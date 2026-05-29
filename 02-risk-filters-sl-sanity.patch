@@ -1,0 +1,55 @@
+--- a/app/risk/filters.py	2026-05-28 15:20:09.000000000 +0000
++++ b/app/risk/filters.py	2026-05-28 15:59:57.008091815 +0000
+@@ -6,6 +6,7 @@
+ from __future__ import annotations
+ 
+ import asyncio
++import os
+ from collections import defaultdict, deque
+ from datetime import datetime, timedelta, timezone
+ from typing import Deque, Dict, Tuple
+@@ -18,6 +19,17 @@
+ from app.market_data.ws_engine import latest_prices, market_bias
+ 
+ 
++def _env_float(key: str, default: float) -> float:
++    try:
++        return float(os.getenv(key, str(default)))
++    except Exception:
++        return default
++
++
++# Phase 0 — SL distance sanity threshold (must match levels.MAX_SL_PCT, or be tighter)
++MAX_SL_PCT_FILTER = _env_float("MAX_SL_PCT_FILTER", 5.0)
++
++
+ # ---------- in-memory cooldown / dedup ----------
+ class CooldownTracker:
+     """Per-symbol, per-side cooldown (also fed by DB for restart safety)."""
+@@ -80,8 +92,12 @@
+ 
+ 
+ # ---------- quality filters ----------
+-def passes_market_filters(snap: FeatureSnapshot, decision: MTFDecision) -> tuple[bool, str | None]:
+-    """Returns (ok, reject_reason_or_None)."""
++def passes_market_filters(
++    snap: FeatureSnapshot,
++    decision: MTFDecision,
++    levels=None,
++) -> tuple[bool, str | None]:
++    """Returns (ok, reject_reason_or_None). `levels` is optional (Phase 0)."""
+     # low volume
+     if snap.vol_spike_pct < -50:
+         return False, "low_volume"
+@@ -99,6 +115,11 @@
+     # fake breakout probability
+     if decision.fake_breakout_prob >= 0.6:
+         return False, "fake_breakout_prob"
++    # Phase 0: reject if SL distance exceeds cap (passed via levels)
++    if levels is not None:
++        sl_pct = getattr(levels, "sl_pct", 0.0)
++        if sl_pct >= MAX_SL_PCT_FILTER:
++            return False, f"sl_too_wide_{sl_pct:.1f}%"
+     # strong trend bonus
+     if snap.trend_strength_adx >= 35:
+         decision.confidence += 4

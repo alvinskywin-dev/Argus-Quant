@@ -1,0 +1,24 @@
+--- a/app/scanner/scanner.py	2026-05-26 22:36:01.000000000 +0000
++++ b/app/scanner/scanner.py	2026-05-28 15:46:52.003266116 +0000
+@@ -67,15 +67,17 @@
+                 return None
+ 
+             primary_snap = snaps[self.primary_tf]
+-            ok, reason = passes_market_filters(primary_snap, decision)
+-            if not ok:
+-                logger.debug(f"{symbol} {decision.side} {decision.confidence}% filtered: {reason}")
+-                return None
+ 
++            # Build levels FIRST so filters can sanity-check SL distance.
+             levels = build_levels(primary_snap, decision.side)
+             if levels is None:
+                 return None
+ 
++            ok, reason = passes_market_filters(primary_snap, decision, levels)
++            if not ok:
++                logger.debug(f"{symbol} {decision.side} {decision.confidence}% filtered: {reason}")
++                return None
++
+             if not await cooldown.can_emit(symbol, decision.side):
+                 return None
+             if not await rate_limiter.acquire():

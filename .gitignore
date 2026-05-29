@@ -1,0 +1,15 @@
+.env
+.env.*
+*.pem
+*.key
+*.log
+logs/
+data/
+backups/
+archive/
+*.tar.gz
+*.zip
+__pycache__/
+*.pyc
+.venv/
+venv/
