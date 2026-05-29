@@ -60,6 +60,22 @@ class Settings(BaseSettings):
     dashboard_port: int = 8010
     dashboard_secret: str = "change_me"
 
+    # --- Community ---
+    telegram_channel_url: str = ""
+    discord_url: str = ""
+
+    # --- Donations ---
+    donate_usdt_trc20: str = ""
+    donate_usdt_bep20: str = ""
+    donate_btc: str = ""
+    donate_eth: str = ""
+
+    # --- Affiliates ---
+    binance_affiliate_url: str = ""
+    bybit_affiliate_url: str = ""
+    okx_affiliate_url: str = ""
+    bitget_affiliate_url: str = ""
+
     # --- Logging ---
     log_level: str = "INFO"
     log_dir: str = "/app/logs"
