@@ -139,5 +139,9 @@ def passes_market_filters(snap: FeatureSnapshot, decision: MTFDecision) -> tuple
 
     # confidence floor
     if decision.confidence < settings.min_confidence:
+        logger.debug(
+            f"CONF_FLOOR {decision.side} final_conf={decision.confidence:.1f} "
+            f"threshold={settings.min_confidence} gap={settings.min_confidence - decision.confidence:.1f}"
+        )
         return False, "below_confidence_threshold"
     return True, None

@@ -31,6 +31,7 @@ def setup_logging() -> None:
         "<level>{message}</level>"
     )
 
+    # stdout — all levels
     logger.add(
         sys.stdout,
         level=settings.log_level.upper(),
@@ -40,6 +41,7 @@ def setup_logging() -> None:
         diagnose=False,
     )
 
+    # master app log
     logger.add(
         os.path.join(settings.log_dir, "app.log"),
         level=settings.log_level.upper(),
@@ -50,6 +52,7 @@ def setup_logging() -> None:
         enqueue=True,
     )
 
+    # errors only
     logger.add(
         os.path.join(settings.log_dir, "errors.log"),
         level="ERROR",
@@ -59,6 +62,25 @@ def setup_logging() -> None:
         compression="zip",
         enqueue=True,
     )
+
+    # per-subsystem logs
+    _subsystems = {
+        "scanner.log":   "app.scanner",
+        "telegram.log":  "app.telegram_bot",
+        "database.log":  "app.database",
+        "websocket.log": "app.market_data.ws_engine",
+    }
+    for filename, module_prefix in _subsystems.items():
+        logger.add(
+            os.path.join(settings.log_dir, filename),
+            level="DEBUG",
+            format=fmt,
+            rotation="10 MB",
+            retention="7 days",
+            compression="zip",
+            enqueue=True,
+            filter=lambda r, p=module_prefix: r["name"].startswith(p),
+        )
 
     _INITIALIZED = True
 

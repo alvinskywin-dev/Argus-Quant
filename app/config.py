@@ -43,21 +43,21 @@ class Settings(BaseSettings):
     # --- Scanner ---
     universe_refresh_sec: int = 900
     scan_interval_sec: int = 30
-    scan_timeframes: str = "5m,15m,1h,4h"
+    scan_timeframes: str = "15m,1h,4h,1d"   # MTF pipeline: 15m entry → 1d trend
     max_symbols: int = 0
     min_quote_volume_usdt: float = 5_000_000
 
     # --- Signal engine ---
-    min_confidence: float = 72.0
-    signal_cooldown_sec: int = 3600
-    symbol_cooldown_minutes: int = 180
+    min_confidence: float = 75.0            # PUBLIC tier floor
+    signal_cooldown_sec: int = 1800
+    symbol_cooldown_minutes: int = 30       # same-direction cooldown (opposite always allowed)
     anti_duplicate_signal: bool = True
     max_signals_per_hour: int = 12
-    min_rr: float = 1.8
+    min_rr: float = 2.0                     # minimum risk-reward
 
     # --- Dashboard ---
     dashboard_host: str = "0.0.0.0"
-    dashboard_port: int = 8000
+    dashboard_port: int = 8010
     dashboard_secret: str = "change_me"
 
     # --- Logging ---

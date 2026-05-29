@@ -30,6 +30,7 @@ class FeatureSnapshot:
     # Trend
     ema_fast: float
     ema_slow: float
+    ema_50: float
     ema_200: float
     trend_up: bool
     trend_strength_adx: float
@@ -82,6 +83,7 @@ def build_snapshot(symbol: str, timeframe: str, df: pd.DataFrame) -> Optional[Fe
 
     ema_fast = ema(close, 9)
     ema_slow = ema(close, 21)
+    ema50 = ema(close, 50)
     ema200 = ema(close, 200)
 
     adx_d = adx(df, 14)
@@ -100,6 +102,7 @@ def build_snapshot(symbol: str, timeframe: str, df: pd.DataFrame) -> Optional[Fe
 
     ema_fast_v = float(ema_fast.iloc[-1])
     ema_slow_v = float(ema_slow.iloc[-1])
+    ema50_v = float(ema50.iloc[-1]) if not np.isnan(ema50.iloc[-1]) else last_close
     ema200_v = float(ema200.iloc[-1]) if not np.isnan(ema200.iloc[-1]) else last_close
 
     trend_up = ema_fast_v > ema_slow_v and last_close > ema_fast_v
@@ -149,6 +152,7 @@ def build_snapshot(symbol: str, timeframe: str, df: pd.DataFrame) -> Optional[Fe
         last_low=last_low,
         ema_fast=ema_fast_v,
         ema_slow=ema_slow_v,
+        ema_50=ema50_v,
         ema_200=ema200_v,
         trend_up=trend_up,
         trend_strength_adx=adx_v,

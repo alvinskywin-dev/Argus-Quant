@@ -82,36 +82,41 @@ def vwap(df: pd.DataFrame, length: int = 20) -> pd.Series:
 
 # ---------- Supertrend ----------
 def supertrend(df: pd.DataFrame, length: int = 10, mult: float = 3.0) -> Dict[str, pd.Series]:
+    """Pure-numpy implementation — avoids pandas iloc assignment (pandas 2.x safe)."""
     hl2 = (df["high"] + df["low"]) / 2
     _atr = atr(df, length)
-    upper_basic = hl2 + mult * _atr
-    lower_basic = hl2 - mult * _atr
+    upper_basic = (hl2 + mult * _atr).values
+    lower_basic = (hl2 - mult * _atr).values
+    close = df["close"].values
 
+    n = len(df)
     upper = upper_basic.copy()
     lower = lower_basic.copy()
-    direction = pd.Series(index=df.index, dtype=float)
-    st = pd.Series(index=df.index, dtype=float)
+    direction = np.full(n, np.nan)
+    st = np.full(n, np.nan)
 
-    close = df["close"]
-    for i in range(1, len(df)):
-        if close.iloc[i - 1] <= upper.iloc[i - 1]:
-            upper.iloc[i] = min(upper_basic.iloc[i], upper.iloc[i - 1])
-        if close.iloc[i - 1] >= lower.iloc[i - 1]:
-            lower.iloc[i] = max(lower_basic.iloc[i], lower.iloc[i - 1])
+    for i in range(1, n):
+        if not np.isnan(upper[i - 1]) and not np.isnan(upper_basic[i]):
+            if close[i - 1] <= upper[i - 1]:
+                upper[i] = min(upper_basic[i], upper[i - 1])
+        if not np.isnan(lower[i - 1]) and not np.isnan(lower_basic[i]):
+            if close[i - 1] >= lower[i - 1]:
+                lower[i] = max(lower_basic[i], lower[i - 1])
 
-        if pd.isna(direction.iloc[i - 1]):
-            direction.iloc[i] = 1.0
-        else:
-            direction.iloc[i] = direction.iloc[i - 1]
+        direction[i] = direction[i - 1] if not np.isnan(direction[i - 1]) else 1.0
 
-        if direction.iloc[i] == 1.0 and close.iloc[i] < lower.iloc[i]:
-            direction.iloc[i] = -1.0
-        elif direction.iloc[i] == -1.0 and close.iloc[i] > upper.iloc[i]:
-            direction.iloc[i] = 1.0
+        if direction[i] == 1.0 and not np.isnan(lower[i]) and close[i] < lower[i]:
+            direction[i] = -1.0
+        elif direction[i] == -1.0 and not np.isnan(upper[i]) and close[i] > upper[i]:
+            direction[i] = 1.0
 
-        st.iloc[i] = lower.iloc[i] if direction.iloc[i] == 1.0 else upper.iloc[i]
+        if not np.isnan(direction[i]):
+            st[i] = lower[i] if direction[i] == 1.0 else upper[i]
 
-    return {"supertrend": st, "direction": direction}
+    return {
+        "supertrend": pd.Series(st, index=df.index, dtype=float),
+        "direction": pd.Series(direction, index=df.index, dtype=float),
+    }
 
 
 # ---------- ADX ----------

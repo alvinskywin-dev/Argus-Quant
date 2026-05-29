@@ -43,11 +43,12 @@ services:
     environment:
       POSTGRES_HOST: postgres
       REDIS_HOST: redis
+      DASHBOARD_PORT: ${DASHBOARD_PORT:-8010}
     volumes:
       - ./logs:/app/logs
       - ./data:/app/data
     ports:
-      - "${DASHBOARD_PORT:-8010}:8010"
+      - "${DASHBOARD_PORT:-8010}:${DASHBOARD_PORT:-8010}"
     networks:
       - signals-net
 
