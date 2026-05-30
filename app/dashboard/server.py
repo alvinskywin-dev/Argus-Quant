@@ -1391,88 +1391,269 @@ header{{background:#08111c;border-bottom:1px solid #13263a;padding:13px 24px}}
 
 
 def _signal_detail_page_html(signal_id: int) -> str:
+    css = """
+/* ── signal detail ────────────────────────────────────────── */
+.sd-hero{background:linear-gradient(135deg,#0b1a2e,#0d2238);border:1px solid #17314b;
+  border-radius:14px;padding:22px 24px;margin-bottom:20px;
+  display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px}
+.sd-symbol{font-size:28px;font-weight:900;letter-spacing:1px;color:#eaf2ff}
+.sd-meta{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.sd-tf{background:#0b1320;border:1px solid #17314b;border-radius:6px;
+  padding:4px 10px;font-size:11px;color:#8fa8c7;letter-spacing:1px}
+.sd-status-box{text-align:right}
+.sd-status-lbl{font-size:10px;color:#7fa0c8;letter-spacing:2px;text-transform:uppercase;margin-bottom:4px}
+.sd-status-val{font-size:22px;font-weight:900}
+.sd-status-open{color:#20ffc8}
+.sd-status-tp{color:#20ff80}
+.sd-status-sl{color:#ff4f61}
+.sd-status-exp{color:#ffd84d}
+.sd-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+.sd-section-title{font-size:11px;font-weight:700;letter-spacing:2px;
+  text-transform:uppercase;color:#7fa0c8;margin-bottom:14px;
+  padding-bottom:8px;border-bottom:1px solid #17314b}
+.sd-row{display:flex;justify-content:space-between;align-items:center;
+  padding:9px 0;border-bottom:1px solid #0e1e2e}
+.sd-row:last-child{border-bottom:none}
+.sd-lbl{font-size:12px;color:#7fa0c8}
+.sd-val{font-size:13px;font-weight:700;color:#eaf2ff;text-align:right}
+.sd-entry{background:#08182a;border:1px solid #17314b;border-radius:8px;padding:10px 14px;
+  display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.sd-entry-lbl{font-size:10px;color:#7fa0c8;letter-spacing:1px;text-transform:uppercase}
+.sd-entry-zone{font-size:13px;font-weight:700;color:#20e6c3}
+.sd-level{display:flex;justify-content:space-between;align-items:center;
+  padding:8px 0;border-bottom:1px solid #0e1e2e}
+.sd-level:last-child{border-bottom:none}
+.sd-level-lbl{display:flex;align-items:center;gap:8px;font-size:12px;color:#7fa0c8}
+.sd-level-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.sd-score-row{margin-bottom:14px}
+.sd-score-row:last-child{margin-bottom:0}
+.sd-score-header{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}
+.sd-score-name{font-size:12px;color:#8fa8c7}
+.sd-score-val{font-size:14px;font-weight:900;color:#20e6c3}
+.sd-score-bar{background:#0b1320;border-radius:4px;height:7px;overflow:hidden}
+.sd-score-fill{background:linear-gradient(90deg,#08a98f,#20f0c0);height:100%;border-radius:4px;
+  transition:width .6s ease}
+.sd-reason-item{display:flex;align-items:flex-start;gap:10px;
+  padding:9px 0;border-bottom:1px solid #0e1e2e;font-size:13px;color:#c9d8e8}
+.sd-reason-item:last-child{border-bottom:none}
+.sd-reason-dot{width:6px;height:6px;border-radius:50%;background:#20f0c0;
+  margin-top:5px;flex-shrink:0}
+.sd-pnl-banner{border-radius:10px;padding:14px 18px;margin-bottom:16px;
+  display:flex;align-items:center;justify-content:space-between}
+.sd-pnl-banner.win{background:#0a3a1f55;border:1px solid #20ff8055}
+.sd-pnl-banner.loss{background:#3a0a1255;border:1px solid #ff4f6155}
+.sd-pnl-banner.open{background:#083a3255;border:1px solid #20ffc855}
+.sd-back{display:inline-flex;align-items:center;gap:6px;color:#20e6c3;
+  font-size:13px;font-weight:600;padding:8px 0;text-decoration:none}
+.sd-back:hover{color:#20f0c0}
+@media(max-width:640px){.sd-grid{grid-template-columns:1fr}.sd-hero{flex-direction:column}}
+"""
     body = f"""
-<div class="page-title">Signal Detail <span style="color:#8fa8c7;font-size:18px">#{signal_id}</span></div>
-<div id="detail-content" style="color:#8fa8c7;padding:24px;text-align:center">Loading...</div>"""
+<div style="margin-bottom:12px">
+  <a href="/signals" class="sd-back">← Back to Signals</a>
+</div>
+<div id="sd-root" style="color:#8fa8c7;padding:32px;text-align:center">Loading signal #{signal_id}…</div>
+"""
     js = f"""
-const SID={signal_id};
-async function load(){{
-  const r=await fetch('/api/public/signal/'+SID);
-  if(!r.ok){{document.getElementById('detail-content').textContent='Signal not found.';return;}}
-  const d=await r.json();
-  if(d.error){{document.getElementById('detail-content').textContent=d.error;return;}}
-  const side=d.side==='LONG'
-    ?'<span class="bl2">LONG</span>':'<span class="bs2">SHORT</span>';
-  const st=d.status;
-  const stBadge=st==='OPEN'?'<span class="bopen">OPEN</span>':
-    st==='SL'?'<span class="bsl">SL</span>':
-    '<span class="btp">'+st+'</span>';
-  const pct=v=>(v>=0?'+':'')+v+'%';
-  const cls=v=>v>=0?'g':'r';
-  const sc=(v,max,lbl)=>{{
-    if(v===null||v===undefined)return'<div style="color:#627a99">'+lbl+': N/A</div>';
-    const pct2=Math.round(v/max*100);
-    return '<div style="margin-bottom:10px">'+
-      '<div style="display:flex;justify-content:space-between;margin-bottom:4px">'+
-        '<span style="font-size:12px;color:#8fa8c7">'+lbl+'</span>'+
-        '<span style="font-size:13px;font-weight:700;color:#20e6c3">'+v+'</span>'+
-      '</div>'+
-      '<div style="background:#0b1320;border-radius:4px;height:6px;overflow:hidden">'+
-        '<div style="background:linear-gradient(90deg,#08a98f,#20f0c0);width:'+pct2+'%;height:100%;border-radius:4px"></div>'+
-      '</div></div>';
-  }};
-  const reasons=(d.reasons||[]).map(r=>'<li style="color:#c9d8e8;margin-bottom:4px">'+r+'</li>').join('');
-  document.getElementById('detail-content').innerHTML=`
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-    <div class="card">
-      <div style="font-size:14px;font-weight:700;margin-bottom:14px;color:#eaf2ff">Signal Info</div>
-      <table style="font-size:13px"><tbody>
-        <tr><td style="color:#8fa8c7;padding:6px 12px 6px 0">Symbol</td><td><b>${{d.symbol}}</b></td></tr>
-        <tr><td style="color:#8fa8c7;padding:6px 12px 6px 0">Side</td><td>${{side}}</td></tr>
-        <tr><td style="color:#8fa8c7;padding:6px 12px 6px 0">Timeframe</td><td>${{d.timeframe}}</td></tr>
-        <tr><td style="color:#8fa8c7;padding:6px 12px 6px 0">Confidence</td><td class="c"><b>${{d.confidence}}%</b></td></tr>
-        <tr><td style="color:#8fa8c7;padding:6px 12px 6px 0">Risk/Reward</td><td class="y">1:${{d.risk_reward}}</td></tr>
-        <tr><td style="color:#8fa8c7;padding:6px 12px 6px 0">Risk Level</td><td>${{d.risk_level}}</td></tr>
-        <tr><td style="color:#8fa8c7;padding:6px 12px 6px 0">Status</td><td>${{stBadge}}</td></tr>
-        <tr><td style="color:#8fa8c7;padding:6px 12px 6px 0">PnL</td><td class="${{cls(d.pnl_pct)}}">${{pct(d.pnl_pct)}}</td></tr>
-        <tr><td style="color:#8fa8c7;padding:6px 12px 6px 0">Opened</td><td style="color:#8fa8c7">${{(d.created_at||'').slice(0,16).replace('T',' ')}}</td></tr>
-      </tbody></table>
-    </div>
-    <div class="card">
-      <div style="font-size:14px;font-weight:700;margin-bottom:14px;color:#eaf2ff">Levels</div>
-      <table style="font-size:13px"><tbody>
-        <tr><td style="color:#8fa8c7;padding:6px 12px 6px 0">Entry Low</td><td class="c">${{d.entry_low}}</td></tr>
-        <tr><td style="color:#8fa8c7;padding:6px 12px 6px 0">Entry High</td><td class="c">${{d.entry_high}}</td></tr>
-        <tr><td style="color:#8fa8c7;padding:6px 12px 6px 0">TP1</td><td class="g">${{d.tp1}}</td></tr>
-        <tr><td style="color:#8fa8c7;padding:6px 12px 6px 0">TP2</td><td class="g">${{d.tp2}}</td></tr>
-        <tr><td style="color:#8fa8c7;padding:6px 12px 6px 0">TP3</td><td class="g">${{d.tp3}}</td></tr>
-        <tr><td style="color:#8fa8c7;padding:6px 12px 6px 0">Stop Loss</td><td class="r">${{d.stop_loss}}</td></tr>
-      </tbody></table>
-    </div>
-  </div>
-  <div class="card" style="margin-top:16px">
-    <div style="font-size:14px;font-weight:700;margin-bottom:16px;color:#eaf2ff">MTF Layer Scores</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-      <div>
-        ${{sc(d.trend_score,20,'1D Trend Score (max 20)')}}
-        ${{sc(d.structure_score,5,'4H Structure Hits (max 5)')}}
+const _SID = {signal_id};
+
+function _fmt(v) {{
+  if (v === null || v === undefined) return '—';
+  return parseFloat(v).toPrecision(7).replace(/\\.?0+$/, '');
+}}
+function _pct(v) {{
+  if (v === null || v === undefined) return '—';
+  return (v >= 0 ? '+' : '') + parseFloat(v).toFixed(2) + '%';
+}}
+function _scoreBar(val, max, label, sublabel) {{
+  if (val === null || val === undefined) {{
+    return `<div class="sd-score-row">
+      <div class="sd-score-header">
+        <span class="sd-score-name">${{label}}</span>
+        <span style="font-size:12px;color:#627a99">N/A</span>
       </div>
-      <div>
-        ${{sc(d.setup_score,5,'1H Setup Hits (max 5)')}}
-        ${{sc(d.entry_score,10,'15M Entry Score (max 10)')}}
+      <div class="sd-score-bar"><div class="sd-score-fill" style="width:0%"></div></div>
+    </div>`;
+  }}
+  const pct = Math.min(100, Math.round(val / max * 100));
+  const barColor = pct >= 80 ? 'linear-gradient(90deg,#08a98f,#20f0c0)'
+                : pct >= 50 ? 'linear-gradient(90deg,#0e7a6e,#1abda0)'
+                : 'linear-gradient(90deg,#1a4a42,#0e6050)';
+  return `<div class="sd-score-row">
+    <div class="sd-score-header">
+      <span class="sd-score-name">${{label}} <span style="color:#627a99;font-size:10px">${{sublabel}}</span></span>
+      <span class="sd-score-val">${{val}} <span style="font-size:11px;color:#627a99">/ ${{max}}</span></span>
+    </div>
+    <div class="sd-score-bar">
+      <div class="sd-score-fill" style="width:${{pct}}%;background:${{barColor}}"></div>
+    </div>
+  </div>`;
+}}
+function _statusClass(st) {{
+  if (st === 'OPEN')   return 'sd-status-open';
+  if (st === 'SL')     return 'sd-status-sl';
+  if (st === 'EXPIRED' || st === 'CANCELLED') return 'sd-status-exp';
+  return 'sd-status-tp';
+}}
+function _sideBadge(side) {{
+  return side === 'LONG'
+    ? '<span class="bl2">LONG</span>'
+    : '<span class="bs2">SHORT</span>';
+}}
+
+async function load() {{
+  const r = await fetch('/api/public/signal/' + _SID);
+  if (!r.ok) {{
+    document.getElementById('sd-root').innerHTML =
+      '<p style="color:#ff4f61;font-size:15px">Signal #' + _SID + ' not found.</p>' +
+      '<a href="/signals" class="sd-back" style="margin-top:12px">← Back to Signals</a>';
+    return;
+  }}
+  const d = await r.json();
+  if (d.error) {{
+    document.getElementById('sd-root').innerHTML =
+      '<p style="color:#ff4f61">' + d.error + '</p>';
+    return;
+  }}
+
+  const isWin  = ['TP1','TP2','TP3'].includes(d.status);
+  const isLoss = d.status === 'SL';
+  const isOpen = d.status === 'OPEN';
+  const pnlClass = isOpen ? 'open' : isWin ? 'win' : isLoss ? 'loss' : 'open';
+
+  // PnL banner
+  const pnlBanner = `<div class="sd-pnl-banner ${{pnlClass}}">
+    <div>
+      <div style="font-size:10px;color:#7fa0c8;letter-spacing:2px;text-transform:uppercase;margin-bottom:3px">
+        ${{isOpen ? 'Unrealised PnL' : 'Final PnL'}}
+      </div>
+      <div style="font-size:24px;font-weight:900;color:${{isOpen?'#20ffc8':isWin?'#20ff80':'#ff4f61'}}">
+        ${{_pct(d.pnl_pct)}}
       </div>
     </div>
-  </div>
-  <div class="card" style="margin-top:16px">
-    <div style="font-size:14px;font-weight:700;margin-bottom:12px;color:#eaf2ff">Reasoning</div>
-    ${{reasons?'<ul style="padding-left:18px">'+reasons+'</ul>':'<p style="color:#627a99">No reasoning recorded</p>'}}
-  </div>
-  <div style="margin-top:12px"><a href="/signals" style="color:#20e6c3;font-size:13px">← Back to Signals</a></div>
+    <div class="sd-status-box">
+      <div class="sd-status-lbl">Status</div>
+      <div class="sd-status-val ${{_statusClass(d.status)}}">${{d.status}}</div>
+    </div>
+  </div>`;
+
+  // Signal info rows
+  const infoRows = [
+    ['Symbol',      `<b style="font-size:15px">${{d.symbol}}</b>`],
+    ['Side',        _sideBadge(d.side)],
+    ['Timeframe',   `<span class="sd-tf">${{d.timeframe}}</span>`],
+    ['Confidence',  `<span class="c" style="font-size:15px;font-weight:900">${{d.confidence}}%</span>`],
+    ['Risk/Reward', `<span class="y">1&nbsp;:&nbsp;${{d.risk_reward}}</span>`],
+    ['Risk Level',  `<span style="color:#8fa8c7">${{d.risk_level||'—'}}</span>`],
+    ['Opened',      `<span style="color:#8fa8c7">${{(d.created_at||'').slice(0,16).replace('T',' ')}}</span>`],
+    d.closed_at
+      ? ['Closed', `<span style="color:#8fa8c7">${{(d.closed_at||'').slice(0,16).replace('T',' ')}}</span>`]
+      : null,
+  ].filter(Boolean).map(([lbl, val]) =>
+    `<div class="sd-row"><span class="sd-lbl">${{lbl}}</span><span class="sd-val">${{val}}</span></div>`
+  ).join('');
+
+  // Levels
+  const levelsHtml = `
+    <div class="sd-entry">
+      <div>
+        <div class="sd-entry-lbl">Entry Zone</div>
+        <div class="sd-entry-zone">${{_fmt(d.entry_low)}} → ${{_fmt(d.entry_high)}}</div>
+      </div>
+    </div>
+    <div class="sd-level">
+      <div class="sd-level-lbl">
+        <div class="sd-level-dot" style="background:#ff4f61"></div>Stop Loss
+      </div>
+      <span style="color:#ff4f61;font-weight:700;font-size:13px">${{_fmt(d.stop_loss)}}</span>
+    </div>
+    <div class="sd-level">
+      <div class="sd-level-lbl">
+        <div class="sd-level-dot" style="background:#20c97a"></div>TP1
+      </div>
+      <span style="color:#20c97a;font-weight:700;font-size:13px">${{_fmt(d.tp1)}}</span>
+    </div>
+    <div class="sd-level">
+      <div class="sd-level-lbl">
+        <div class="sd-level-dot" style="background:#20ff80"></div>TP2
+      </div>
+      <span style="color:#20ff80;font-weight:700;font-size:13px">${{_fmt(d.tp2)}}</span>
+    </div>
+    <div class="sd-level">
+      <div class="sd-level-lbl">
+        <div class="sd-level-dot" style="background:#4dffa0"></div>TP3
+      </div>
+      <span style="color:#4dffa0;font-weight:700;font-size:13px">${{_fmt(d.tp3)}}</span>
+    </div>`;
+
+  // MTF scores
+  const scoresHtml =
+    _scoreBar(d.trend_score,     20, '1D Trend',      '(EMA + structure, max 20)') +
+    _scoreBar(d.structure_score,  5, '4H Structure',   '(confluence hits, max 5)') +
+    _scoreBar(d.setup_score,      5, '1H Setup',       '(setup hits, max 5)') +
+    _scoreBar(d.entry_score,     10, '15M Entry',      '(weighted triggers, max 10)');
+
+  // Reasoning
+  const reasons = (d.reasons || []);
+  const reasonsHtml = reasons.length
+    ? reasons.map(r =>
+        `<div class="sd-reason-item"><div class="sd-reason-dot"></div><span>${{r}}</span></div>`
+      ).join('')
+    : '<p style="color:#627a99;font-size:13px;padding:8px 0">No reasoning recorded for this signal.</p>';
+
+  document.getElementById('sd-root').innerHTML = `
+    <div class="sd-hero">
+      <div class="sd-meta">
+        <span class="sd-symbol">${{d.symbol}}</span>
+        ${{_sideBadge(d.side)}}
+        <span class="sd-tf">${{d.timeframe}}</span>
+        <span class="sd-tf">#{signal_id}</span>
+      </div>
+      <div class="sd-status-box">
+        <div class="sd-status-lbl">Confidence</div>
+        <div class="sd-status-val" style="color:#20e6c3">${{d.confidence}}%</div>
+      </div>
+    </div>
+
+    ${{pnlBanner}}
+
+    <div class="sd-grid">
+      <div class="card">
+        <div class="sd-section-title">Signal Info</div>
+        ${{infoRows}}
+      </div>
+      <div class="card">
+        <div class="sd-section-title">Levels</div>
+        ${{levelsHtml}}
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="sd-section-title">MTF Layer Scores</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+        <div>
+          ${{_scoreBar(d.trend_score, 20, '1D Trend', '(max 20)')}}
+          ${{_scoreBar(d.structure_score, 5, '4H Structure', '(max 5)')}}
+        </div>
+        <div>
+          ${{_scoreBar(d.setup_score, 5, '1H Setup', '(max 5)')}}
+          ${{_scoreBar(d.entry_score, 10, '15M Entry', '(max 10)')}}
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:20px">
+      <div class="sd-section-title">Reasoning</div>
+      ${{reasonsHtml}}
+    </div>
+
+    <a href="/signals" class="sd-back">← Back to Signals</a>
   `;
 }}
-document.addEventListener('DOMContentLoaded',load);
+
+document.addEventListener('DOMContentLoaded', load);
 """
-    return _page_shell(f"Signal #{signal_id}", body, extra_js=js)
+    return _page_shell(f"Signal #{signal_id}", body, extra_css=css, extra_js=js)
 
 
 def _health_page_html() -> str:
