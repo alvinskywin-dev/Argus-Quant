@@ -1188,14 +1188,30 @@ async def index():
                 f'<button class="don-btn don-qr" onclick="showQR(\'{safe_coin}\',\'{safe_net} &mdash; {safe_netname}\',\'{addr}\')">QR Code</button>'
                 f'</div></div>'
             )
+    if not don_cards:
+        for coin, net, netname, _addr, color in wallets:
+            don_cards.append(
+                f'<div class="don-card card disabled">'
+                f'<div class="don-hdr"><span class="don-coin" style="color:{color}">{_esc(coin)} &mdash; {_esc(net)}</span>'
+                f'<span class="don-net">{_esc(netname)}</span></div>'
+                f'<div class="don-empty">Wallet address not configured yet</div>'
+                f'</div>'
+            )
     donate_section = (
         '<div class="sh">'
         '<div class="sh-lbl">&#9829; SUPPORT</div>'
-        '<div class="sh-title">Support the Project &#128154;</div>'
-        '<div class="sh-sub">All signals are 100% free. Donations help keep the servers running 24/7.</div>'
+        '<div class="sh-title">Support Alpha Radar Signals &#10084;&#65039;</div>'
+        '<div class="sh-sub">If Alpha Radar Signals helps you, consider supporting development and server costs.</div>'
+        '</div>'
+        '<div class="don-intro">'
+        '<div class="card" style="padding:20px">'
+        '<div style="font-weight:900;font-size:18px;margin-bottom:8px;color:var(--text)">Keep Alpha Radar Free</div>'
+        '<div class="don-copyline">Every donation helps fund data, servers, backtesting, and new features for the trading community.</div>'
+        '<div style="margin-top:14px;color:var(--green);font-size:12px;font-weight:800">Thank you for your support! &#128591;</div>'
         '</div>'
         '<div class="don-grid">' + "".join(don_cards) + '</div>'
-    ) if don_cards else ""
+        '</div>'
+    )
     html = html.replace("__DONATE__", donate_section)
 
     # ── exchange affiliate cards ─────────────────────────────────────
@@ -1207,21 +1223,26 @@ async def index():
         ("Bitget", bitget_aff, "#00e6b3", "Bg", "Best Copy Trading", "Follow top traders automatically with copy trading."),
     ]
     for name, url, color, ico, tag, desc in exchanges:
+        safe_name = _esc(name)
         if url:
-            safe_name = _esc(name)
-            aff_cards.append(
-                f'<div class="exch-card card">'
-                f'<div class="exch-ico" style="color:{color};border-color:{color}44;background:{color}12">{ico}</div>'
-                f'<div class="exch-name" style="color:{color}">{safe_name}</div>'
-                f'<div class="exch-tag">{tag}</div>'
-                f'<div class="exch-desc">{desc}</div>'
+            btn = (
                 f'<a href="{url}" target="_blank" rel="noopener" class="exch-btn" '
-                f'style="background:{color};box-shadow:0 4px 14px {color}44">Register Now</a>'
-                f'</div>'
+                f'style="background:{color};box-shadow:0 4px 14px {color}44">Register Now &rarr;</a>'
             )
-    aff_section = (
-        '<div class="exch-grid">' + "".join(aff_cards) + '</div>'
-    ) if aff_cards else ""
+            disabled_cls = ''
+        else:
+            btn = '<span class="exch-btn coming-soon">Coming Soon</span>'
+            disabled_cls = ' disabled'
+        aff_cards.append(
+            f'<div class="exch-card card{disabled_cls}">'
+            f'<div class="exch-ico" style="color:{color};border-color:{color}44;background:{color}12">{ico}</div>'
+            f'<div class="exch-name" style="color:{color}">{safe_name}</div>'
+            f'<div class="exch-tag">{tag}</div>'
+            f'<div class="exch-desc">{desc}</div>'
+            f'{btn}'
+            f'</div>'
+        )
+    aff_section = '<div class="exch-grid">' + "".join(aff_cards) + '</div>'
     html = html.replace("__AFFILIATES__", aff_section)
 
     return HTMLResponse(html)
@@ -3028,7 +3049,7 @@ button{font-family:inherit;cursor:pointer;border:none;background:none}
 nav{position:sticky;top:0;z-index:100;background:rgba(5,12,26,0.92);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border-bottom:1px solid rgba(0,230,118,0.08)}
 .nav-in{display:flex;align-items:center;justify-content:space-between;padding:12px 22px;max-width:1200px;margin:0 auto;gap:14px}
 .nav-logo{display:flex;align-items:center;gap:11px;flex-shrink:0}
-.logo-mark{width:36px;height:36px;border:2px solid var(--green);border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--green);font-weight:900;font-size:16px;box-shadow:0 0 14px rgba(0,230,118,0.25)}
+.logo-mark{width:46px;height:46px;display:flex;align-items:center;justify-content:center;color:var(--green);filter:drop-shadow(0 0 16px rgba(0,230,118,.38));flex-shrink:0}.logo-mark svg{width:46px;height:46px}.logo-txt{font-size:15px!important;line-height:1.05}
 .logo-txt{font-size:14px;font-weight:900;letter-spacing:.5px}
 .logo-txt em{color:var(--green);font-style:normal}
 .live-pill{background:rgba(0,230,118,0.08);color:var(--green);border:1px solid rgba(0,230,118,0.25);border-radius:4px;padding:3px 9px;font-weight:800;font-size:10px;letter-spacing:2px;animation:liveblink 2s infinite}
@@ -3045,25 +3066,25 @@ nav{position:sticky;top:0;z-index:100;background:rgba(5,12,26,0.92);backdrop-fil
 .nav-admin:hover{border-color:var(--bdr-h);color:var(--sub)}
 
 /* HERO */
-.hero{padding:76px 0 52px;background:radial-gradient(ellipse 80% 55% at 10% 60%,rgba(0,230,118,0.05),transparent 55%),radial-gradient(ellipse 65% 50% at 88% 50%,rgba(0,229,204,0.04),transparent 60%),linear-gradient(180deg,#050c1a 0%,#060e1c 100%)}
-.hero-in{display:grid;grid-template-columns:1fr 1fr;gap:44px;align-items:center}
+.hero{padding:104px 0 66px;min-height:680px;display:flex;align-items:center;background:radial-gradient(ellipse 90% 55% at 12% 56%,rgba(0,230,118,0.08),transparent 56%),radial-gradient(ellipse 70% 55% at 86% 48%,rgba(0,229,204,0.07),transparent 60%),linear-gradient(180deg,#050c1a 0%,#061123 100%);position:relative;overflow:hidden}.hero::before{content:"";position:absolute;inset:0;background-image:linear-gradient(rgba(0,230,118,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(0,230,118,.035) 1px,transparent 1px);background-size:48px 48px;mask-image:radial-gradient(ellipse at center,#000 0%,transparent 74%);pointer-events:none}.hero::after{content:"";position:absolute;right:0;top:12%;width:45%;height:60%;background:linear-gradient(160deg,transparent 0 35%,rgba(0,230,118,.12) 36%,transparent 38% 100%);opacity:.6;pointer-events:none}
+.hero-in{display:grid;grid-template-columns:1.04fr .96fr;gap:58px;align-items:center;position:relative;z-index:1}
 .hero-eyebrow{display:inline-flex;align-items:center;gap:7px;background:rgba(0,230,118,0.07);border:1px solid rgba(0,230,118,0.2);border-radius:100px;padding:5px 16px;font-size:11px;letter-spacing:1px;color:var(--green);font-weight:700;margin-bottom:16px}
 .eye-dot{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:liveblink 1.5s infinite}
-.hero-h1{font-size:50px;font-weight:900;line-height:1.06;letter-spacing:-1px;margin-bottom:10px}
+.hero-h1{font-size:68px;font-weight:900;line-height:1.02;letter-spacing:-1.8px;margin-bottom:16px;text-transform:uppercase}
 .h1-l1{display:block;color:var(--text)}
-.h1-l2{display:block;color:var(--green);text-shadow:0 0 40px rgba(0,230,118,0.35)}
-.hero-sub{font-size:14px;color:var(--sub);margin-bottom:22px;letter-spacing:.3px}
-.hero-feats{display:grid;grid-template-columns:1fr 1fr;gap:10px 16px;margin-bottom:30px}
-.feat{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--sub)}
+.h1-l2{display:block;color:var(--green);text-shadow:0 0 44px rgba(0,230,118,0.42)}
+.hero-sub{font-size:18px;color:#d6e5f2;margin-bottom:28px;letter-spacing:.2px;max-width:680px}
+.hero-feats{display:grid;grid-template-columns:repeat(4,minmax(120px,1fr));gap:12px 18px;margin-bottom:34px;max-width:760px}
+.feat{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--sub);background:rgba(255,255,255,.025);border:1px solid rgba(0,230,118,.08);border-radius:12px;padding:10px 12px}
 .feat-chk{width:20px;height:20px;border-radius:50%;background:rgba(0,230,118,0.1);border:1px solid rgba(0,230,118,0.32);display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--green);flex-shrink:0;font-weight:900}
 .hero-btns{display:flex;gap:12px;flex-wrap:wrap}
-.btn-primary{background:linear-gradient(135deg,#00b09b,#00e676);color:#020f08;padding:13px 26px;border-radius:10px;font-weight:800;font-size:14px;letter-spacing:.3px;transition:transform .2s,box-shadow .2s;display:inline-flex;align-items:center;gap:8px;border:none}
+.btn-primary{background:linear-gradient(135deg,#00c878,#00f5a8);color:#020f08;padding:17px 34px;border-radius:12px;font-weight:900;font-size:16px;letter-spacing:.2px;transition:transform .2s,box-shadow .2s;display:inline-flex;align-items:center;gap:10px;border:none;text-transform:uppercase}
 .btn-primary:hover{transform:translateY(-2px);box-shadow:0 8px 28px rgba(0,230,118,0.35);color:#020f08}
-.btn-outline{background:transparent;color:var(--sub);padding:13px 26px;border-radius:10px;font-weight:700;font-size:14px;border:1px solid rgba(255,255,255,0.12);transition:all .2s;display:inline-flex;align-items:center;gap:8px}
+.btn-outline{background:rgba(255,255,255,.03);color:#b9d1e8;padding:17px 32px;border-radius:12px;font-weight:800;font-size:15px;border:1px solid rgba(255,255,255,0.16);transition:all .2s;display:inline-flex;align-items:center;gap:8px;text-transform:uppercase}
 .btn-outline:hover{border-color:rgba(0,230,118,0.3);color:var(--green);transform:translateY(-2px)}
 
 /* RADAR */
-.radar-wrap{position:relative;width:420px;height:420px;max-width:100%;margin:0 auto}
+.radar-wrap{position:relative;width:520px;height:520px;max-width:100%;margin:0 auto}
 .radar-bg{position:absolute;inset:0;border-radius:50%;background:radial-gradient(circle,rgba(0,230,118,0.05),transparent 68%)}
 .rring{position:absolute;border-radius:50%;border:1px solid;top:50%;left:50%;transform:translate(-50%,-50%)}
 .rr1{width:100%;height:100%;border-color:rgba(0,230,118,0.10)}
@@ -3115,7 +3136,7 @@ nav{position:sticky;top:0;z-index:100;background:rgba(5,12,26,0.92);backdrop-fil
 .ovx{overflow-x:auto;-webkit-overflow-scrolling:touch}
 
 /* PERF */
-.perf-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:15px;margin-bottom:20px}
+.perf-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:15px;margin-bottom:20px}.perf-collecting{display:none;padding:30px;border-radius:18px;background:linear-gradient(135deg,rgba(0,230,118,.08),rgba(0,136,204,.06));border:1px solid rgba(0,230,118,.18);margin-bottom:18px}.perf-collecting h3{font-size:24px;margin:0 0 8px;color:var(--green)}.perf-collecting p{color:var(--sub);font-size:14px;line-height:1.7;margin:0}.perf-muted .perf-grid,.perf-muted .equity-card,.perf-muted .perf-history,.perf-muted .leaderboard-card{display:none}
 .pcrd{padding:22px;text-align:center}
 .plbl{font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:10px}
 .pval{font-size:34px;font-weight:900;line-height:1}
@@ -3133,13 +3154,13 @@ nav{position:sticky;top:0;z-index:100;background:rgba(5,12,26,0.92);backdrop-fil
 .exch-section-hdr .sh-title{font-size:22px}
 .exch-section-hdr .sh-sub{max-width:480px;margin:6px auto 0}
 .exch-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
-.exch-card{padding:24px 18px;border-radius:16px;text-align:center;transition:transform .25s,box-shadow .25s}
+.exch-card{padding:30px 22px;border-radius:18px;text-align:center;transition:transform .25s,box-shadow .25s;min-height:230px;display:flex;flex-direction:column;justify-content:space-between}
 .exch-card:hover{transform:translateY(-5px);box-shadow:0 14px 40px rgba(0,0,0,0.55)}
 .exch-ico{width:56px;height:56px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:900;margin:0 auto 14px;border:2px solid}
 .exch-name{font-size:17px;font-weight:900;margin-bottom:5px}
 .exch-tag{font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:10px}
 .exch-desc{font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.5}
-.exch-btn{display:block;padding:10px;border-radius:8px;font-weight:700;font-size:12px;transition:all .2s;color:#020f08}
+.exch-btn{display:block;padding:12px 14px;border-radius:9px;font-weight:900;font-size:13px;transition:all .2s;color:#020f08;text-transform:uppercase;letter-spacing:.4px}
 .exch-btn:hover{opacity:.88;transform:translateY(-1px);color:#020f08}
 
 /* TELEGRAM CTA */
@@ -3167,7 +3188,7 @@ nav{position:sticky;top:0;z-index:100;background:rgba(5,12,26,0.92);backdrop-fil
 .btn-tg:hover{transform:translateY(-2px);box-shadow:0 12px 32px rgba(0,136,204,0.45);color:#fff}
 
 /* DONATIONS */
-.don-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.don-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.don-intro{display:grid;grid-template-columns:.85fr 1.35fr;gap:18px;align-items:stretch}.don-copyline{color:var(--sub);font-size:14px;line-height:1.75}.don-card{min-height:145px}.don-empty{border:1px dashed rgba(0,230,118,.18);border-radius:10px;padding:16px;color:var(--muted);font-size:12px;text-align:center;background:rgba(0,0,0,.18)}
 .don-card{padding:20px}
 .don-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
 .don-coin{font-size:14px;font-weight:900;letter-spacing:.5px}
@@ -3235,10 +3256,20 @@ footer{border-top:1px solid rgba(0,230,118,0.07);padding:48px 0 28px;margin-top:
 .modal-close{background:rgba(255,255,255,0.06);border:1px solid var(--bdr);color:var(--sub);padding:8px 22px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer}
 .modal-close:hover{border-color:var(--bdr-h);color:var(--text)}
 
+
+/* V5 conversion fixes */
+.exch-empty-note{grid-column:1/-1;text-align:center;color:var(--muted);font-size:12px;padding:10px}
+.exch-card.disabled{opacity:.82}
+.exch-card.disabled .exch-btn{background:rgba(255,255,255,0.06)!important;color:var(--muted)!important;box-shadow:none!important;cursor:not-allowed}
+.don-empty{padding:18px;border-style:dashed;text-align:center;color:var(--muted);font-size:13px}
+.don-intro{display:grid;grid-template-columns:1.1fr 2fr;gap:16px;align-items:stretch}
+.don-copyline{color:var(--sub);font-size:13px;line-height:1.7}
+@media(max-width:768px){.don-intro{grid-template-columns:1fr}}
+
 /* RESPONSIVE */
-@media(max-width:1020px){.stats-bar{grid-template-columns:repeat(3,1fr)}.perf-grid{grid-template-columns:1fr 1fr}.footer-in{grid-template-columns:1fr 1fr}.exch-grid{grid-template-columns:1fr 1fr}.tg-inner{grid-template-columns:1fr;text-align:center}.tg-phone{display:none}}
-@media(max-width:768px){.hero{padding:52px 0 32px}.hero-in{grid-template-columns:1fr;gap:28px}.hero-h1{font-size:36px}.hero-right{order:-1}.radar-wrap{width:280px;height:280px}.stats-bar{grid-template-columns:1fr 1fr}.don-grid{grid-template-columns:1fr}.tg-cta{padding:36px 22px}.tg-title{font-size:24px}.nav-links{display:none}.hero-feats{grid-template-columns:1fr}}
-@media(max-width:480px){.stats-bar{grid-template-columns:1fr}.exch-grid{grid-template-columns:1fr}.hero-h1{font-size:28px}.footer-in{grid-template-columns:1fr}.perf-grid{grid-template-columns:1fr}.fbot{flex-direction:column;text-align:center}}
+@media(max-width:1020px){.stats-bar{grid-template-columns:repeat(3,1fr)}.perf-grid{grid-template-columns:1fr 1fr}.footer-in{grid-template-columns:1fr 1fr}.exch-grid{grid-template-columns:1fr 1fr}.tg-inner{grid-template-columns:1fr;text-align:center}.tg-phone{display:none}.hero-feats{grid-template-columns:1fr 1fr}.don-intro{grid-template-columns:1fr}}
+@media(max-width:768px){.hero{padding:48px 0 44px;min-height:auto}.hero-in{grid-template-columns:1fr;gap:30px}.hero-h1{font-size:44px}.hero-right{order:0}.radar-wrap{width:330px;height:330px}.stats-bar{grid-template-columns:1fr 1fr}.don-grid{grid-template-columns:1fr}.tg-cta{padding:36px 22px}.tg-title{font-size:24px}.nav-links{display:none}.hero-feats{grid-template-columns:1fr 1fr}.hero-btns .btn-primary,.hero-btns .btn-outline{width:100%;justify-content:center}}
+@media(max-width:480px){.stats-bar{grid-template-columns:1fr}.exch-grid{grid-template-columns:1fr}.hero-h1{font-size:38px}.footer-in{grid-template-columns:1fr}.perf-grid{grid-template-columns:1fr}.fbot{flex-direction:column;text-align:center}.hero-feats{grid-template-columns:1fr}.radar-wrap{width:300px;height:300px}.logo-txt{font-size:12px!important}}
 </style>
 </head>
 <body>
@@ -3246,14 +3277,16 @@ footer{border-top:1px solid rgba(0,230,118,0.07);padding:48px 0 28px;margin-top:
 <nav>
 <div class="nav-in">
   <div class="nav-logo">
-    <div class="logo-mark">A</div>
+    <div class="logo-mark" aria-label="Alpha Radar Signals logo"><svg viewBox="0 0 64 64" role="img"><circle cx="32" cy="32" r="29" fill="none" stroke="currentColor" stroke-width="3" opacity=".55"/><path d="M32 9 55 53H43l-5-10H26l-5 10H9L32 9Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M24 35h16M32 21v31" stroke="currentColor" stroke-width="3" stroke-linecap="round" opacity=".85"/><path d="M32 32 56 20" stroke="currentColor" stroke-width="3" stroke-linecap="round" opacity=".7"/></svg></div>
     <div class="logo-txt">ALPHA RADAR <em>SIGNALS</em></div>
   </div>
   <div class="nav-links">
     <a href="#live-stats">Stats</a>
+    <a href="#exchanges-section">Exchanges</a>
+    <a href="#telegram-section">Telegram</a>
     <a href="#signals-section">Signals</a>
     <a href="#perf-section">Performance</a>
-    <a href="#exchanges-section">Exchanges</a>
+    <a href="#support-section">Donate</a>
     <a href="/faq">FAQ</a>
   </div>
   <div class="nav-right">
@@ -3304,6 +3337,15 @@ footer{border-top:1px solid rgba(0,230,118,0.07);padding:48px 0 28px;margin-top:
 </div>
 </div>
 
+<div class="container section-sm">
+  <div class="stats-bar trust-strip">
+    <div class="scard card"><div class="sc-lbl">Markets Scanned</div><div class="sc-val cg">206</div><div class="sc-hint">USDT Futures</div></div>
+    <div class="scard card"><div class="sc-lbl">Scanner</div><div class="sc-val ct">24/7</div><div class="sc-hint">Always monitoring</div></div>
+    <div class="scard card"><div class="sc-lbl">Telegram Alerts</div><div class="sc-val cb">Live</div><div class="sc-hint">Real-time delivery</div></div>
+    <div class="scard card"><div class="sc-lbl">Risk Control</div><div class="sc-val cy">SL/TP</div><div class="sc-hint">Managed setups</div></div>
+  </div>
+</div>
+
 <div id="live-stats" class="container section-sm">
 <div class="stats-bar">
   <div class="scard card"><div class="sc-lbl">Total Signals</div><div id="s-total" class="sc-val ct">&#8212;</div><div class="sc-hint">MTF pipeline</div></div>
@@ -3311,22 +3353,6 @@ footer{border-top:1px solid rgba(0,230,118,0.07);padding:48px 0 28px;margin-top:
   <div class="scard card"><div class="sc-lbl">Avg Risk / Reward</div><div id="s-rr" class="sc-val cy">&#8212;</div><div class="sc-hint">1:X ratio</div></div>
   <div class="scard card"><div class="sc-lbl">Markets Scanned</div><div id="s-mkts" class="sc-val cb">&#8212;</div><div class="sc-hint">USDT pairs</div></div>
   <div class="scard card"><div class="sc-lbl">Active Signals</div><div id="s-active" class="sc-val cg">&#8212;</div><div class="sc-hint">Live now</div></div>
-</div>
-</div>
-
-<div id="signals-section" class="container section-sm">
-<div class="sh">
-  <div class="sh-lbl">&#9679; REAL-TIME</div>
-  <div class="sh-title">Latest Live Signals</div>
-  <div class="sh-sub">AI-generated trade setups from the multi-timeframe pipeline &mdash; updated every 6 seconds</div>
-</div>
-<div class="card" style="padding:4px">
-<div class="ovx">
-<table class="stbl">
-<thead><tr><th>TIME</th><th>SYMBOL</th><th>SIDE</th><th>TF</th><th>CONF</th><th>RR</th><th>STATUS</th><th>PNL</th></tr></thead>
-<tbody id="sig-tbl"><tr><td colspan="8" style="text-align:center;color:var(--muted);padding:32px">Loading signals...</td></tr></tbody>
-</table>
-</div>
 </div>
 </div>
 
@@ -3339,7 +3365,7 @@ footer{border-top:1px solid rgba(0,230,118,0.07);padding:48px 0 28px;margin-top:
 __AFFILIATES__
 </div>
 
-<div class="container" style="margin-bottom:40px">
+<div id="telegram-section" class="container" style="margin-bottom:40px">
 <div class="tg-cta">
   <div class="tg-inner">
     <div class="tg-phone">
@@ -3376,11 +3402,32 @@ __AFFILIATES__
 </div>
 </div>
 
+<div id="signals-section" class="container section-sm">
+<div class="sh">
+  <div class="sh-lbl">&#9679; REAL-TIME</div>
+  <div class="sh-title">Latest Live Signals</div>
+  <div class="sh-sub">AI-generated trade setups from the multi-timeframe pipeline &mdash; updated every 6 seconds</div>
+</div>
+<div class="card" style="padding:4px">
+<div class="ovx">
+<table class="stbl">
+<thead><tr><th>TIME</th><th>SYMBOL</th><th>SIDE</th><th>TF</th><th>CONF</th><th>RR</th><th>STATUS</th><th>PNL</th></tr></thead>
+<tbody id="sig-tbl"><tr><td colspan="8" style="text-align:center;color:var(--muted);padding:32px">Loading signals...</td></tr></tbody>
+</table>
+</div>
+</div>
+</div>
+
+
 <div id="perf-section" class="container section-sm">
 <div class="sh">
   <div class="sh-lbl">&#128200; TRACK RECORD</div>
   <div class="sh-title">Performance Summary</div>
-  <div class="sh-sub">Live metrics from all closed trades &mdash; verified on-chain results</div>
+  <div class="sh-sub">Live metrics from closed signals &mdash; transparent public tracking</div>
+</div>
+<div id="perf-collecting" class="perf-collecting">
+  <h3>Collecting Verified Performance Data</h3>
+  <p>Alpha Radar now tracks only the new MTF V3/V4 signal engine. Until enough verified closed trades are available, we hide weak legacy performance numbers to avoid misleading visitors.</p>
 </div>
 <div class="perf-grid">
   <div class="pcrd card"><div class="plbl">Win Rate</div><div id="ps-wr" class="pval cg">&#8212;</div><div class="phint"><span id="ps-w" class="cg">&#8212;</span> W &nbsp;/&nbsp; <span id="ps-l" class="cr">&#8212;</span> L</div></div>
@@ -3388,12 +3435,12 @@ __AFFILIATES__
   <div class="pcrd card"><div class="plbl">Total PnL</div><div id="ps-total-pnl" class="pval cg">&#8212;</div><div class="phint">Cumulative closed</div></div>
   <div class="pcrd card"><div class="plbl">Avg Risk / Reward</div><div id="ps-rr" class="pval cy">&#8212;</div><div class="phint">Per signal</div></div>
 </div>
-<div class="card" style="padding:22px;margin-bottom:18px">
+<div class="card equity-card" style="padding:22px;margin-bottom:18px">
   <div style="font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:14px">Equity Curve</div>
   <canvas id="equity-chart" height="160"></canvas>
   <div id="equity-empty" style="text-align:center;color:var(--muted);padding:36px;display:none">Not enough closed trades yet</div>
 </div>
-<div class="card" style="padding:18px">
+<div class="card perf-history" style="padding:18px">
 <div class="tabs">
   <button class="tbtn on" onclick="swTab('open',this)">Open (<span id="tc-open">&#8212;</span>)</button>
   <button class="tbtn" onclick="swTab('closed',this)">Closed</button>
@@ -3409,13 +3456,13 @@ __AFFILIATES__
 </table>
 </div>
 </div>
-<div class="card" style="padding:18px;margin-top:16px">
+<div class="card leaderboard-card" style="padding:18px;margin-top:16px">
 <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:12px;letter-spacing:1px">PERFORMANCE LEADERBOARD</div>
 <div id="lb-list"><p style="color:var(--muted);text-align:center;padding:20px">Loading...</p></div>
 </div>
 </div>
 
-<div class="container section-sm">
+<div id="support-section" class="container section-sm">
 __DONATE__
 </div>
 
@@ -3659,6 +3706,15 @@ async function loadPerf(){
     document.getElementById('ps-rr').textContent=d.avg_rr!=null?('1:'+d.avg_rr):'&#8212;';
     var pEl=document.getElementById('ps-wr');
     if(d.win_rate!=null){pEl.textContent=d.win_rate+'%';pEl.className='pval '+(d.win_rate>=50?'cg':'cr');}
+    var totalPnl=parseFloat(d.total_pnl||d.avg_pnl||0);
+    var wr=parseFloat(d.win_rate||0);
+    var closed=parseInt(d.total_closed||d.total_signals||0);
+    var perf=document.getElementById('perf-section');
+    var collecting=document.getElementById('perf-collecting');
+    if(perf&&collecting){
+      if(closed < 30 || wr < 45 || totalPnl < 0){perf.classList.add('perf-muted');collecting.style.display='block';}
+      else{perf.classList.remove('perf-muted');collecting.style.display='none';}
+    }
   }catch(e){}
 }
 
