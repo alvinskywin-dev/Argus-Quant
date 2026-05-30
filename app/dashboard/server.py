@@ -157,6 +157,7 @@ async def _get_stats() -> dict:
 
     def _row(s):
         return {
+            "id": s.id,
             "time": s.created_at.strftime("%m-%d %H:%M") if s.created_at else "-",
             "symbol": s.symbol, "side": s.side, "tf": s.timeframe,
             "conf": round(float(s.confidence or 0), 1),
@@ -1091,8 +1092,14 @@ async def index():
             f'<a href="{dc_url}" target="_blank" style="background:#5865f2;color:#fff;padding:14px 28px;'
             f'border-radius:12px;font-weight:700;font-size:15px;text-decoration:none">💬 Join Discord</a>'
         )
-    if not hero_btns:
-        hero_btns.append('<span style="color:#8fa8c7;font-size:15px">Free signals — join our community below</span>')
+    # "View Live Signals" always present regardless of .env
+    hero_btns.append(
+        '<a href="/signals" style="background:#0b1320;border:2px solid #20f0c0;'
+        'color:#20f0c0;padding:14px 28px;border-radius:12px;font-weight:700;'
+        'font-size:15px;text-decoration:none">📊 View Live Signals</a>'
+    )
+    if not hero_btns[:-1]:   # no community buttons configured
+        pass  # view signals btn is still there
     html = html.replace("__HERO_BTNS__", "".join(hero_btns))
 
     # community section
@@ -2785,7 +2792,14 @@ _PUBLIC_HTML = """\
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>ALPHA RADAR SIGNALS — Free AI Crypto Futures Signals</title>
-<meta name="description" content="Free AI-powered crypto futures signals. Multi-timeframe analysis. Real-time results."/>
+<meta name="description" content="Free AI-powered crypto futures signals. Multi-timeframe analysis. Real-time results. No subscription required."/>
+<meta property="og:title" content="ALPHA RADAR SIGNALS — Free AI Crypto Futures Signals"/>
+<meta property="og:description" content="Free AI-powered crypto futures signals. Multi-timeframe analysis. Real-time results. No subscription required."/>
+<meta property="og:type" content="website"/>
+<meta property="og:site_name" content="ALPHA RADAR SIGNALS"/>
+<meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="ALPHA RADAR SIGNALS — Free AI Crypto Futures Signals"/>
+<meta name="twitter:description" content="Free AI-powered crypto futures signals. No subscription required."/>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#070b12;color:#eaf2ff;font-family:Inter,Arial,sans-serif;line-height:1.6}
@@ -2895,10 +2909,10 @@ footer{border-top:1px solid #13263a;padding:26px 24px;text-align:center;color:#6
 
 <div class="container">
 <div class="sbar">
-  <div class="scard"><div class="slabel">WIN RATE (7D)</div><div id="s-wr" class="sval g">—</div></div>
-  <div class="scard"><div class="slabel">SIGNALS (7D)</div><div id="s-tot" class="sval">—</div></div>
-  <div class="scard"><div class="slabel">AVG PNL</div><div id="s-pnl" class="sval g">—</div></div>
-  <div class="scard"><div class="slabel">UNIVERSE</div><div id="s-uni" class="sval c">—</div></div>
+  <div class="scard"><div class="slabel">TOTAL SIGNALS</div><div id="s-total" class="sval">—</div></div>
+  <div class="scard"><div class="slabel">WIN RATE</div><div id="s-wr" class="sval g">—</div></div>
+  <div class="scard"><div class="slabel">PROFIT FACTOR</div><div id="s-pf" class="sval c">—</div></div>
+  <div class="scard"><div class="slabel">ACTIVE SIGNALS</div><div id="s-active" class="sval y">—</div></div>
 </div>
 
 <section>
@@ -2930,21 +2944,26 @@ footer{border-top:1px solid #13263a;padding:26px 24px;text-align:center;color:#6
 </section>
 
 <section>
-<div class="stitle"><b></b>Performance Statistics (7D)</div>
-<div class="stats3">
+<div class="stitle"><b></b>Performance</div>
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px">
   <div class="card" style="text-align:center">
     <div class="slabel">WIN RATE</div>
-    <div id="ps-wr" class="sval g" style="font-size:38px;margin:10px 0">—</div>
+    <div id="ps-wr" class="sval g" style="font-size:34px;margin:10px 0">—</div>
     <div style="font-size:12px;color:#627a99"><span id="ps-w" class="g">—</span> wins &nbsp;/&nbsp; <span id="ps-l" class="r">—</span> losses</div>
   </div>
   <div class="card" style="text-align:center">
+    <div class="slabel">PROFIT FACTOR</div>
+    <div id="ps-pf" class="sval c" style="font-size:34px;margin:10px 0">—</div>
+    <div style="font-size:12px;color:#627a99">All closed trades</div>
+  </div>
+  <div class="card" style="text-align:center">
     <div class="slabel">AVG PNL / TRADE</div>
-    <div id="ps-pnl" class="sval g" style="font-size:38px;margin:10px 0">—</div>
+    <div id="ps-pnl" class="sval g" style="font-size:34px;margin:10px 0">—</div>
     <div style="font-size:12px;color:#627a99">Closed trades only</div>
   </div>
   <div class="card" style="text-align:center">
     <div class="slabel">OPEN NOW</div>
-    <div id="ps-open" class="sval c" style="font-size:38px;margin:10px 0">—</div>
+    <div id="ps-open" class="sval c" style="font-size:34px;margin:10px 0">—</div>
     <div style="font-size:12px;color:#627a99">Active signals</div>
   </div>
 </div>
@@ -2985,14 +3004,26 @@ __AFFILIATES__
 <section>
 <div class="stitle"><b></b>Frequently Asked Questions</div>
 <div class="faq-list">
-  <div class="faq-item"><div class="faq-q">Are the signals free?</div><div class="faq-a">Yes, 100% free. No subscription required. All signals are delivered directly to Telegram at no cost.</div></div>
-  <div class="faq-item"><div class="faq-q">How do I receive signals?</div><div class="faq-a">Join our Telegram channel. Signals are posted automatically the moment the AI engine detects a valid setup.</div></div>
-  <div class="faq-item"><div class="faq-q">What markets are covered?</div><div class="faq-a">We scan USDT perpetual futures on Binance — all liquid pairs with over $5M daily volume.</div></div>
-  <div class="faq-item"><div class="faq-q">What does confidence % mean?</div><div class="faq-a">Confidence is the AI engine's 4-layer quality score (75–100%). Higher = more timeframe confluences aligned. It is not a win probability.</div></div>
-  <div class="faq-item"><div class="faq-q">What is the 4-layer MTF pipeline?</div><div class="faq-a">Each signal passes four hard gates: 1D Trend → 4H Structure → 1H Setup → 15M Entry. All four must confirm before a signal is emitted.</div></div>
-  <div class="faq-item"><div class="faq-q">What is Risk/Reward (RR)?</div><div class="faq-a">RR is the ratio of potential profit to potential loss. We require a minimum of 1:2.0 — you can gain at least $2 for every $1 risked.</div></div>
-  <div class="faq-item"><div class="faq-q">Should I use all my capital on one signal?</div><div class="faq-a">Never. Risk at most 1–2% of your trading capital per trade. Proper position sizing is essential for long-term survival.</div></div>
-  <div class="faq-item"><div class="faq-q">Who runs this project?</div><div class="faq-a">ALPHA RADAR SIGNALS is an independent trading tools project. We are not a registered financial institution. All signals are for educational use only.</div></div>
+  <div class="faq-item">
+    <div class="faq-q">What is Alpha Radar?</div>
+    <div class="faq-a">Alpha Radar Signals is a free AI-powered crypto futures signal service. Our multi-timeframe engine scans 200+ USDT perpetual pairs on Binance 24/7, applying a strict 4-layer pipeline (1D Trend → 4H Structure → 1H Setup → 15M Entry) to deliver high-quality setups directly to Telegram.</div>
+  </div>
+  <div class="faq-item">
+    <div class="faq-q">Is this financial advice?</div>
+    <div class="faq-a">No. All signals, analysis, and content on Alpha Radar Signals are for educational and informational purposes only. Nothing on this platform constitutes financial, investment, trading, or legal advice. You are solely responsible for your trading decisions. Past performance does not guarantee future results.</div>
+  </div>
+  <div class="faq-item">
+    <div class="faq-q">Does the bot trade automatically?</div>
+    <div class="faq-a">No. Alpha Radar Signals does not place any real trades. All signals require manual execution by the user. The system only generates and broadcasts trade setups — it never connects to your exchange account or touches real funds.</div>
+  </div>
+  <div class="faq-item">
+    <div class="faq-q">How are signals generated?</div>
+    <div class="faq-a">Each signal must pass four hard gates in sequence: (1) 1D Trend Filter — EMA50/200 alignment confirms the dominant trend. (2) 4H Structure — Break of Structure, Order Blocks, and Fair Value Gaps confirm momentum. (3) 1H Setup — pullbacks, retests, VWAP alignment, and volume confirm the entry zone. (4) 15M Entry Trigger — a score-based entry system fires on BOS, FVG retest, OB retest, EMA pullback, or VWAP reclaim. All four gates must pass.</div>
+  </div>
+  <div class="faq-item">
+    <div class="faq-q">What timeframes are used?</div>
+    <div class="faq-a">The pipeline uses four timeframes: 1D (trend), 4H (structure), 1H (setup), and 15M (entry). All four must agree before a signal is emitted. Legacy 5-minute signals from older scanner versions are excluded from all reports and statistics.</div>
+  </div>
 </div>
 </section>
 </div>
@@ -3052,21 +3083,17 @@ async function loadStats(){
     if(!r.ok)return;
     const d=await r.json();
     if(d.error)return;
-    document.getElementById('s-wr').textContent=d.winrate+'%';
-    document.getElementById('s-tot').textContent=d.signals7d;
-    const pe=document.getElementById('s-pnl');
-    pe.textContent=pct(d.avgpnl);pe.className='sval '+cls(d.avgpnl);
-    document.getElementById('s-uni').textContent=d.universe;
-    document.getElementById('ps-wr').textContent=d.winrate+'%';
-    const ppe=document.getElementById('ps-pnl');
-    ppe.textContent=pct(d.avgpnl);ppe.className='sval '+cls(d.avgpnl);
-    document.getElementById('ps-w').textContent=d.wins??'—';
-    document.getElementById('ps-l').textContent=d.losses??'—';
+    // Stat bar — s-total and s-pf set by loadPerf()
+    document.getElementById('s-wr').textContent=(d.winrate??'—')+'%';
+    document.getElementById('s-active').textContent=d.open_signals??'—';
+    // Performance section
+    document.getElementById('ps-wr').textContent=(d.winrate??'—')+'%';
     document.getElementById('ps-open').textContent=d.open_signals??'—';
     document.getElementById('tc-open').textContent=d.open_signals??'—';
     // latest signals
-    const sRows=(d.recent||[]).slice(0,15).map(x=>
-      '<tr><td>'+x.time+'</td><td><b>'+x.symbol+'</b></td>'+
+    const sRows=(d.recent||[]).slice(0,10).map(x=>
+      '<tr><td>'+x.time+'</td>'+
+      '<td><b><a href="/signal/'+x.id+'" style="color:#20e6c3">'+x.symbol+'</a></b></td>'+
       '<td><span class="'+(x.side==='LONG'?'bl2':'bs2')+'">'+x.side+'</span></td>'+
       '<td>'+x.tf+'</td><td>'+x.conf+'%</td><td>1:'+x.rr+'</td>'+
       '<td>'+sBadge(x.status)+'</td>'+
@@ -3130,9 +3157,34 @@ async function loadPrices(){
     document.getElementById('b-upd').textContent=new Date().toLocaleTimeString();
   }catch(e){console.error(e);}
 }
-loadStats();loadPrices();
+async function loadPerf(){
+  try{
+    const r=await fetch('/api/public/performance');
+    if(!r.ok)return;
+    const d=await r.json();
+    if(d.error)return;
+    // Stat bar
+    document.getElementById('s-total').textContent=d.total_signals??d.total_closed??'—';
+    const wrEl=document.getElementById('s-wr');
+    wrEl.textContent=(d.win_rate??'—')+'%';
+    wrEl.className='sval '+(d.win_rate>=50?'g':'r');
+    const pfEl=document.getElementById('s-pf');
+    pfEl.textContent=d.profit_factor!=null?d.profit_factor:'∞';
+    // Performance section
+    document.getElementById('ps-wr').textContent=(d.win_rate??'—')+'%';
+    document.getElementById('ps-w').textContent=d.wins??'—';
+    document.getElementById('ps-l').textContent=d.losses??'—';
+    const pfEl2=document.getElementById('ps-pf');
+    pfEl2.textContent=d.profit_factor!=null?d.profit_factor:'∞';
+    const pnlEl=document.getElementById('ps-pnl');
+    pnlEl.textContent=pct(d.avg_pnl);
+    pnlEl.className='sval '+(d.avg_pnl>=0?'g':'r');
+  }catch(e){console.error(e);}
+}
+loadStats();loadPrices();loadPerf();
 setInterval(loadStats,6000);
 setInterval(loadPrices,3000);
+setInterval(loadPerf,30000);
 </script>
 </body>
 </html>
