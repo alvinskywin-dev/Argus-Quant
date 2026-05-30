@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="OKX">
+  <!-- OKX geometric mark: 5 squares in X/diagonal pattern, white on transparent -->
+  <rect x="5"  y="5"  width="28" height="28" rx="5" fill="white"/>
+  <rect x="67" y="5"  width="28" height="28" rx="5" fill="white"/>
+  <rect x="36" y="36" width="28" height="28" rx="5" fill="white"/>
+  <rect x="5"  y="67" width="28" height="28" rx="5" fill="white"/>
+  <rect x="67" y="67" width="28" height="28" rx="5" fill="white"/>
+</svg>

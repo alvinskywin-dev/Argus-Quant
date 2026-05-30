@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Binance">
+  <!-- Binance classic 5-diamond cross mark in gold -->
+  <polygon points="50,4 64,18 50,32 36,18" fill="#F3BA2F"/>
+  <polygon points="4,50 18,36 32,50 18,64" fill="#F3BA2F"/>
+  <polygon points="68,50 82,36 96,50 82,64" fill="#F3BA2F"/>
+  <polygon points="50,68 64,82 50,96 36,82" fill="#F3BA2F"/>
+  <polygon points="36,50 50,36 64,50 50,64" fill="#F3BA2F"/>
+</svg>

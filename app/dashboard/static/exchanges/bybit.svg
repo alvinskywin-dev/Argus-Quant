@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 100" role="img" aria-label="Bybit">
+  <!-- Bybit B mark in orange, even-odd fill rule for bump cutouts -->
+  <path fill-rule="evenodd" fill="#F7A600"
+    d="M10,8 L10,92 L48,92 Q76,92 76,70 Q76,57 58,52 Q76,48 76,28 Q76,8 48,8 Z
+       M28,22 L44,22 Q60,22 60,33 Q60,46 44,46 L28,46 Z
+       M28,54 L46,54 Q62,54 62,67 Q62,78 46,78 L28,78 Z"/>
+</svg>

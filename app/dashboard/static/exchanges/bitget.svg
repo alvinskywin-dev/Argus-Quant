@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Bitget">
+  <!-- Bitget upward arrow/flame mark in teal -->
+  <defs>
+    <linearGradient id="bg-grad" x1="30" y1="100" x2="70" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#00b4d8"/>
+      <stop offset="100%" stop-color="#00e6b3"/>
+    </linearGradient>
+  </defs>
+  <!-- Outer chevron/arrow pointing up -->
+  <path d="M50,4 L90,52 L72,52 L72,96 L28,96 L28,52 L10,52 Z" fill="url(#bg-grad)"/>
+  <!-- Inner cutout to create hollow arrow -->
+  <path d="M50,20 L78,52 L64,52 L64,88 L36,88 L36,52 L22,52 Z" fill="#071426"/>
+</svg>
