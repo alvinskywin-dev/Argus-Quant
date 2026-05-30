@@ -25,6 +25,26 @@ def _quality_label(conf: float) -> str:
     return "STANDARD"
 
 
+def _funding_line(sig: dict) -> str:
+    """Return a compact funding line if funding data is available in the signal."""
+    rate = sig.get("_funding_rate")
+    cls  = sig.get("_funding_class")
+    score = sig.get("_funding_score")
+    if rate is None or cls is None:
+        return ""
+    rate_pct = rate * 100
+    label_map = {
+        "neutral":          "Neutral",
+        "positive":         "Positive",
+        "negative":         "Negative / Contrarian",
+        "extreme_positive": "Extreme Positive ⚠️",
+        "extreme_negative": "Extreme Negative ⚠️",
+    }
+    label = label_map.get(cls, cls.replace("_", " ").title())
+    score_str = f"{score:+d}" if score is not None else ""
+    return f"💰 <b>Funding</b> • <code>{rate_pct:.4f}%</code>  {label}  Score <code>{score_str}</code>"
+
+
 def format_signal(sig: dict) -> str:
     side = sig["side"]
     side_icon = "🟢" if side == "LONG" else "🔴"
@@ -34,8 +54,9 @@ def format_signal(sig: dict) -> str:
         reasons = [r.strip() for r in reasons.split("|") if r.strip()]
 
     ai = "\n".join(f"✔ {r}" for r in reasons[:3])
+    funding_line = _funding_line(sig)
 
-    return (
+    body = (
         "⚡ <b>ALPHA RADAR SIGNALS</b>\n\n"
 
         f"{side_icon} <code>{sig['symbol']}</code> <b>{side}</b>\n"
@@ -56,6 +77,9 @@ def format_signal(sig: dict) -> str:
 
         f"{ai}"
     )
+    if funding_line:
+        body += f"\n\n{funding_line}"
+    return body
 
 def format_event(payload: dict) -> str:
     event = payload["event"]

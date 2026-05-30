@@ -117,6 +117,15 @@ class Settings(BaseSettings):
     vip_chat_id: str = ""
     elite_vip_chat_id: str = ""
 
+    # --- Funding Rate Engine (Sprint 11B) ---
+    funding_enabled: bool = True
+    funding_cache_seconds: int = 300
+    funding_positive: float = 0.0003
+    funding_negative: float = -0.0003
+    funding_extreme_positive: float = 0.0008
+    funding_extreme_negative: float = -0.0008
+    funding_weight: int = 10
+
     # --- Misc ---
     production_start_utc: str = ""
     timezone: str = "UTC"

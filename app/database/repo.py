@@ -8,7 +8,7 @@ from typing import Any, Iterable, List, Optional
 
 from sqlalchemy import and_, delete, desc, func, select, update
 
-from app.database.models import DailyStat, Signal, SignalMessage, SystemSetting, User, Watchlist
+from app.database.models import DailyStat, FundingRateSnapshot, Signal, SignalMessage, SystemSetting, User, Watchlist
 from app.database.session import get_session
 
 # Statuses that mean a signal is still active (position is open)
@@ -279,3 +279,33 @@ async def get_signal_messages(signal_id: int) -> list[SignalMessage]:
             select(SignalMessage).where(SignalMessage.signal_id == signal_id)
         )
         return list(rows.scalars().all())
+
+
+# ---------------- funding rate snapshots ----------------
+
+async def save_funding_snapshot(
+    symbol: str,
+    funding_rate: float,
+    classification: str,
+    funding_time: int | None = None,
+    next_funding_time: int | None = None,
+) -> None:
+    async with get_session() as s:
+        s.add(FundingRateSnapshot(
+            symbol=symbol,
+            funding_rate=funding_rate,
+            funding_time=funding_time,
+            next_funding_time=next_funding_time,
+            classification=classification,
+        ))
+
+
+async def get_latest_funding(symbol: str) -> Optional[FundingRateSnapshot]:
+    async with get_session() as s:
+        row = await s.execute(
+            select(FundingRateSnapshot)
+            .where(FundingRateSnapshot.symbol == symbol)
+            .order_by(desc(FundingRateSnapshot.created_at))
+            .limit(1)
+        )
+        return row.scalar_one_or_none()

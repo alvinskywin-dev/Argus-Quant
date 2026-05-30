@@ -17,7 +17,7 @@ from sqlalchemy import func as _sqlfunc, select, desc
 
 from app.config import settings
 from app.database.session import SessionLocal
-from app.database.models import Signal, AffiliateClick, OpenInterestSnapshot, PaperPosition
+from app.database.models import FundingRateSnapshot, Signal, AffiliateClick, OpenInterestSnapshot, PaperPosition
 from app.database.repo import get_active_signals_summary, ACTIVE_STATUSES
 from app.market_data import universe
 from app.market_data.ws_engine import ws_health
@@ -1091,6 +1091,70 @@ async def api_oi_status():
                     "price_change":  s.price_change_pct,
                     "oi_score":      s.oi_score,
                     "time":          s.created_at.strftime("%m-%d %H:%M") if s.created_at else "-",
+                }
+                for s in recent
+            ],
+        })
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+@app.get("/api/funding/status")
+async def api_funding_status():
+    """
+    Sprint 11B — Funding Rate dashboard cards.
+
+    Returns crowd-positioning counts (extreme_positive / extreme_negative /
+    neutral) from the most recent funding snapshot per symbol in the last 2h.
+    """
+    try:
+        from datetime import timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
+
+        async with SessionLocal() as session:
+            subq = (
+                select(
+                    FundingRateSnapshot.symbol,
+                    _sqlfunc.max(FundingRateSnapshot.created_at).label("latest"),
+                )
+                .where(FundingRateSnapshot.created_at >= cutoff)
+                .group_by(FundingRateSnapshot.symbol)
+                .subquery()
+            )
+            res = await session.execute(
+                select(FundingRateSnapshot)
+                .join(
+                    subq,
+                    (FundingRateSnapshot.symbol == subq.c.symbol) &
+                    (FundingRateSnapshot.created_at == subq.c.latest),
+                )
+            )
+            snaps = res.scalars().all()
+
+        extreme_pos = sum(1 for s in snaps if s.classification == "extreme_positive")
+        extreme_neg = sum(1 for s in snaps if s.classification == "extreme_negative")
+        neutral_cnt = sum(1 for s in snaps if s.classification == "neutral")
+        positive_cnt = sum(1 for s in snaps if s.classification == "positive")
+        negative_cnt = sum(1 for s in snaps if s.classification == "negative")
+        total = len(snaps)
+
+        recent = sorted(snaps, key=lambda s: s.created_at, reverse=True)[:20]
+
+        return JSONResponse({
+            "funding_status":          "active" if total > 0 else "no_data",
+            "total_symbols":           total,
+            "extreme_positive_funding": extreme_pos,
+            "extreme_negative_funding": extreme_neg,
+            "neutral_funding":          neutral_cnt,
+            "positive_funding":         positive_cnt,
+            "negative_funding":         negative_cnt,
+            "snapshots": [
+                {
+                    "symbol":         s.symbol,
+                    "funding_rate":   s.funding_rate,
+                    "funding_pct":    round(s.funding_rate * 100, 5),
+                    "classification": s.classification,
+                    "time":           s.created_at.strftime("%m-%d %H:%M") if s.created_at else "-",
                 }
                 for s in recent
             ],

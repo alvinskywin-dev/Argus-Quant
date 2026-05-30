@@ -214,6 +214,24 @@ class PaperPosition(Base):
     closed_at:   Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class FundingRateSnapshot(Base):
+    __tablename__ = "funding_rate_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    funding_rate: Mapped[float] = mapped_column(Float)
+    funding_time: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    next_funding_time: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    classification: Mapped[str] = mapped_column(String(32), default="neutral")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+    __table_args__ = (
+        Index("ix_funding_snapshots_symbol_created", "symbol", "created_at"),
+    )
+
+
 class OpenInterestSnapshot(Base):
     __tablename__ = "open_interest_snapshots"
 

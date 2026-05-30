@@ -24,6 +24,7 @@ from app.database.models import OpenInterestSnapshot
 from app.database.repo import has_active_signal, in_post_close_cooldown
 from app.database.session import SessionLocal
 from app.market_data import fetch_klines, universe
+from app.market_data.funding import fetch_funding_rate, score_funding_for_side
 from app.market_data.open_interest import fetch_oi_snapshot
 from app.risk import build_levels, cooldown, passes_market_filters, rate_limiter
 from app.strategies import FeatureSnapshot, build_snapshot
@@ -267,14 +268,46 @@ class MarketScanner:
                 except Exception as exc:
                     logger.debug(f"OI DB save failed for {symbol}: {exc}")
 
+            # ── Funding Rate scoring ─────────────────────────────────────
+            funding_data = None
+            funding_fs = None
+            funding_diag = ""
+            if settings.funding_enabled:
+                funding_data = await fetch_funding_rate(symbol)
+                if funding_data:
+                    funding_fs = score_funding_for_side(
+                        funding_data.classification, decision.side
+                    )
+                    funding_diag = (
+                        f"Funding: rate={funding_data.funding_rate * 100:.4f}% "
+                        f"class={funding_data.classification} "
+                        f"score={funding_fs.score:+d}"
+                    )
+                    logger.info(
+                        f"💰 {symbol} {decision.side} | {funding_diag} | {funding_fs.reason}"
+                    )
+                    try:
+                        from app.database.repo import save_funding_snapshot
+                        await save_funding_snapshot(
+                            symbol=symbol,
+                            funding_rate=funding_data.funding_rate,
+                            classification=funding_data.classification,
+                            funding_time=funding_data.funding_time,
+                            next_funding_time=funding_data.next_funding_time,
+                        )
+                    except Exception as exc:
+                        logger.debug(f"funding DB save failed for {symbol}: {exc}")
+
+            funding_score = funding_fs.score if funding_fs else 0
+
             adjusted_confidence = round(
-                max(0.0, min(100.0, decision.confidence + oi_score)), 1
+                max(0.0, min(100.0, decision.confidence + oi_score + funding_score)), 1
             )
 
             logger.info(
                 f"✅ SIGNAL  {symbol} {decision.side}  "
                 f"tier={decision.tier}  conf={adjusted_confidence:.1f}%  "
-                f"(base={decision.confidence:.1f} oi={oi_score:+d})  "
+                f"(base={decision.confidence:.1f} oi={oi_score:+d} funding={funding_score:+d})  "
                 f"rr=1:{levels.risk_reward}  tfs={decision.contributing_tfs}"
             )
 
@@ -286,7 +319,7 @@ class MarketScanner:
                 "risk_level":     decision.risk_level,
                 "strategy":       "MTF_SMC_STRICT",
                 "reasons":        " | ".join(
-                    ([*decision.reasons[:8], oi_diag] if oi_diag else decision.reasons[:8])
+                    r for r in [*decision.reasons[:6], oi_diag, funding_diag] if r
                 ),
                 "entry_low":      levels.entry_low,
                 "entry_high":     levels.entry_high,
@@ -300,10 +333,14 @@ class MarketScanner:
                 "structure_score":decision.structure_score,
                 "setup_score":    decision.setup_score,
                 "entry_score":    decision.entry_score_pts,
-                "_snapshot":         primary_snap,
-                "_contributing_tfs": decision.contributing_tfs,
-                "_detected_at":      utcnow(),
-                "_tier":             decision.tier,
+                "_snapshot":          primary_snap,
+                "_contributing_tfs":  decision.contributing_tfs,
+                "_detected_at":       utcnow(),
+                "_tier":              decision.tier,
+                "_funding_rate":      funding_data.funding_rate if funding_data else None,
+                "_funding_class":     funding_data.classification if funding_data else None,
+                "_funding_score":     funding_score,
+                "_funding_reason":    funding_fs.reason if funding_fs else "",
             }
 
     async def scan_once(self) -> int:
