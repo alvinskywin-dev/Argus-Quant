@@ -26,6 +26,9 @@ _SCHEMA_UPGRADES: list[str] = [
     "ALTER TABLE signals ADD COLUMN IF NOT EXISTS structure_score FLOAT",
     "ALTER TABLE signals ADD COLUMN IF NOT EXISTS setup_score     FLOAT",
     "ALTER TABLE signals ADD COLUMN IF NOT EXISTS entry_score     FLOAT",
+    # V3.1 Sprint 6 — paper_positions gains tp2 and tp3 columns
+    "ALTER TABLE paper_positions ADD COLUMN IF NOT EXISTS tp2 FLOAT DEFAULT 0",
+    "ALTER TABLE paper_positions ADD COLUMN IF NOT EXISTS tp3 FLOAT DEFAULT 0",
     # V3.1 Sprint 3 — DB-level active-signal uniqueness per symbol.
     # Prevents duplicate OPEN signals at the database layer as a last resort.
     # Uses a partial index (PostgreSQL-specific) so only active rows are constrained.

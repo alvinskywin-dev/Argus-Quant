@@ -187,24 +187,31 @@ class ArchivedSignal(Base):
 
 
 class PaperPosition(Base):
-    """Virtual paper-trading positions tracked against incoming signals."""
+    """
+    Virtual paper-trading position created for each valid MTF signal.
+    No real funds involved — purely simulated at 10 000 USDT starting balance,
+    1% risk per trade.
+    """
     __tablename__ = "paper_positions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     signal_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("signals.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    symbol: Mapped[str] = mapped_column(String(32), index=True)
-    side: Mapped[str] = mapped_column(String(8))
+    symbol:      Mapped[str]   = mapped_column(String(32), index=True)
+    side:        Mapped[str]   = mapped_column(String(8))        # LONG / SHORT
     entry_price: Mapped[float] = mapped_column(Float)
-    stop_loss: Mapped[float] = mapped_column(Float)
-    tp1: Mapped[float] = mapped_column(Float)
-    size_usdt: Mapped[float] = mapped_column(Float, default=100.0)
-    status: Mapped[str] = mapped_column(String(16), default="OPEN")
-    pnl_usdt: Mapped[float] = mapped_column(Float, default=0.0)
-    pnl_pct: Mapped[float] = mapped_column(Float, default=0.0)
-    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
-    closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    stop_loss:   Mapped[float] = mapped_column(Float)
+    tp1:         Mapped[float] = mapped_column(Float)
+    tp2:         Mapped[float] = mapped_column(Float, default=0.0)
+    tp3:         Mapped[float] = mapped_column(Float, default=0.0)
+    size_usdt:   Mapped[float] = mapped_column(Float, default=100.0)
+    # OPEN | TP1 | TP2 | TP3 | SL | CLOSED
+    status:      Mapped[str]   = mapped_column(String(16), default="OPEN")
+    pnl_usdt:    Mapped[float] = mapped_column(Float, default=0.0)
+    pnl_pct:     Mapped[float] = mapped_column(Float, default=0.0)
+    opened_at:   Mapped[datetime]          = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    closed_at:   Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class SignalMessage(Base):

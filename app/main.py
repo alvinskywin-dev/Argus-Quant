@@ -188,6 +188,14 @@ class App:
         # use has_active_signal_excluding() and not block the new signal itself.
         sig["_signal_id"] = persisted.id
 
+        # Open a paper position for every valid MTF signal (no real funds)
+        try:
+            from app.paper.trading import open_paper_position
+            await open_paper_position(persisted)
+            logger.info(f"📊 paper position opened for signal #{persisted.id} {sig['symbol']}")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"paper position open failed #{persisted.id}: {exc}")
+
         try:
             sent_messages = await self.bot.broadcast_signal(sig)
         except Exception as exc:  # noqa: BLE001
@@ -217,6 +225,19 @@ class App:
 
     async def _handle_tracker_event(self, payload: dict) -> None:
         await self.bot.broadcast_event(payload)
+
+        # Keep paper position in sync with tracker events (TP1/TP2/TP3/SL)
+        event = payload.get("event", "")
+        if event in ("TP1", "TP2", "TP3", "SL"):
+            try:
+                from app.paper.trading import on_signal_event
+                await on_signal_event(
+                    signal_id = int(payload["signal_id"]),
+                    event     = event,
+                    pnl_pct   = float(payload.get("pnl_pct") or 0),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"paper position update failed ({event}): {exc}")
 
     async def _run_dashboard(self) -> None:
         cfg = uvicorn.Config(

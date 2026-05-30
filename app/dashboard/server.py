@@ -400,6 +400,44 @@ async def api_public_performance():
         return JSONResponse({"error": str(exc)}, status_code=500)
 
 
+@app.get("/api/paper")
+async def api_paper():
+    """Paper trading — stats + latest positions (Sprint 6 primary endpoint)."""
+    try:
+        from app.paper.trading import get_portfolio_stats, get_positions
+        stats = await get_portfolio_stats()
+        open_pos   = await get_positions(status="open",   limit=50)
+        closed_pos = await get_positions(status="closed", limit=50)
+        return JSONResponse({**stats, "open": open_pos, "closed": closed_pos})
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+@app.get("/api/paper/positions")
+async def api_paper_positions(status: str = "", limit: int = 100):
+    """Paper trading — positions list (filter: open / closed / all)."""
+    limit = min(max(1, limit), 500)
+    try:
+        from app.paper.trading import get_positions
+        rows = await get_positions(
+            status=status.lower() if status else None,
+            limit=limit,
+        )
+        return JSONResponse({"positions": rows, "count": len(rows)})
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+@app.get("/api/paper/stats")
+async def api_paper_stats():
+    """Paper trading — portfolio statistics only."""
+    try:
+        from app.paper.trading import get_portfolio_stats
+        return JSONResponse(await get_portfolio_stats())
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
 @app.get("/api/public/prices")
 async def api_public_prices():
     return JSONResponse(ws_health())
@@ -2259,73 +2297,194 @@ document.addEventListener('DOMContentLoaded',()=>{
 
 
 def _paper_page_html() -> str:
+    css = """
+/* ── paper trading ────────────────────────────────────────── */
+.pp-header{margin-bottom:16px}
+.pp-title{font-size:26px;font-weight:900;letter-spacing:1px;color:#eaf2ff}
+.pp-subtitle{font-size:12px;color:#7fa0c8;margin-top:4px}
+.pp-warn{background:#0a2a0a55;border:1px solid #20ff8033;border-radius:9px;
+  padding:10px 16px;margin-bottom:18px;font-size:12px;color:#8fa8c7}
+.pp-kpi{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:18px}
+.pp-kcard{background:linear-gradient(180deg,#101827,#0b1320);border:1px solid #17314b;
+  border-radius:12px;padding:15px;text-align:center}
+.pp-klbl{font-size:9px;color:#7fa0c8;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px}
+.pp-kval{font-size:22px;font-weight:900}
+.pp-curve-wrap{background:linear-gradient(180deg,#101827,#0b1320);border:1px solid #17314b;
+  border-radius:12px;padding:16px;margin-bottom:18px}
+.pp-curve-title{font-size:11px;font-weight:700;color:#7fa0c8;letter-spacing:2px;
+  text-transform:uppercase;margin-bottom:12px}
+.pp-curve{display:flex;align-items:flex-end;gap:3px;height:70px;overflow:hidden}
+.pp-curve-bar{flex:1;min-width:4px;border-radius:2px 2px 0 0;opacity:0.85}
+@media(max-width:720px){.pp-kpi{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:460px){.pp-kpi{grid-template-columns:repeat(2,1fr)}}
+"""
     body = """
-<div class="page-title">Paper Trading</div>
-<div class="sbar">
-  <div class="scard"><div class="slabel">BALANCE</div><div id="pt-bal" class="sval c">—</div></div>
-  <div class="scard"><div class="slabel">TOTAL PNL</div><div id="pt-pnl" class="sval g">—</div></div>
-  <div class="scard"><div class="slabel">WIN RATE</div><div id="pt-wr" class="sval g">—</div></div>
-  <div class="scard"><div class="slabel">OPEN POSITIONS</div><div id="pt-open" class="sval y">—</div></div>
+<div class="pp-header">
+  <div class="pp-title">PAPER TRADING</div>
+  <div class="pp-subtitle">Virtual Portfolio · 10 000 USDT · 1% Risk Per Trade · No Real Funds</div>
 </div>
-<div style="background:#0b2a0a;border:1px solid #1a5a18;border-radius:10px;padding:13px 16px;margin-bottom:16px;font-size:12px;color:#8fa8c7">
-  <b style="color:#20ff80">Virtual Portfolio</b> — 10 000 USDT starting balance · 1% risk per trade · No real funds
+
+<div class="pp-warn">
+  📊 <b style="color:#20ff80">Simulated only.</b>
+  Positions are opened automatically for every valid MTF signal.
+  No real Binance API calls. No real money.
 </div>
+
+<div class="pp-kpi">
+  <div class="pp-kcard">
+    <div class="pp-klbl">Balance</div>
+    <div id="pp-bal" class="pp-kval c">—</div>
+    <div id="pp-bal-sub" style="font-size:10px;color:#627a99;margin-top:3px"></div>
+  </div>
+  <div class="pp-kcard">
+    <div class="pp-klbl">Total PnL</div>
+    <div id="pp-pnl" class="pp-kval g">—</div>
+    <div id="pp-pnl-pct" style="font-size:10px;color:#627a99;margin-top:3px"></div>
+  </div>
+  <div class="pp-kcard">
+    <div class="pp-klbl">Win Rate</div>
+    <div id="pp-wr" class="pp-kval g">—</div>
+    <div id="pp-wr-sub" style="font-size:10px;color:#627a99;margin-top:3px"></div>
+  </div>
+  <div class="pp-kcard">
+    <div class="pp-klbl">Open</div>
+    <div id="pp-open" class="pp-kval y">—</div>
+  </div>
+  <div class="pp-kcard">
+    <div class="pp-klbl">Closed</div>
+    <div id="pp-closed" class="pp-kval w">—</div>
+    <div id="pp-wl" style="font-size:10px;color:#627a99;margin-top:3px"></div>
+  </div>
+</div>
+
+<div class="pp-curve-wrap">
+  <div class="pp-curve-title">Balance Curve</div>
+  <div class="pp-curve" id="pp-curve">
+    <div style="color:#627a99;font-size:12px;padding:8px">Loading...</div>
+  </div>
+</div>
+
 <div class="card" style="margin-bottom:16px">
-  <div style="font-size:14px;font-weight:700;margin-bottom:12px;color:#eaf2ff">Open Positions (<span id="pt-open-cnt">—</span>)</div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+    <div style="font-size:13px;font-weight:700;color:#eaf2ff">
+      Open Positions <span id="pp-open-cnt" style="color:#ffd84d;font-size:13px">(—)</span>
+    </div>
+  </div>
   <div style="overflow-x:auto">
   <table>
-  <thead><tr><th>OPENED</th><th>SYMBOL</th><th>SIDE</th><th>ENTRY</th><th>SL</th><th>TP1</th><th>CONF</th><th>RR</th></tr></thead>
-  <tbody id="pt-open-tbl"><tr><td colspan="8" style="text-align:center;color:#627a99;padding:18px">Loading...</td></tr></tbody>
+  <thead><tr>
+    <th>OPENED</th><th>SYMBOL</th><th>SIDE</th>
+    <th>ENTRY</th><th>SL</th><th>TP1</th><th>TP2</th><th>TP3</th>
+    <th>SIZE</th><th>STATUS</th>
+  </tr></thead>
+  <tbody id="pp-open-tbl">
+    <tr><td colspan="10" style="text-align:center;color:#627a99;padding:18px">Loading...</td></tr>
+  </tbody>
   </table>
   </div>
 </div>
+
 <div class="card">
-  <div style="font-size:14px;font-weight:700;margin-bottom:12px;color:#eaf2ff">Closed Trades</div>
+  <div style="font-size:13px;font-weight:700;color:#eaf2ff;margin-bottom:12px">Closed Trades</div>
   <div style="overflow-x:auto">
   <table>
-  <thead><tr><th>OPENED</th><th>SYMBOL</th><th>SIDE</th><th>ENTRY</th><th>STATUS</th><th>PNL%</th><th>PNL USDT</th></tr></thead>
-  <tbody id="pt-closed-tbl"><tr><td colspan="7" style="text-align:center;color:#627a99;padding:18px">Loading...</td></tr></tbody>
+  <thead><tr>
+    <th>OPENED</th><th>CLOSED</th><th>SYMBOL</th><th>SIDE</th>
+    <th>ENTRY</th><th>SL</th><th>TP1</th>
+    <th>SIZE</th><th>STATUS</th><th>PNL %</th><th>PNL USDT</th>
+  </tr></thead>
+  <tbody id="pp-closed-tbl">
+    <tr><td colspan="11" style="text-align:center;color:#627a99;padding:18px">Loading...</td></tr>
+  </tbody>
   </table>
   </div>
-</div>"""
+</div>
+"""
     js = """
-function pct(v){return(v>=0?'+':'')+v+'%';}
-function cls(v){return v>=0?'g':'r';}
-function sBadge(st){
-  if(st==='OPEN')return '<span class="bopen">OPEN</span>';
-  if(st==='SL')return '<span class="bsl">SL</span>';
-  if(st==='EXPIRED')return '<span class="bexp">EXP</span>';
-  return '<span class="btp">'+st+'</span>';
+function _p(v){return(v>=0?'+':'')+v+'%';}
+function _cls(v){return v>=0?'g':'r';}
+function _u(v){return(v>=0?'+$':'−$')+Math.abs(v).toFixed(2);}
+function _badge(st){
+  if(st==='OPEN')  return '<span class="bopen">OPEN</span>';
+  if(st==='SL')    return '<span class="bsl">SL</span>';
+  if(['TP1','TP2','TP3'].includes(st)) return '<span class="btp">'+st+'</span>';
+  return '<span class="bexp">'+st+'</span>';
 }
+function _side(s){ return s==='LONG'?'<span class="bl2">LONG</span>':'<span class="bs2">SHORT</span>'; }
+
 async function load(){
-  const r=await fetch('/api/public/paper');
-  if(!r.ok)return;
-  const d=await r.json();
-  if(d.error)return;
-  document.getElementById('pt-bal').textContent='$'+d.current_balance.toFixed(2);
-  const pEl=document.getElementById('pt-pnl');
-  pEl.textContent=(d.total_pnl_usdt>=0?'+$':'−$')+Math.abs(d.total_pnl_usdt).toFixed(2);
-  pEl.className='sval '+(d.total_pnl_usdt>=0?'g':'r');
-  document.getElementById('pt-wr').textContent=d.win_rate+'%';
-  document.getElementById('pt-open').textContent=d.open_count;
-  document.getElementById('pt-open-cnt').textContent=d.open_count;
-  document.getElementById('pt-open-tbl').innerHTML=(d.open||[]).map(x=>
-    '<tr><td>'+x.opened+'</td><td><b><a href="/signal/'+x.id+'" style="color:#20e6c3">'+x.symbol+'</a></b></td>'+
-    '<td><span class="'+(x.side==='LONG'?'bl2':'bs2')+'">'+x.side+'</span></td>'+
-    '<td>'+x.entry+'</td><td class="r">'+x.sl+'</td><td class="g">'+x.tp1+'</td>'+
-    '<td>'+x.conf+'%</td><td>1:'+x.rr+'</td></tr>'
-  ).join('')||'<tr><td colspan="8" style="text-align:center;color:#627a99;padding:14px">No open positions</td></tr>';
-  document.getElementById('pt-closed-tbl').innerHTML=(d.closed||[]).map(x=>
-    '<tr><td>'+x.opened+'</td><td><b><a href="/signal/'+x.id+'" style="color:#20e6c3">'+x.symbol+'</a></b></td>'+
-    '<td><span class="'+(x.side==='LONG'?'bl2':'bs2')+'">'+x.side+'</span></td>'+
-    '<td>'+x.entry+'</td><td>'+sBadge(x.status)+'</td>'+
-    '<td class="'+cls(x.pnl_pct)+'">'+pct(x.pnl_pct)+'</td>'+
-    '<td class="'+cls(x.pnl_usdt)+'">'+(x.pnl_usdt>=0?'+$':'−$')+Math.abs(x.pnl_usdt).toFixed(2)+'</td></tr>'
-  ).join('')||'<tr><td colspan="7" style="text-align:center;color:#627a99;padding:14px">No closed trades yet</td></tr>';
+  try{
+    const r=await fetch('/api/paper');
+    if(!r.ok)return;
+    const d=await r.json();
+    if(d.error)return;
+
+    // KPI
+    document.getElementById('pp-bal').textContent='$'+(d.current_balance||0).toFixed(2);
+    document.getElementById('pp-bal-sub').textContent='started $'+(d.initial_balance||10000).toFixed(0);
+    const pEl=document.getElementById('pp-pnl');
+    pEl.textContent=_u(d.total_pnl_usdt||0);
+    pEl.className='pp-kval '+_cls(d.total_pnl_usdt||0);
+    document.getElementById('pp-pnl-pct').textContent=_p(d.total_pnl_pct||0);
+    const wrEl=document.getElementById('pp-wr');
+    wrEl.textContent=(d.win_rate||0)+'%';
+    wrEl.className='pp-kval '+(d.win_rate>=50?'g':'r');
+    document.getElementById('pp-wr-sub').textContent=(d.wins||0)+'W / '+(d.losses||0)+'L';
+    document.getElementById('pp-open').textContent=d.open_count||0;
+    document.getElementById('pp-open-cnt').textContent='('+d.open_count+')';
+    document.getElementById('pp-closed').textContent=d.closed_count||0;
+    document.getElementById('pp-wl').textContent=(d.wins||0)+'W / '+(d.losses||0)+'L';
+
+    // Balance curve
+    const curve=d.balance_curve||[];
+    if(curve.length>1){
+      const mn=Math.min(...curve),mx=Math.max(...curve),range=mx-mn||1;
+      document.getElementById('pp-curve').innerHTML=curve.map(v=>{
+        const h=Math.max(4,Math.round((v-mn)/range*66));
+        const col=v>=d.initial_balance?'#20ff80':'#ff4f61';
+        return`<div class="pp-curve-bar" style="height:${h}px;background:${col}"></div>`;
+      }).join('');
+    }else{
+      document.getElementById('pp-curve').innerHTML=
+        '<p style="color:#627a99;font-size:12px">Not enough closed trades yet</p>';
+    }
+
+    // Open positions
+    const empty10='<tr><td colspan="10" style="text-align:center;color:#627a99;padding:14px">No open positions</td></tr>';
+    document.getElementById('pp-open-tbl').innerHTML=(d.open||[]).map(x=>`<tr>
+      <td>${x.opened_at||'—'}</td>
+      <td><b><a href="/signal/${x.signal_id||x.id}" style="color:#20e6c3">${x.symbol}</a></b></td>
+      <td>${_side(x.side)}</td>
+      <td class="c">${x.entry_price}</td>
+      <td class="r">${x.stop_loss}</td>
+      <td class="g">${x.tp1}</td>
+      <td class="g">${x.tp2||'—'}</td>
+      <td class="g">${x.tp3||'—'}</td>
+      <td style="color:#ffd84d">$${x.size_usdt}</td>
+      <td>${_badge(x.status)}</td>
+    </tr>`).join('')||empty10;
+
+    // Closed trades
+    const empty11='<tr><td colspan="11" style="text-align:center;color:#627a99;padding:14px">No closed trades yet</td></tr>';
+    document.getElementById('pp-closed-tbl').innerHTML=(d.closed||[]).map(x=>`<tr>
+      <td>${x.opened_at||'—'}</td>
+      <td>${x.closed_at||'—'}</td>
+      <td><b><a href="/signal/${x.signal_id||x.id}" style="color:#20e6c3">${x.symbol}</a></b></td>
+      <td>${_side(x.side)}</td>
+      <td class="c">${x.entry_price}</td>
+      <td class="r">${x.stop_loss}</td>
+      <td class="g">${x.tp1}</td>
+      <td style="color:#ffd84d">$${x.size_usdt}</td>
+      <td>${_badge(x.status)}</td>
+      <td class="${_cls(x.pnl_pct)}">${_p(x.pnl_pct)}</td>
+      <td class="${_cls(x.pnl_usdt)}">${_u(x.pnl_usdt)}</td>
+    </tr>`).join('')||empty11;
+
+  }catch(e){console.error('paper load error',e);}
 }
 document.addEventListener('DOMContentLoaded',()=>{load();setInterval(load,15000);});
 """
-    return _page_shell("Paper Trading", body, extra_js=js)
+    return _page_shell("Paper Trading", body, extra_css=css, extra_js=js)
 
 
 def _backtest_page_html() -> str:
