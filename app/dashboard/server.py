@@ -552,11 +552,115 @@ async def api_public_paper():
         return JSONResponse({"error": str(exc)}, status_code=500)
 
 
-@app.get("/api/public/backtest")
-async def api_public_backtest():
-    """Backtest metrics computed from all closed MTF signals in the database."""
-    import math as _math
+def _compute_backtest(signals: list) -> dict:
+    """
+    Core backtest computation — pure function, no DB calls.
+    Called by both GET /api/backtest and GET /api/public/backtest.
+    strategy = MTF_SMC_STRICT · timeframe IN (15m/1h/4h/1d) · closed only.
+    """
+    import math as _m
+    from collections import defaultdict as _dd
 
+    _EMPTY = {
+        "total": 0, "wins": 0, "losses": 0,
+        "win_rate": 0.0, "profit_factor": 0.0,
+        "max_drawdown": 0.0, "max_drawdown_pct": 0.0,
+        "sharpe_ratio": 0.0, "avg_rr": 0.0, "avg_pnl": 0.0,
+        "total_pnl": 0.0, "rr_distribution": [],
+        "equity_curve": [0.0], "monthly": [],
+    }
+    if not signals:
+        return _EMPTY
+
+    WIN_ST = ("TP1", "TP2", "TP3")
+    wins   = [s for s in signals if s.status in WIN_ST]
+    losses = [s for s in signals if s.status == "SL"]
+    pnls   = [float(s.pnl_pct   or 0) for s in signals]
+    rrs    = [float(s.risk_reward or 0) for s in signals]
+    n      = len(signals)
+
+    # ── core metrics ──────────────────────────────────────────────
+    gross_win  = sum(p for p in pnls if p > 0)
+    gross_loss = abs(sum(p for p in pnls if p < 0))
+    profit_factor = round(gross_win / gross_loss, 2) if gross_loss > 0 else None
+
+    mean_pnl = sum(pnls) / max(1, n)
+    sharpe   = 0.0
+    if n > 1:
+        var = sum((p - mean_pnl) ** 2 for p in pnls) / n
+        sharpe = round(mean_pnl / max(0.001, _m.sqrt(var)), 2)
+
+    # ── equity curve (cumulative PnL %) + max drawdown ───────────
+    cum = peak = max_dd = 0.0
+    equity_curve = [0.0]
+    for p in pnls:
+        cum   = round(cum + p, 2)
+        equity_curve.append(cum)
+        if cum > peak:
+            peak = cum
+        dd = peak - cum
+        if dd > max_dd:
+            max_dd = dd
+
+    # ── RR distribution ───────────────────────────────────────────
+    rr_buckets: dict = {}
+    for rr in rrs:
+        b = f"{_m.floor(rr * 2) / 2:.1f}"
+        rr_buckets[b] = rr_buckets.get(b, 0) + 1
+    rr_dist = sorted(
+        [{"rr": k, "count": v} for k, v in rr_buckets.items()],
+        key=lambda x: float(x["rr"])
+    )
+
+    # ── monthly breakdown ─────────────────────────────────────────
+    mo_map: dict = _dd(list)
+    for s in signals:
+        if s.created_at:
+            mo_map[s.created_at.strftime("%Y-%m")].append(s)
+
+    monthly_rows = []
+    for month, msigs in sorted(mo_map.items()):
+        mw   = [s for s in msigs if s.status in WIN_ST]
+        ml   = [s for s in msigs if s.status == "SL"]
+        mp   = [float(s.pnl_pct or 0) for s in msigs]
+        mn   = max(1, len(msigs))
+        mgw  = sum(p for p in mp if p > 0)
+        mgl  = abs(sum(p for p in mp if p < 0))
+        m_pf = round(mgw / mgl, 2) if mgl > 0 else None
+        monthly_rows.append({
+            "month":         month,
+            "signals":       len(msigs),
+            "wins":          len(mw),
+            "losses":        len(ml),
+            "win_rate":      round(len(mw) / mn * 100, 1),
+            "total_pnl":     round(sum(mp), 2),
+            "profit_factor": m_pf,
+        })
+
+    return {
+        "total":            n,
+        "wins":             len(wins),
+        "losses":           len(losses),
+        "win_rate":         round(len(wins) / n * 100, 1),
+        "profit_factor":    profit_factor,
+        "max_drawdown":     round(max_dd, 2),
+        "max_drawdown_pct": round(max_dd, 2),   # backward-compat alias
+        "sharpe_ratio":     sharpe,
+        "avg_rr":           round(sum(rrs) / max(1, n), 2),
+        "avg_pnl":          round(mean_pnl, 2),
+        "total_pnl":        round(sum(pnls), 2),
+        "rr_distribution":  rr_dist,
+        "equity_curve":     equity_curve[-61:],  # max 61 points (60 trades + start)
+        "monthly":          monthly_rows,
+    }
+
+
+@app.get("/api/backtest")
+async def api_backtest():
+    """
+    Sprint 7 canonical backtest endpoint.
+    strategy = MTF_SMC_STRICT · timeframe IN (15m/1h/4h/1d) · closed only.
+    """
     try:
         async with SessionLocal() as session:
             res = await session.execute(
@@ -569,82 +673,27 @@ async def api_public_backtest():
                 .order_by(Signal.created_at)
             )
             signals = list(res.scalars().all())
+        return JSONResponse(_compute_backtest(signals))
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
 
-        if not signals:
-            return JSONResponse({
-                "total": 0, "wins": 0, "losses": 0,
-                "win_rate": 0, "profit_factor": 0,
-                "sharpe_ratio": 0, "max_drawdown_pct": 0,
-                "avg_rr": 0, "rr_distribution": [],
-            })
 
-        wins = [s for s in signals if s.status in ("TP1", "TP2", "TP3")]
-        losses = [s for s in signals if s.status == "SL"]
-        pnls = [float(s.pnl_pct or 0) for s in signals]
-        rrs = [float(s.risk_reward or 0) for s in signals]
-
-        gross_win = sum(p for p in pnls if p > 0)
-        gross_loss = abs(sum(p for p in pnls if p < 0))
-        profit_factor = round(gross_win / max(0.001, gross_loss), 2)
-
-        mean_pnl = sum(pnls) / max(1, len(pnls))
-        if len(pnls) > 1:
-            variance = sum((p - mean_pnl) ** 2 for p in pnls) / len(pnls)
-            sharpe = round(mean_pnl / max(0.001, _math.sqrt(variance)), 2)
-        else:
-            sharpe = 0.0
-
-        cum = peak = max_dd = 0.0
-        equity_curve = []
-        for p in pnls:
-            cum += p
-            equity_curve.append(round(cum, 2))
-            if cum > peak:
-                peak = cum
-            dd = peak - cum
-            if dd > max_dd:
-                max_dd = dd
-
-        # RR distribution: bucket into ranges
-        rr_buckets: dict = {}
-        for rr in rrs:
-            bucket = f"{_math.floor(rr * 2) / 2:.1f}"
-            rr_buckets[bucket] = rr_buckets.get(bucket, 0) + 1
-        rr_dist = sorted(
-            [{"rr": k, "count": v} for k, v in rr_buckets.items()],
-            key=lambda x: float(x["rr"])
-        )
-
-        # Monthly breakdown
-        monthly: dict = {}
-        for s in signals:
-            if s.created_at:
-                mo = s.created_at.strftime("%Y-%m")
-                monthly.setdefault(mo, {"wins": 0, "losses": 0, "pnl": 0.0})
-                if s.status in ("TP1", "TP2", "TP3"):
-                    monthly[mo]["wins"] += 1
-                else:
-                    monthly[mo]["losses"] += 1
-                monthly[mo]["pnl"] = round(monthly[mo]["pnl"] + float(s.pnl_pct or 0), 2)
-        monthly_list = sorted(
-            [{"month": k, **v} for k, v in monthly.items()],
-            key=lambda x: x["month"]
-        )
-
-        return JSONResponse({
-            "total": len(signals),
-            "wins": len(wins),
-            "losses": len(losses),
-            "win_rate": round(len(wins) / max(1, len(signals)) * 100, 1),
-            "profit_factor": profit_factor,
-            "sharpe_ratio": sharpe,
-            "max_drawdown_pct": round(max_dd, 2),
-            "avg_rr": round(sum(rrs) / max(1, len(rrs)), 2),
-            "avg_pnl": round(mean_pnl, 2),
-            "rr_distribution": rr_dist,
-            "monthly": monthly_list,
-            "equity_curve": equity_curve[-60:],
-        })
+@app.get("/api/public/backtest")
+async def api_public_backtest():
+    """Backward-compat alias → delegates to _compute_backtest()."""
+    try:
+        async with SessionLocal() as session:
+            res = await session.execute(
+                select(Signal)
+                .where(
+                    Signal.strategy == _MTF_STRATEGY,
+                    Signal.timeframe.in_(_MTF_TIMEFRAMES),
+                    Signal.status.in_(["TP1", "TP2", "TP3", "SL"]),
+                )
+                .order_by(Signal.created_at)
+            )
+            signals = list(res.scalars().all())
+        return JSONResponse(_compute_backtest(signals))
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=500)
 
@@ -2488,90 +2537,203 @@ document.addEventListener('DOMContentLoaded',()=>{load();setInterval(load,15000)
 
 
 def _backtest_page_html() -> str:
+    css = """
+/* ── backtest engine ──────────────────────────────────────── */
+.bk-header{margin-bottom:20px}
+.bk-title{font-size:26px;font-weight:900;letter-spacing:1px;color:#eaf2ff}
+.bk-subtitle{font-size:12px;color:#7fa0c8;margin-top:4px;letter-spacing:1px}
+.bk-kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
+.bk-kcard{background:linear-gradient(180deg,#101827,#0b1320);border:1px solid #17314b;
+  border-radius:12px;padding:15px;text-align:center}
+.bk-klbl{font-size:9px;color:#7fa0c8;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px}
+.bk-kval{font-size:24px;font-weight:900}
+.bk-2col{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+.bk-sec-title{font-size:11px;font-weight:700;color:#7fa0c8;letter-spacing:2px;
+  text-transform:uppercase;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #17314b}
+.bk-row{display:flex;justify-content:space-between;padding:8px 0;
+  border-bottom:1px solid #0e1e2e;font-size:13px}
+.bk-row:last-child{border-bottom:none}
+.bk-rlbl{color:#7fa0c8;font-size:12px}
+.bk-rval{font-weight:700;color:#eaf2ff}
+.bk-curve{display:flex;align-items:flex-end;gap:2px;height:90px;overflow:hidden;margin-top:4px}
+.bk-no-data{color:#627a99;font-size:13px;padding:24px;text-align:center}
+@media(max-width:720px){.bk-kpi{grid-template-columns:repeat(2,1fr)}.bk-2col{grid-template-columns:1fr}}
+"""
     body = """
-<div class="page-title">Backtest Engine</div>
-<div class="sbar">
-  <div class="scard"><div class="slabel">WIN RATE</div><div id="bt-wr" class="sval g">—</div></div>
-  <div class="scard"><div class="slabel">PROFIT FACTOR</div><div id="bt-pf" class="sval c">—</div></div>
-  <div class="scard"><div class="slabel">MAX DRAWDOWN</div><div id="bt-dd" class="sval r">—</div></div>
-  <div class="scard"><div class="slabel">SHARPE RATIO</div><div id="bt-sh" class="sval y">—</div></div>
+<div class="bk-header">
+  <div class="bk-title">BACKTEST ENGINE</div>
+  <div class="bk-subtitle">MTF STRATEGY ONLY &nbsp;·&nbsp; strategy = MTF_SMC_STRICT &nbsp;·&nbsp; Closed signals</div>
 </div>
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:4px">
+
+<div class="bk-kpi">
+  <div class="bk-kcard">
+    <div class="bk-klbl">Total Trades</div>
+    <div id="bk-total" class="bk-kval w">—</div>
+    <div id="bk-wl-sub" style="font-size:10px;color:#627a99;margin-top:3px"></div>
+  </div>
+  <div class="bk-kcard">
+    <div class="bk-klbl">Win Rate</div>
+    <div id="bk-wr" class="bk-kval g">—</div>
+  </div>
+  <div class="bk-kcard">
+    <div class="bk-klbl">Profit Factor</div>
+    <div id="bk-pf" class="bk-kval c">—</div>
+  </div>
+  <div class="bk-kcard">
+    <div class="bk-klbl">Max Drawdown</div>
+    <div id="bk-dd" class="bk-kval r">—</div>
+  </div>
+  <div class="bk-kcard">
+    <div class="bk-klbl">Sharpe Ratio</div>
+    <div id="bk-sh" class="bk-kval y">—</div>
+  </div>
+  <div class="bk-kcard">
+    <div class="bk-klbl">Avg RR</div>
+    <div id="bk-rr" class="bk-kval y">—</div>
+  </div>
+  <div class="bk-kcard">
+    <div class="bk-klbl">Avg PnL / Trade</div>
+    <div id="bk-pnl" class="bk-kval g">—</div>
+  </div>
+  <div class="bk-kcard">
+    <div class="bk-klbl">Total PnL</div>
+    <div id="bk-tpnl" class="bk-kval g">—</div>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:16px">
+  <div class="bk-sec-title">Equity Curve <span style="font-size:9px;color:#627a99">(Cumulative PnL %)</span></div>
+  <div id="bk-curve" class="bk-curve">
+    <div class="bk-no-data">Loading...</div>
+  </div>
+  <div id="bk-curve-lbl" style="display:flex;justify-content:space-between;font-size:10px;color:#627a99;margin-top:6px">
+    <span>Trade 1</span><span id="bk-curve-end"></span>
+  </div>
+</div>
+
+<div class="bk-2col">
   <div class="card">
-    <div style="font-size:14px;font-weight:700;margin-bottom:12px;color:#eaf2ff">Summary</div>
-    <table style="font-size:13px"><tbody id="bt-summary">
-      <tr><td colspan="2" style="color:#627a99;padding:14px;text-align:center">Loading...</td></tr>
-    </tbody></table>
+    <div class="bk-sec-title">Summary Statistics</div>
+    <div id="bk-summary"><div class="bk-no-data">Loading...</div></div>
   </div>
   <div class="card">
-    <div style="font-size:14px;font-weight:700;margin-bottom:12px;color:#eaf2ff">RR Distribution</div>
-    <div id="bt-rr-dist" style="color:#627a99;padding:14px;text-align:center">Loading...</div>
+    <div class="bk-sec-title">RR Distribution</div>
+    <div id="bk-rr-dist"><div class="bk-no-data">Loading...</div></div>
   </div>
 </div>
-<div class="card" style="margin-top:16px">
-  <div style="font-size:14px;font-weight:700;margin-bottom:12px;color:#eaf2ff">Monthly Breakdown</div>
+
+<div class="card">
+  <div class="bk-sec-title">Monthly Results</div>
   <div style="overflow-x:auto">
   <table>
-  <thead><tr><th>MONTH</th><th>WINS</th><th>LOSSES</th><th>NET PNL</th></tr></thead>
-  <tbody id="bt-monthly"><tr><td colspan="4" style="text-align:center;color:#627a99;padding:18px">Loading...</td></tr></tbody>
+  <thead><tr>
+    <th>MONTH</th><th>SIGNALS</th><th>WINS</th><th>LOSSES</th>
+    <th>WIN RATE</th><th>TOTAL PNL</th><th>PROFIT FACTOR</th>
+  </tr></thead>
+  <tbody id="bk-monthly">
+    <tr><td colspan="7" style="text-align:center;color:#627a99;padding:18px">Loading...</td></tr>
+  </tbody>
   </table>
   </div>
 </div>
-<div class="card" style="margin-top:16px">
-  <div style="font-size:14px;font-weight:700;margin-bottom:12px;color:#eaf2ff">Cumulative PnL Curve</div>
-  <div id="bt-curve" style="height:80px;display:flex;align-items:flex-end;gap:2px;overflow:hidden"></div>
-</div>"""
-    js = """
-function pct(v){return(v>=0?'+':'')+v+'%';}
-function cls(v){return v>=0?'g':'r';}
-async function load(){
-  const r=await fetch('/api/public/backtest');
-  if(!r.ok)return;
-  const d=await r.json();
-  if(d.error)return;
-  document.getElementById('bt-wr').textContent=d.win_rate+'%';
-  document.getElementById('bt-pf').textContent=d.profit_factor;
-  document.getElementById('bt-dd').textContent=pct(d.max_drawdown_pct);
-  document.getElementById('bt-sh').textContent=d.sharpe_ratio;
-  document.getElementById('bt-summary').innerHTML=`
-    <tr><td style="color:#8fa8c7;padding:6px 14px 6px 0">Total Signals</td><td>${d.total}</td></tr>
-    <tr><td style="color:#8fa8c7;padding:6px 14px 6px 0">Wins</td><td class="g">${d.wins}</td></tr>
-    <tr><td style="color:#8fa8c7;padding:6px 14px 6px 0">Losses</td><td class="r">${d.losses}</td></tr>
-    <tr><td style="color:#8fa8c7;padding:6px 14px 6px 0">Avg PnL/Trade</td><td class="${cls(d.avg_pnl)}">${pct(d.avg_pnl)}</td></tr>
-    <tr><td style="color:#8fa8c7;padding:6px 14px 6px 0">Avg RR</td><td>1:${d.avg_rr}</td></tr>
-  `;
-  // RR dist bars
-  const rrd=d.rr_distribution||[];
-  const maxC=Math.max(1,...rrd.map(x=>x.count));
-  document.getElementById('bt-rr-dist').innerHTML=rrd.map(x=>`
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:12px">
-      <div style="width:40px;color:#8fa8c7;text-align:right">1:${x.rr}</div>
-      <div style="flex:1;background:#0b1320;border-radius:3px;height:14px;overflow:hidden">
-        <div style="background:linear-gradient(90deg,#08a98f,#20f0c0);width:${Math.round(x.count/maxC*100)}%;height:100%"></div>
-      </div>
-      <div style="width:24px;color:#eaf2ff">${x.count}</div>
-    </div>`).join('')||'<p style="color:#627a99">No data</p>';
-  // Monthly table
-  document.getElementById('bt-monthly').innerHTML=(d.monthly||[]).reverse().map(m=>
-    '<tr><td>'+m.month+'</td><td class="g">'+m.wins+'</td><td class="r">'+m.losses+'</td>'+
-    '<td class="'+cls(m.pnl)+'">'+(m.pnl>=0?'+':'')+m.pnl+'%</td></tr>'
-  ).join('')||'<tr><td colspan="4" style="text-align:center;color:#627a99;padding:14px">No data</td></tr>';
-  // Equity curve
-  const curve=d.equity_curve||[];
-  if(curve.length>1){
-    const mn=Math.min(...curve),mx=Math.max(...curve),range=mx-mn||1;
-    const cols=curve.map(v=>{
-      const h=Math.max(4,Math.round((v-mn)/range*76));
-      return`<div style="flex:1;min-width:2px;height:${h}px;background:${v>=0?'#20ff80':'#ff4f61'};border-radius:1px 1px 0 0;opacity:0.8"></div>`;
-    }).join('');
-    document.getElementById('bt-curve').innerHTML=cols;
-  }else{
-    document.getElementById('bt-curve').innerHTML='<p style="color:#627a99;padding:14px">Not enough data</p>';
-  }
-}
-document.addEventListener('DOMContentLoaded',load);
 """
-    return _page_shell("Backtest Engine", body, extra_js=js)
+    js = """
+function _p(v){ return v===null||v===undefined?'—':(v>=0?'+':'')+v+'%'; }
+function _cls(v){ return v>=0?'g':'r'; }
+function _pf(v){ return v===null||v===undefined?'∞':v; }
+
+async function load(){
+  try{
+    const r = await fetch('/api/backtest');
+    if(!r.ok) return;
+    const d = await r.json();
+    if(d.error) return;
+
+    const noData = (d.total||0) === 0;
+
+    // KPI
+    document.getElementById('bk-total').textContent = d.total||0;
+    document.getElementById('bk-wl-sub').textContent = (d.wins||0)+'W / '+(d.losses||0)+'L';
+    const wrEl = document.getElementById('bk-wr');
+    wrEl.textContent = (d.win_rate||0)+'%';
+    wrEl.className = 'bk-kval ' + (d.win_rate>=50?'g':'r');
+    document.getElementById('bk-pf').textContent = _pf(d.profit_factor);
+    document.getElementById('bk-dd').textContent = _p(-(d.max_drawdown||0));
+    document.getElementById('bk-sh').textContent = d.sharpe_ratio||0;
+    document.getElementById('bk-rr').textContent = d.avg_rr?'1:'+d.avg_rr:'—';
+    const pnlEl = document.getElementById('bk-pnl');
+    pnlEl.textContent = _p(d.avg_pnl);
+    pnlEl.className = 'bk-kval ' + _cls(d.avg_pnl||0);
+    const tEl = document.getElementById('bk-tpnl');
+    tEl.textContent = _p(d.total_pnl);
+    tEl.className = 'bk-kval ' + _cls(d.total_pnl||0);
+
+    // Equity curve
+    const curve = d.equity_curve||[];
+    if(curve.length > 1){
+      const mn = Math.min(...curve), mx = Math.max(...curve), range = mx-mn||1;
+      document.getElementById('bk-curve').innerHTML = curve.map(v=>{
+        const h = Math.max(3, Math.round((v-mn)/range*86));
+        const col = v >= 0 ? '#20ff80' : '#ff4f61';
+        return `<div style="flex:1;min-width:2px;height:${h}px;background:${col};
+          border-radius:1px 1px 0 0;opacity:0.85"></div>`;
+      }).join('');
+      document.getElementById('bk-curve-end').textContent = 'Trade '+( curve.length-1);
+    } else {
+      document.getElementById('bk-curve').innerHTML =
+        '<div class="bk-no-data">Not enough data</div>';
+    }
+
+    // Summary
+    document.getElementById('bk-summary').innerHTML = noData
+      ? '<div class="bk-no-data">No closed trades yet</div>'
+      : `<div class="bk-row"><span class="bk-rlbl">Total Trades</span><span class="bk-rval">${d.total}</span></div>
+         <div class="bk-row"><span class="bk-rlbl">Wins</span><span class="bk-rval g">${d.wins}</span></div>
+         <div class="bk-row"><span class="bk-rlbl">Losses</span><span class="bk-rval r">${d.losses}</span></div>
+         <div class="bk-row"><span class="bk-rlbl">Win Rate</span><span class="bk-rval ${_cls(d.win_rate-50)}">${d.win_rate}%</span></div>
+         <div class="bk-row"><span class="bk-rlbl">Profit Factor</span><span class="bk-rval c">${_pf(d.profit_factor)}</span></div>
+         <div class="bk-row"><span class="bk-rlbl">Sharpe Ratio</span><span class="bk-rval y">${d.sharpe_ratio}</span></div>
+         <div class="bk-row"><span class="bk-rlbl">Max Drawdown</span><span class="bk-rval r">${_p(-d.max_drawdown)}</span></div>
+         <div class="bk-row"><span class="bk-rlbl">Avg RR</span><span class="bk-rval y">1:${d.avg_rr}</span></div>
+         <div class="bk-row"><span class="bk-rlbl">Avg PnL / Trade</span><span class="bk-rval ${_cls(d.avg_pnl)}">${_p(d.avg_pnl)}</span></div>
+         <div class="bk-row"><span class="bk-rlbl">Total PnL</span><span class="bk-rval ${_cls(d.total_pnl)}">${_p(d.total_pnl)}</span></div>`;
+
+    // RR distribution
+    const rrd = d.rr_distribution||[];
+    const maxC = Math.max(1, ...rrd.map(x=>x.count));
+    document.getElementById('bk-rr-dist').innerHTML = rrd.length
+      ? rrd.map(x=>`
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:12px">
+            <div style="width:36px;color:#8fa8c7;text-align:right;font-weight:700">1:${x.rr}</div>
+            <div style="flex:1;background:#0b1320;border-radius:4px;height:14px;overflow:hidden">
+              <div style="background:linear-gradient(90deg,#08a98f,#20f0c0);
+                width:${Math.round(x.count/maxC*100)}%;height:100%;border-radius:4px"></div>
+            </div>
+            <div style="width:28px;color:#eaf2ff;font-weight:700;text-align:right">${x.count}</div>
+          </div>`).join('')
+      : '<div class="bk-no-data">No data</div>';
+
+    // Monthly table
+    const mo = (d.monthly||[]).slice().reverse();
+    const moEmpty = '<tr><td colspan="7" style="text-align:center;color:#627a99;padding:14px">No monthly data</td></tr>';
+    document.getElementById('bk-monthly').innerHTML = mo.length
+      ? mo.map(m=>`<tr>
+          <td>${m.month}</td>
+          <td>${m.signals}</td>
+          <td class="g">${m.wins}</td>
+          <td class="r">${m.losses}</td>
+          <td class="${m.win_rate>=50?'g':'r'}">${m.win_rate}%</td>
+          <td class="${_cls(m.total_pnl)}">${_p(m.total_pnl)}</td>
+          <td class="c">${_pf(m.profit_factor)}</td>
+        </tr>`).join('')
+      : moEmpty;
+
+  }catch(e){ console.error('backtest load error', e); }
+}
+
+document.addEventListener('DOMContentLoaded', load);
+"""
+    return _page_shell("Backtest Engine", body, extra_css=css, extra_js=js)
 
 
 def create_app():
