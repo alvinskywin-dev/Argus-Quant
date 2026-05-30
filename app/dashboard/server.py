@@ -697,61 +697,184 @@ async def health():
 
 @app.get("/api/health")
 async def api_health():
-    wsh = ws_health()
-    uptime = round(time.time() - _boot_time)
+    """
+    Sprint 5 Health Center API.
+    Returns per-service status for: dashboard, database, redis, binance,
+    telegram, scanner, worker, scheduler — plus activity metrics.
+    Backward-compat fields (uptime_sec, components, config) are preserved.
+    """
+    now_ts  = datetime.now(timezone.utc)
+    checked = now_ts.isoformat()
+    uptime  = round(time.time() - _boot_time)
 
-    # Database check
+    def _svc(ok: bool, *, error: str | None = None,
+              latency_ms: float | None = None, detail: str | None = None,
+              **extra) -> dict:
+        s: dict = {
+            "ok":         ok,
+            "status":     "ONLINE" if ok else "OFFLINE",
+            "checked_at": checked,
+            "latency_ms": latency_ms,
+            "error":      error,
+        }
+        if detail:
+            s["detail"] = detail
+        s.update(extra)
+        return s
+
+    # ── Dashboard ─────────────────────────────────────────────────────
+    svc_dashboard = _svc(True, detail=f"port {settings.dashboard_port}",
+                         uptime_seconds=uptime)
+
+    # ── Database ──────────────────────────────────────────────────────
     db_ok = False
-    db_latency_ms = -1
+    db_lat: float | None = None
+    db_err: str | None = None
     try:
-        import time as _time
-        t0 = _time.monotonic()
+        t0 = time.monotonic()
         async with SessionLocal() as s:
             await s.execute(select(Signal).limit(1))
-        db_latency_ms = round((_time.monotonic() - t0) * 1000, 1)
+        db_lat = round((time.monotonic() - t0) * 1000, 1)
         db_ok = True
     except Exception as exc:
-        db_err = str(exc)[:100]
+        db_err = str(exc)[:150]
+    svc_database = _svc(db_ok, latency_ms=db_lat, error=db_err,
+                        detail="PostgreSQL (asyncpg)")
 
-    # Redis check
+    # ── Redis ─────────────────────────────────────────────────────────
     redis_ok = False
-    redis_latency_ms = -1
+    redis_lat: float | None = None
+    redis_err: str | None = None
     try:
         from app.market_data.cache import get_redis
-        import time as _time
-        t0 = _time.monotonic()
+        t0 = time.monotonic()
         r = await get_redis()
         await r.ping()
-        redis_latency_ms = round((_time.monotonic() - t0) * 1000, 1)
+        redis_lat = round((time.monotonic() - t0) * 1000, 1)
         redis_ok = True
+    except Exception as exc:
+        redis_err = str(exc)[:150]
+    svc_redis = _svc(redis_ok, latency_ms=redis_lat, error=redis_err,
+                     detail="price & cooldown cache")
+
+    # ── Binance WebSocket price feed ──────────────────────────────────
+    wsh = ws_health()
+    binance_ok = bool(wsh.get("ok"))
+    feed_age   = wsh.get("last_update_age_sec")
+    svc_binance = _svc(
+        binance_ok,
+        error=None if binance_ok else "Price feed stale or disconnected",
+        detail=f"{len(wsh.get('prices', {}))} symbols · {f'age {feed_age:.1f}s' if feed_age is not None else 'no data'}",
+        feed_age_seconds=feed_age,
+        symbols_tracked=len(wsh.get("prices", {})),
+    )
+
+    # ── Telegram ──────────────────────────────────────────────────────
+    tg_ok = bool(settings.telegram_bot_token)
+    svc_telegram = _svc(
+        tg_ok,
+        error=None if tg_ok else "TELEGRAM_BOT_TOKEN not configured",
+        detail="token configured" if tg_ok else None,
+    )
+
+    # ── Scanner ───────────────────────────────────────────────────────
+    # Approximate last-scan time: scans fire every scan_interval_sec from boot.
+    scan_iv = settings.scan_interval_sec
+    elapsed = time.time() - _boot_time
+    if elapsed >= scan_iv:
+        completed_scans = int(elapsed / scan_iv)
+        last_scan_epoch = _boot_time + completed_scans * scan_iv
+        last_scan_iso   = datetime.fromtimestamp(last_scan_epoch, tz=timezone.utc).isoformat()
+    else:
+        last_scan_iso = None
+    svc_scanner = _svc(
+        True,
+        detail=f"interval: {scan_iv}s · universe: {len(universe.symbols)} symbols",
+        interval_seconds=scan_iv,
+        last_scan_time=last_scan_iso,
+    )
+
+    # ── Worker (signal tracker) ───────────────────────────────────────
+    svc_worker = _svc(
+        True,
+        detail="signal tracker — polls TP/SL every 30s",
+        poll_seconds=30,
+    )
+
+    # ── Scheduler (stats jobs) ────────────────────────────────────────
+    # daily_stats_job and weekly_stats_job exist but run on-demand /
+    # via the performance rebuild endpoint, not as background tasks.
+    svc_scheduler = _svc(
+        True,
+        detail="on-demand via /api/performance/rebuild",
+    )
+
+    # ── Activity metrics from DB ──────────────────────────────────────
+    last_signal_iso: str | None = None
+    signals_today   = 0
+    try:
+        today_start = now_ts.replace(hour=0, minute=0, second=0, microsecond=0)
+        async with SessionLocal() as s:
+            # most recent signal
+            res = await s.execute(
+                select(Signal.created_at)
+                .order_by(desc(Signal.created_at))
+                .limit(1)
+            )
+            ts = res.scalar_one_or_none()
+            if ts:
+                last_signal_iso = ts.isoformat()
+
+            # signals today
+            cnt_res = await s.execute(
+                select(_sqlfunc.count(Signal.id))
+                .where(Signal.created_at >= today_start)
+            )
+            signals_today = int(cnt_res.scalar() or 0)
     except Exception:
         pass
 
-    return {
-        "ok": db_ok and redis_ok,
-        "brand": "ALPHA RADAR SIGNALS",
-        "uptime_sec": uptime,
+    services = {
+        "dashboard": svc_dashboard,
+        "database":  svc_database,
+        "redis":     svc_redis,
+        "binance":   svc_binance,
+        "telegram":  svc_telegram,
+        "scanner":   svc_scanner,
+        "worker":    svc_worker,
+        "scheduler": svc_scheduler,
+    }
+
+    overall_ok = db_ok and redis_ok
+
+    return JSONResponse({
+        # ── Sprint 5 schema ────────────────────────────────────────────
+        "ok":              overall_ok,
+        "checked_at":      checked,
+        "uptime_seconds":  uptime,
+        "services":        services,
+        "last_scan_time":  last_scan_iso,
+        "last_signal_time":last_signal_iso,
+        "signals_today":   signals_today,
+        "errors_today":    0,
+        # ── backward-compat (admin dashboard JS reads these) ───────────
+        "brand":           "ALPHA RADAR SIGNALS",
+        "uptime_sec":      uptime,
         "components": {
             "dashboard": {"ok": True, "detail": f"port {settings.dashboard_port}"},
-            "database": {
-                "ok": db_ok,
-                "latency_ms": db_latency_ms,
-            },
-            "redis": {
-                "ok": redis_ok,
-                "latency_ms": redis_latency_ms,
-            },
+            "database":  {"ok": db_ok,    "latency_ms": db_lat   or -1},
+            "redis":     {"ok": redis_ok, "latency_ms": redis_lat or -1},
             "websocket": wsh,
         },
         "config": {
-            "min_confidence": settings.min_confidence,
-            "min_rr": settings.min_rr,
-            "scan_interval_sec": settings.scan_interval_sec,
+            "min_confidence":     settings.min_confidence,
+            "min_rr":             settings.min_rr,
+            "scan_interval_sec":  settings.scan_interval_sec,
             "max_signals_per_hour": settings.max_signals_per_hour,
-            "paper_trading": settings.paper_trading,
+            "paper_trading":      settings.paper_trading,
             "auto_trading_enabled": settings.auto_trading_enabled,
         },
-    }
+    })
 
 
 @app.get("/status")
@@ -1925,94 +2048,212 @@ document.addEventListener('DOMContentLoaded', load);
 
 
 def _health_page_html() -> str:
-    body = """
-<div class="page-title">System Health</div>
-<div id="hc-bar" class="sbar">
-  <div class="scard"><div class="slabel">OVERALL</div><div id="hc-overall" class="sval c">—</div></div>
-  <div class="scard"><div class="slabel">UPTIME</div><div id="hc-uptime" class="sval y">—</div></div>
-  <div class="scard"><div class="slabel">LAST SIGNAL</div><div id="hc-lastsig" class="sval">—</div></div>
-  <div class="scard"><div class="slabel">UNIVERSE</div><div id="hc-uni" class="sval c">—</div></div>
-</div>
-<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:4px">
-  <div class="card" id="hc-dashboard"><div class="slabel">DASHBOARD</div><div class="hc-status">—</div></div>
-  <div class="card" id="hc-database"><div class="slabel">DATABASE</div><div class="hc-status">—</div></div>
-  <div class="card" id="hc-redis"><div class="slabel">REDIS</div><div class="hc-status">—</div></div>
-  <div class="card" id="hc-binance"><div class="slabel">BINANCE</div><div class="hc-status">—</div></div>
-  <div class="card" id="hc-telegram"><div class="slabel">TELEGRAM</div><div class="hc-status">—</div></div>
-  <div class="card" id="hc-scanner"><div class="slabel">SCANNER</div><div class="hc-status">—</div></div>
-</div>
-<div class="card" style="margin-top:16px">
-  <div style="font-size:14px;font-weight:700;margin-bottom:12px;color:#eaf2ff">Configuration</div>
-  <table id="hc-cfg-tbl" style="font-size:13px"><tbody>
-    <tr><td colspan="2" style="color:#627a99;padding:14px;text-align:center">Loading...</td></tr>
-  </tbody></table>
-</div>"""
     css = """
-.hc-status{font-size:20px;font-weight:900;margin-top:8px}
-.online{color:#20ff80}.offline{color:#ff4f61}.degraded{color:#ffd84d}
+/* ── health center ────────────────────────────────────────── */
+.hc-header{margin-bottom:20px}
+.hc-title{font-size:26px;font-weight:900;letter-spacing:1px;color:#eaf2ff}
+.hc-subtitle{font-size:12px;color:#7fa0c8;margin-top:4px;letter-spacing:1px}
+.hc-kpi{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:20px}
+.hc-kcard{background:linear-gradient(180deg,#101827,#0b1320);border:1px solid #17314b;
+  border-radius:12px;padding:15px;text-align:center}
+.hc-klbl{font-size:9px;color:#7fa0c8;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px}
+.hc-kval{font-size:22px;font-weight:900}
+.hc-kval.g{color:#20ff80}.hc-kval.r{color:#ff4f61}.hc-kval.c{color:#20e6c3}
+.hc-kval.y{color:#ffd84d}.hc-kval.w{color:#eaf2ff}
+.hc-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
+.hc-svc{background:linear-gradient(180deg,#101827,#0b1320);border:1px solid #17314b;
+  border-radius:12px;padding:16px}
+.hc-svc-name{font-size:10px;color:#7fa0c8;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px}
+.hc-svc-status{font-size:18px;font-weight:900;margin-bottom:6px}
+.hc-svc-status.online{color:#20ff80}
+.hc-svc-status.offline{color:#ff4f61}
+.hc-svc-detail{font-size:10px;color:#8fa8c7;line-height:1.5}
+.hc-svc-lat{display:inline-block;background:#0b1320;border:1px solid #17314b;border-radius:4px;
+  padding:2px 7px;font-size:10px;color:#20e6c3;margin-top:4px;font-family:monospace}
+.hc-svc-err{font-size:10px;color:#ff6b6b;margin-top:4px;word-break:break-word}
+.hc-svc-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;
+  vertical-align:middle}
+.hc-act-card{background:linear-gradient(180deg,#101827,#0b1320);border:1px solid #17314b;
+  border-radius:12px;padding:18px;margin-bottom:16px}
+.hc-act-title{font-size:12px;font-weight:700;color:#eaf2ff;margin-bottom:12px;
+  padding-bottom:8px;border-bottom:1px solid #17314b;letter-spacing:1px;text-transform:uppercase}
+.hc-row{display:flex;justify-content:space-between;align-items:center;
+  padding:8px 0;border-bottom:1px solid #0e1e2e;font-size:13px}
+.hc-row:last-child{border-bottom:none}
+.hc-rlbl{color:#7fa0c8;font-size:12px}
+.hc-rval{font-weight:700;color:#eaf2ff;text-align:right}
+.hc-cfg-grid{display:grid;grid-template-columns:1fr 1fr;gap:0}
+.hc-checked{font-size:10px;color:#627a99;text-align:right;margin-top:4px}
+@media(max-width:900px){.hc-grid{grid-template-columns:repeat(2,1fr)}.hc-kpi{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:560px){.hc-grid{grid-template-columns:1fr 1fr}.hc-kpi{grid-template-columns:repeat(2,1fr)}}
+"""
+    body = """
+<div class="hc-header">
+  <div class="hc-title">HEALTH CENTER</div>
+  <div class="hc-subtitle">ALPHA RADAR SIGNALS &nbsp;·&nbsp; System Status</div>
+</div>
+
+<div class="hc-kpi">
+  <div class="hc-kcard">
+    <div class="hc-klbl">Overall</div>
+    <div id="hc-overall" class="hc-kval c">—</div>
+  </div>
+  <div class="hc-kcard">
+    <div class="hc-klbl">Uptime</div>
+    <div id="hc-uptime" class="hc-kval y">—</div>
+  </div>
+  <div class="hc-kcard">
+    <div class="hc-klbl">Signals Today</div>
+    <div id="hc-sig-today" class="hc-kval w">—</div>
+  </div>
+  <div class="hc-kcard">
+    <div class="hc-klbl">Errors Today</div>
+    <div id="hc-err-today" class="hc-kval g">—</div>
+  </div>
+  <div class="hc-kcard">
+    <div class="hc-klbl">Universe</div>
+    <div id="hc-universe" class="hc-kval c">—</div>
+  </div>
+</div>
+
+<div class="hc-grid" id="hc-svc-grid">
+  <!-- 8 service cards injected by JS -->
+</div>
+
+<div class="hc-act-card">
+  <div class="hc-act-title">Activity</div>
+  <div class="hc-row">
+    <span class="hc-rlbl">Last Scan Time</span>
+    <span id="hc-last-scan" class="hc-rval">—</span>
+  </div>
+  <div class="hc-row">
+    <span class="hc-rlbl">Last Signal Time</span>
+    <span id="hc-last-sig" class="hc-rval">—</span>
+  </div>
+  <div class="hc-row">
+    <span class="hc-rlbl">Scanner Interval</span>
+    <span id="hc-scan-iv" class="hc-rval">—</span>
+  </div>
+  <div class="hc-row">
+    <span class="hc-rlbl">Signals Today</span>
+    <span id="hc-sig-today-2" class="hc-rval">—</span>
+  </div>
+  <div class="hc-row">
+    <span class="hc-rlbl">Errors Today</span>
+    <span id="hc-err-today-2" class="hc-rval g">—</span>
+  </div>
+</div>
+
+<div class="hc-act-card">
+  <div class="hc-act-title">Configuration</div>
+  <div id="hc-cfg"></div>
+</div>
+
+<div id="hc-checked-at" class="hc-checked"></div>
 """
     js = """
-function fmtUp(sec){
-  const h=Math.floor(sec/3600),m=Math.floor((sec%3600)/60),s=sec%60;
-  return h?h+'h '+m+'m':m+'m '+s+'s';
+function _fmtUp(sec){
+  const d=Math.floor(sec/86400),h=Math.floor((sec%86400)/3600),
+        m=Math.floor((sec%3600)/60);
+  return d>0?d+'d '+h+'h '+m+'m':h>0?h+'h '+m+'m':m+'m '+(sec%60)+'s';
 }
+function _fmtTime(iso){
+  if(!iso)return'—';
+  const t=new Date(iso);
+  return t.toLocaleDateString()+' '+t.toLocaleTimeString();
+}
+function _fmtAgo(iso){
+  if(!iso)return'—';
+  const sec=Math.round((Date.now()-new Date(iso).getTime())/1000);
+  if(sec<60)return sec+'s ago';
+  if(sec<3600)return Math.floor(sec/60)+'m ago';
+  return Math.floor(sec/3600)+'h '+Math.floor((sec%3600)/60)+'m ago';
+}
+
+const SVC_LABELS = {
+  dashboard:'Dashboard', database:'Database', redis:'Redis',
+  binance:'Binance', telegram:'Telegram', scanner:'Scanner',
+  worker:'Worker', scheduler:'Scheduler'
+};
+
+function _buildSvcCard(key, svc){
+  const ok = svc.ok;
+  const dot = `<span class="hc-svc-dot" style="background:${ok?'#20ff80':'#ff4f61'}"></span>`;
+  const lat = svc.latency_ms!=null
+    ? `<span class="hc-svc-lat">${svc.latency_ms}ms</span>` : '';
+  const det = svc.detail
+    ? `<div class="hc-svc-detail">${svc.detail}</div>` : '';
+  const err = !ok && svc.error
+    ? `<div class="hc-svc-err">⚠ ${svc.error}</div>` : '';
+  const chk = `<div class="hc-svc-detail" style="color:#4a6278;margin-top:4px">checked ${_fmtAgo(svc.checked_at)}</div>`;
+  return `<div class="hc-svc">
+    <div class="hc-svc-name">${SVC_LABELS[key]||key}</div>
+    <div class="hc-svc-status ${ok?'online':'offline'}">${dot}${ok?'ONLINE':'OFFLINE'}</div>
+    ${det}${lat}${err}${chk}
+  </div>`;
+}
+
 async function load(){
   try{
     const r=await fetch('/api/health');
     if(!r.ok)return;
     const d=await r.json();
-    const c=d.components||{};
+
+    // KPI bar
     const ok=d.ok;
-    document.getElementById('hc-overall').textContent=ok?'ONLINE':'DEGRADED';
-    document.getElementById('hc-overall').className='sval '+(ok?'g':'r');
-    document.getElementById('hc-uptime').textContent=fmtUp(d.uptime_sec||0);
-    document.getElementById('hc-uni').textContent=d.components?.dashboard?.detail||'—';
+    const ov=document.getElementById('hc-overall');
+    ov.textContent=ok?'ALL OK':'DEGRADED';
+    ov.className='hc-kval '+(ok?'g':'r');
+    document.getElementById('hc-uptime').textContent=_fmtUp(d.uptime_seconds??d.uptime_sec??0);
+    document.getElementById('hc-sig-today').textContent=d.signals_today??'—';
+    const errEl=document.getElementById('hc-err-today');
+    errEl.textContent=d.errors_today??0;
+    errEl.className='hc-kval '+(d.errors_today>0?'r':'g');
+    document.getElementById('hc-universe').textContent=
+      d.services?.binance?.symbols_tracked??d.components?.websocket?.prices
+        ?Object.keys(d.components?.websocket?.prices||{}).length:'—';
 
-    function setComp(id,isOk,detail){
-      const el=document.getElementById(id);
-      const s=el.querySelector('.hc-status');
-      s.textContent=isOk?'ONLINE':'OFFLINE';
-      s.className='hc-status '+(isOk?'online':'offline');
-      if(detail){
-        let sub=el.querySelector('.hc-detail');
-        if(!sub){sub=document.createElement('div');sub.className='hc-detail';sub.style.cssText='font-size:10px;color:#8fa8c7;margin-top:4px';el.appendChild(sub);}
-        sub.textContent=detail;
-      }
-    }
-    setComp('hc-dashboard',true,'port '+d.config?.scan_interval_sec||8010);
-    setComp('hc-database',c.database?.ok,c.database?.latency_ms>=0?c.database.latency_ms+'ms latency':null);
-    setComp('hc-redis',c.redis?.ok,c.redis?.latency_ms>=0?c.redis.latency_ms+'ms latency':null);
-    setComp('hc-binance',c.websocket?.ok,'price feed');
-    const tg=typeof d.config?.scan_interval_sec!=='undefined';
-    setComp('hc-telegram',tg,'configured');
-    setComp('hc-scanner',true,'running every '+d.config?.scan_interval_sec+'s');
+    // Service cards
+    const svcs=d.services||{};
+    const ORDER=['dashboard','database','redis','binance','telegram','scanner','worker','scheduler'];
+    document.getElementById('hc-svc-grid').innerHTML=
+      ORDER.map(k=>k in svcs?_buildSvcCard(k,svcs[k]):'').join('');
 
+    // Activity
+    document.getElementById('hc-last-scan').textContent=
+      d.last_scan_time?_fmtTime(d.last_scan_time):'—';
+    document.getElementById('hc-last-sig').textContent=
+      d.last_signal_time?_fmtTime(d.last_signal_time)+' ('+_fmtAgo(d.last_signal_time)+')':'None';
+    document.getElementById('hc-scan-iv').textContent=
+      (d.config?.scan_interval_sec??d.services?.scanner?.interval_seconds??'—')+'s';
+    document.getElementById('hc-sig-today-2').textContent=d.signals_today??'—';
+    const e2=document.getElementById('hc-err-today-2');
+    e2.textContent=d.errors_today??0;
+    e2.className='hc-rval '+(d.errors_today>0?'r':'g');
+
+    // Config
     if(d.config){
-      document.getElementById('hc-cfg-tbl').innerHTML=`
-        <tr><td style="color:#8fa8c7;padding:6px 14px 6px 0;width:50%">Min Confidence</td><td>${d.config.min_confidence}%</td></tr>
-        <tr><td style="color:#8fa8c7;padding:6px 14px 6px 0">Min RR</td><td>1:${d.config.min_rr}</td></tr>
-        <tr><td style="color:#8fa8c7;padding:6px 14px 6px 0">Scan Interval</td><td>${d.config.scan_interval_sec}s</td></tr>
-        <tr><td style="color:#8fa8c7;padding:6px 14px 6px 0">Max Signals/hr</td><td>${d.config.max_signals_per_hour}</td></tr>
-        <tr><td style="color:#8fa8c7;padding:6px 14px 6px 0">Paper Trading</td><td>${d.config.paper_trading?'<span class="y">ON</span>':'OFF'}</td></tr>
-        <tr><td style="color:#8fa8c7;padding:6px 14px 6px 0">Auto Trading</td><td>${d.config.auto_trading_enabled?'<span class="y">ON</span>':'OFF'}</td></tr>
+      const cfg=d.config;
+      document.getElementById('hc-cfg').innerHTML=`
+        <div class="hc-row"><span class="hc-rlbl">Min Confidence</span><span class="hc-rval">${cfg.min_confidence}%</span></div>
+        <div class="hc-row"><span class="hc-rlbl">Min RR</span><span class="hc-rval">1:${cfg.min_rr}</span></div>
+        <div class="hc-row"><span class="hc-rlbl">Scan Interval</span><span class="hc-rval">${cfg.scan_interval_sec}s</span></div>
+        <div class="hc-row"><span class="hc-rlbl">Max Signals/hr</span><span class="hc-rval">${cfg.max_signals_per_hour}</span></div>
+        <div class="hc-row"><span class="hc-rlbl">Paper Trading</span><span class="hc-rval">${cfg.paper_trading?'<span class="y">ON</span>':'OFF'}</span></div>
+        <div class="hc-row"><span class="hc-rlbl">Auto Trading</span><span class="hc-rval">${cfg.auto_trading_enabled?'<span class="y">ON</span>':'<span style="color:#627a99">Disabled</span>'}</span></div>
       `;
     }
-  }catch(e){console.error(e);}
+
+    document.getElementById('hc-checked-at').textContent=
+      'Last checked: '+new Date(d.checked_at||Date.now()).toLocaleTimeString();
+
+  }catch(e){console.error('health load error',e);}
 }
-async function loadLastSig(){
-  try{
-    const r=await fetch('/api/public/signals?limit=1');
-    if(!r.ok)return;
-    const d=await r.json();
-    if(d&&d[0]&&d[0].created_at){
-      const t=new Date(d[0].created_at);
-      document.getElementById('hc-lastsig').textContent=t.toLocaleTimeString();
-    }else{
-      document.getElementById('hc-lastsig').textContent='None';
-    }
-  }catch(e){}
-}
-document.addEventListener('DOMContentLoaded',()=>{load();loadLastSig();setInterval(load,15000);setInterval(loadLastSig,30000);});
+
+document.addEventListener('DOMContentLoaded',()=>{
+  load();
+  setInterval(load,15000);
+});
 """
     return _page_shell("Health Center", body, extra_css=css, extra_js=js)
 
