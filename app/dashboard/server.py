@@ -9,12 +9,13 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI, Request, Form
+from fastapi.middleware.base import BaseHTTPMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, PlainTextResponse
 from sqlalchemy import select, desc
 
 from app.config import settings
 from app.database.session import SessionLocal
-from app.database.models import Signal
+from app.database.models import Signal, AffiliateClick
 from app.market_data import universe
 from app.market_data.ws_engine import ws_health
 
@@ -83,6 +84,20 @@ async def _lifespan(app: FastAPI):
 
 app = FastAPI(title="ALPHA RADAR SIGNALS", lifespan=_lifespan)
 _boot_time = time.time()
+
+
+class _SecurityHeaders(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        return response
+
+
+app.add_middleware(_SecurityHeaders)
 
 
 # ── stats helper ──────────────────────────────────────────────────
@@ -163,9 +178,154 @@ async def api_public_stats():
         return JSONResponse({"error": str(exc)}, status_code=500)
 
 
+@app.get("/api/public/signals")
+async def api_public_signals(limit: int = 50):
+    limit = min(max(1, limit), 200)
+    try:
+        async with SessionLocal() as session:
+            res = await session.execute(
+                select(Signal).order_by(desc(Signal.created_at)).limit(limit)
+            )
+            rows = res.scalars().all()
+        return JSONResponse([{
+            "id": s.id,
+            "symbol": s.symbol,
+            "side": s.side,
+            "timeframe": s.timeframe,
+            "confidence": round(float(s.confidence or 0), 1),
+            "risk_reward": round(float(s.risk_reward or 0), 2),
+            "status": s.status,
+            "pnl_pct": round(float(s.pnl_pct or 0), 2),
+            "entry_low": round(float(s.entry_low or 0), 6),
+            "tp1": round(float(s.tp1 or 0), 6),
+            "sl": round(float(s.stop_loss or 0), 6),
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+        } for s in rows])
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+@app.get("/api/public/performance")
+async def api_public_performance():
+    try:
+        stats = await _get_stats()
+        now = datetime.now(timezone.utc)
+        async with SessionLocal() as session:
+            res = await session.execute(
+                select(Signal).where(Signal.status.in_(["TP1", "TP2", "TP3", "SL"]))
+                .order_by(desc(Signal.created_at)).limit(1000)
+            )
+            closed = res.scalars().all()
+
+        wins = [s for s in closed if s.status in ("TP1", "TP2", "TP3")]
+        losses = [s for s in closed if s.status == "SL"]
+        total_closed = len(closed)
+        win_rate = len(wins) / max(1, total_closed) * 100
+        avg_rr = sum(float(s.risk_reward or 0) for s in closed) / max(1, total_closed)
+
+        # Profit factor: gross wins / gross losses (by pnl_pct)
+        gross_win = sum(float(s.pnl_pct or 0) for s in wins)
+        gross_loss = abs(sum(float(s.pnl_pct or 0) for s in losses))
+        profit_factor = round(gross_win / max(0.01, gross_loss), 2)
+
+        # LONG vs SHORT breakdown
+        long_signals = [s for s in closed if s.side == "LONG"]
+        short_signals = [s for s in closed if s.side == "SHORT"]
+        long_wins = [s for s in long_signals if s.status in ("TP1", "TP2", "TP3")]
+        short_wins = [s for s in short_signals if s.status in ("TP1", "TP2", "TP3")]
+
+        # Monthly breakdown (last 6 months)
+        monthly: dict = {}
+        for s in closed:
+            if s.created_at:
+                key = s.created_at.strftime("%Y-%m")
+                monthly.setdefault(key, {"wins": 0, "losses": 0, "pnl": 0.0})
+                if s.status in ("TP1", "TP2", "TP3"):
+                    monthly[key]["wins"] += 1
+                else:
+                    monthly[key]["losses"] += 1
+                monthly[key]["pnl"] = round(monthly[key]["pnl"] + float(s.pnl_pct or 0), 2)
+        monthly_list = sorted(
+            [{"month": k, **v} for k, v in monthly.items()],
+            key=lambda x: x["month"]
+        )[-6:]
+
+        return JSONResponse({
+            "total_closed": total_closed,
+            "wins": len(wins),
+            "losses": len(losses),
+            "win_rate": round(win_rate, 1),
+            "avg_pnl": round(sum(float(s.pnl_pct or 0) for s in closed) / max(1, total_closed), 2),
+            "avg_rr": round(avg_rr, 2),
+            "profit_factor": profit_factor,
+            "long": {
+                "total": len(long_signals),
+                "wins": len(long_wins),
+                "win_rate": round(len(long_wins) / max(1, len(long_signals)) * 100, 1),
+            },
+            "short": {
+                "total": len(short_signals),
+                "wins": len(short_wins),
+                "win_rate": round(len(short_wins) / max(1, len(short_signals)) * 100, 1),
+            },
+            "monthly": monthly_list,
+            "leaderboard": stats.get("leaderboard", []),
+        })
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
 @app.get("/api/public/prices")
 async def api_public_prices():
     return JSONResponse(ws_health())
+
+
+@app.get("/aff/{exchange}")
+async def affiliate_redirect(exchange: str, request: Request):
+    """Track affiliate click then redirect to the affiliate URL."""
+    exchange = exchange.lower().strip()
+    url_map = {
+        "binance": settings.binance_affiliate_url,
+        "bybit":   settings.bybit_affiliate_url,
+        "okx":     settings.okx_affiliate_url,
+        "bitget":  settings.bitget_affiliate_url,
+    }
+    dest = _safe_url(url_map.get(exchange, ""))
+    if not dest:
+        return RedirectResponse("/", status_code=302)
+
+    # Record click
+    try:
+        async with SessionLocal() as session:
+            click = AffiliateClick(
+                exchange=exchange,
+                referrer=request.headers.get("referer", "")[:256],
+            )
+            session.add(click)
+            await session.commit()
+    except Exception:
+        pass
+
+    return RedirectResponse(dest, status_code=302)
+
+
+@app.get("/api/admin/affiliate-stats")
+async def affiliate_stats(request: Request):
+    if not _is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        from sqlalchemy import func as sqlfunc
+        from sqlalchemy import text
+        async with SessionLocal() as session:
+            res = await session.execute(
+                select(AffiliateClick.exchange, sqlfunc.count(AffiliateClick.id).label("clicks"))
+                .group_by(AffiliateClick.exchange)
+                .order_by(sqlfunc.count(AffiliateClick.id).desc())
+            )
+            rows = res.fetchall()
+        return JSONResponse([{"exchange": r[0], "clicks": r[1]} for r in rows])
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
 
 
 # ── monitoring (no auth) ──────────────────────────────────────────
@@ -178,11 +338,59 @@ async def health():
 @app.get("/api/health")
 async def api_health():
     wsh = ws_health()
+    uptime = round(time.time() - _boot_time)
+
+    # Database check
+    db_ok = False
+    db_latency_ms = -1
+    try:
+        import time as _time
+        t0 = _time.monotonic()
+        async with SessionLocal() as s:
+            await s.execute(select(Signal).limit(1))
+        db_latency_ms = round((_time.monotonic() - t0) * 1000, 1)
+        db_ok = True
+    except Exception as exc:
+        db_err = str(exc)[:100]
+
+    # Redis check
+    redis_ok = False
+    redis_latency_ms = -1
+    try:
+        from app.market_data.cache import get_redis
+        import time as _time
+        t0 = _time.monotonic()
+        r = await get_redis()
+        await r.ping()
+        redis_latency_ms = round((_time.monotonic() - t0) * 1000, 1)
+        redis_ok = True
+    except Exception:
+        pass
+
     return {
-        "ok": True, "brand": "ALPHA RADAR SIGNALS", "dashboard": "online",
-        "database": "online", "redis": "online", "telegram": "online",
-        "scanner": "online", "websocket": wsh,
-        "uptime_sec": round(time.time() - _boot_time),
+        "ok": db_ok and redis_ok,
+        "brand": "ALPHA RADAR SIGNALS",
+        "uptime_sec": uptime,
+        "components": {
+            "dashboard": {"ok": True, "detail": f"port {settings.dashboard_port}"},
+            "database": {
+                "ok": db_ok,
+                "latency_ms": db_latency_ms,
+            },
+            "redis": {
+                "ok": redis_ok,
+                "latency_ms": redis_latency_ms,
+            },
+            "websocket": wsh,
+        },
+        "config": {
+            "min_confidence": settings.min_confidence,
+            "min_rr": settings.min_rr,
+            "scan_interval_sec": settings.scan_interval_sec,
+            "max_signals_per_hour": settings.max_signals_per_hour,
+            "paper_trading": settings.paper_trading,
+            "auto_trading_enabled": settings.auto_trading_enabled,
+        },
     }
 
 
@@ -401,6 +609,486 @@ async def index():
     html = html.replace("__AFFILIATES__", aff_section)
 
     return HTMLResponse(html)
+
+
+@app.get("/signals", response_class=HTMLResponse)
+async def signals_page():
+    return HTMLResponse(_signals_page_html())
+
+
+@app.get("/performance", response_class=HTMLResponse)
+async def performance_page():
+    return HTMLResponse(_performance_page_html())
+
+
+@app.get("/stats", response_class=HTMLResponse)
+async def stats_page():
+    return HTMLResponse(_stats_page_html())
+
+
+@app.get("/about", response_class=HTMLResponse)
+async def about_page():
+    return HTMLResponse(_info_page(
+        "About",
+        """
+<h2>About ALPHA RADAR SIGNALS</h2>
+<p>ALPHA RADAR SIGNALS is a free, AI-powered crypto futures signal service. Our multi-timeframe analysis engine scans the market 24/7 and delivers high-quality trade setups directly to Telegram.</p>
+<h3>How It Works</h3>
+<ul style="color:#c9d8e8;line-height:2">
+  <li><strong>1D Trend Filter</strong> — Identifies the dominant daily trend using EMA and market structure.</li>
+  <li><strong>4H Structure</strong> — Confirms Break of Structure, Order Blocks, and Fair Value Gaps.</li>
+  <li><strong>1H Setup</strong> — Detects pullbacks, retests, VWAP alignment, and volume confirmation.</li>
+  <li><strong>15M Entry</strong> — Triggers on momentum breakout with score-based confirmation.</li>
+</ul>
+<h3>Signal Tiers</h3>
+<ul style="color:#c9d8e8;line-height:2">
+  <li><strong>ELITE (95-100%)</strong> — Highest confidence setups.</li>
+  <li><strong>VIP (85-94%)</strong> — Strong setups with solid confluence.</li>
+  <li><strong>PUBLIC (75-84%)</strong> — Good setups meeting minimum criteria.</li>
+</ul>
+<h3>Free Forever</h3>
+<p>All signals are provided free of charge. We monetize through voluntary donations and affiliate partnerships.</p>
+<p><a href="/faq">Frequently Asked Questions →</a></p>
+""",
+    ))
+
+
+@app.get("/faq", response_class=HTMLResponse)
+async def faq_page():
+    return HTMLResponse(_info_page(
+        "FAQ",
+        """
+<h2>Frequently Asked Questions</h2>
+
+<h3>Are the signals free?</h3>
+<p>Yes. All signals on ALPHA RADAR SIGNALS are 100% free. No subscription or payment required.</p>
+
+<h3>How do I receive signals?</h3>
+<p>Join our Telegram channel. Signals are posted automatically as soon as the AI engine detects a valid setup.</p>
+
+<h3>What markets do you cover?</h3>
+<p>We scan USDT perpetual futures on Binance — all liquid pairs with >$5M daily volume.</p>
+
+<h3>How accurate are the signals?</h3>
+<p>Accuracy varies by market conditions. Check the live performance statistics on our dashboard. Past results do not guarantee future performance.</p>
+
+<h3>What does confidence % mean?</h3>
+<p>Confidence is our AI engine's assessment of signal quality (75-100%). Higher = more confluences aligned. It is not a win probability.</p>
+
+<h3>What is Risk/Reward (RR)?</h3>
+<p>RR is the ratio of potential profit to potential loss. A 1:2.5 RR means you can gain $2.50 for every $1 risked. We require a minimum of 1:2.0.</p>
+
+<h3>Should I use all my capital on one signal?</h3>
+<p>No. Never risk more than 1-2% of your trading capital on a single trade. Proper position sizing is essential for long-term survival.</p>
+
+<h3>Can I auto-trade these signals?</h3>
+<p>Auto-trading is on our roadmap but not currently available. All signals require manual execution.</p>
+
+<h3>Who runs this project?</h3>
+<p>ALPHA RADAR SIGNALS is an independent trading tools project. We are not a registered financial institution.</p>
+""",
+    ))
+
+
+@app.get("/terms", response_class=HTMLResponse)
+async def terms():
+    return HTMLResponse(_info_page(
+        "Terms of Service",
+        """
+<h2>Terms of Service</h2>
+<p>Last updated: 2026-05-30</p>
+<h3>1. Acceptance</h3>
+<p>By using ALPHA RADAR SIGNALS ("the Service") you agree to these Terms. If you do not agree, stop using the Service immediately.</p>
+<h3>2. Educational Purpose Only</h3>
+<p>All signals, analysis, and content provided by the Service are for educational and informational purposes only. Nothing on this platform constitutes financial, investment, trading, or legal advice.</p>
+<h3>3. No Guarantees</h3>
+<p>Past performance is not indicative of future results. Signal accuracy cannot be guaranteed. You may lose all of your capital.</p>
+<h3>4. User Responsibility</h3>
+<p>You are solely responsible for your trading decisions. Always conduct your own research and consult a qualified financial advisor before making any investment.</p>
+<h3>5. Limitation of Liability</h3>
+<p>ALPHA RADAR SIGNALS and its operators shall not be liable for any losses, damages, or costs arising from your use of the Service.</p>
+<h3>6. Modifications</h3>
+<p>We reserve the right to modify these Terms at any time. Continued use of the Service constitutes acceptance of the updated Terms.</p>
+""",
+    ))
+
+
+@app.get("/privacy", response_class=HTMLResponse)
+async def privacy():
+    return HTMLResponse(_info_page(
+        "Privacy Policy",
+        """
+<h2>Privacy Policy</h2>
+<p>Last updated: 2026-05-30</p>
+<h3>1. Data We Collect</h3>
+<p>The public dashboard does not require account creation. We do not collect personally identifiable information from visitors to the public site.</p>
+<p>If you join our Telegram channel, Telegram's own privacy policy governs the processing of your Telegram data.</p>
+<h3>2. Server Logs</h3>
+<p>Our servers may log IP addresses and request metadata for security monitoring and abuse prevention. These logs are retained for up to 30 days.</p>
+<h3>3. Cookies</h3>
+<p>The admin dashboard uses a session cookie strictly for authentication. No tracking or advertising cookies are used.</p>
+<h3>4. Affiliate Links</h3>
+<p>Clicking an affiliate link may set cookies on the destination exchange's website. We do not control third-party cookies.</p>
+<h3>5. Contact</h3>
+<p>For privacy-related inquiries please reach out via our Telegram channel.</p>
+""",
+    ))
+
+
+@app.get("/risk-disclaimer", response_class=HTMLResponse)
+async def risk_disclaimer():
+    return HTMLResponse(_info_page(
+        "Risk Disclaimer",
+        """
+<h2>Risk Disclaimer</h2>
+<p><strong>TRADING FUTURES AND CRYPTOCURRENCIES INVOLVES SUBSTANTIAL RISK OF LOSS.</strong></p>
+<p>You should carefully consider whether trading is appropriate for you in light of your experience, objectives, financial resources, and other relevant circumstances.</p>
+<ul style="color:#c9d8e8;line-height:2">
+  <li>Futures markets use leverage, which magnifies both gains and losses.</li>
+  <li>You can lose more than your initial deposit in futures trading.</li>
+  <li>Cryptocurrency markets are highly volatile and unregulated in many jurisdictions.</li>
+  <li>Past signal performance does not guarantee future results.</li>
+  <li>AI-generated signals are probabilistic tools, not certainties.</li>
+  <li>Never invest money you cannot afford to lose entirely.</li>
+  <li>Diversify your investments and never risk your emergency funds.</li>
+  <li>ALPHA RADAR SIGNALS is not a regulated financial advisor.</li>
+</ul>
+<p>By using this service you acknowledge that you have read, understood, and accepted this risk disclaimer.</p>
+""",
+    ))
+
+
+def _page_shell(title: str, body: str, extra_css: str = "", extra_js: str = "") -> str:
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>{_esc(title)} — ALPHA RADAR SIGNALS</title>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{background:#070b12;color:#eaf2ff;font-family:Inter,Arial,sans-serif;line-height:1.6}}
+a{{color:#20e6c3;text-decoration:none}}
+.container{{max-width:1200px;margin:0 auto;padding:0 24px}}
+header{{background:#08111c;border-bottom:1px solid #13263a;padding:13px 24px}}
+.hdr{{display:flex;align-items:center;justify-content:space-between;max-width:1200px;margin:0 auto}}
+.brand{{font-size:16px;font-weight:900;letter-spacing:1px;color:#eaf2ff}}
+.brand em{{color:#20f0c0;font-style:normal}}
+.hnav{{display:flex;gap:16px;font-size:13px}}
+.page-title{{font-size:28px;font-weight:900;color:#20f0c0;padding:32px 0 8px}}
+.card{{background:linear-gradient(180deg,#101827,#0b1320);border:1px solid #17314b;border-radius:13px;padding:20px;margin-bottom:16px}}
+table{{width:100%;border-collapse:collapse}}
+th,td{{text-align:left;padding:10px 12px;border-bottom:1px solid #17283d;font-size:13px}}
+th{{color:#8fa8c7;font-size:10px;letter-spacing:1px;text-transform:uppercase}}
+tr:last-child td{{border-bottom:none}}
+.g{{color:#20ff80}}.r{{color:#ff4f61}}.c{{color:#20e6c3}}.y{{color:#ffd84d}}
+.bl2{{background:#0a3a1f44;color:#20ff80;border:1px solid #20ff8033;padding:2px 7px;border-radius:4px;font-size:11px;font-weight:700}}
+.bs2{{background:#3a0a1244;color:#ff4f61;border:1px solid #ff4f6133;padding:2px 7px;border-radius:4px;font-size:11px;font-weight:700}}
+.bopen{{color:#20ffc8;font-weight:700}}.btp{{color:#20ff80;font-weight:700}}.bsl{{color:#ff4f61;font-weight:700}}.bexp{{color:#ffd84d;font-weight:700}}
+.sbar{{display:grid;grid-template-columns:repeat(4,1fr);gap:15px;margin:20px 0}}
+.scard{{background:linear-gradient(180deg,#101827,#0b1320);border:1px solid #17314b;border-radius:13px;padding:19px;text-align:center}}
+.slabel{{color:#7fa0c8;font-size:10px;letter-spacing:2px;text-transform:uppercase}}
+.sval{{font-size:32px;font-weight:900;margin-top:8px}}
+footer{{border-top:1px solid #13263a;padding:26px 24px;text-align:center;color:#627a99;font-size:12px;margin-top:32px}}
+@media(max-width:860px){{.sbar{{grid-template-columns:1fr 1fr}}}}
+@media(max-width:480px){{.sbar{{grid-template-columns:1fr}}}}
+{extra_css}
+</style>
+</head>
+<body>
+<header>
+<div class="hdr">
+  <div class="brand"><a href="/" style="text-decoration:none;color:#eaf2ff">ALPHA RADAR <em>SIGNALS</em></a></div>
+  <div class="hnav">
+    <a href="/signals">Signals</a>
+    <a href="/performance">Performance</a>
+    <a href="/stats">Stats</a>
+    <a href="/about">About</a>
+    <a href="/faq">FAQ</a>
+  </div>
+</div>
+</header>
+<div class="container">
+{body}
+</div>
+<footer>
+  <p>ALPHA RADAR SIGNALS &nbsp;·&nbsp; Free AI-powered crypto futures signals</p>
+  <p style="margin-top:6px">
+    <a href="/terms" style="color:#627a99">Terms</a> &nbsp;·&nbsp;
+    <a href="/privacy" style="color:#627a99">Privacy</a> &nbsp;·&nbsp;
+    <a href="/risk-disclaimer" style="color:#627a99">Risk Disclaimer</a>
+  </p>
+</footer>
+<script>{extra_js}</script>
+</body>
+</html>"""
+
+
+def _signals_page_html() -> str:
+    body = """
+<div class="page-title">Live Signals</div>
+<div class="sbar">
+  <div class="scard"><div class="slabel">OPEN NOW</div><div id="s-open" class="sval c">—</div></div>
+  <div class="scard"><div class="slabel">WIN RATE (7D)</div><div id="s-wr" class="sval g">—</div></div>
+  <div class="scard"><div class="slabel">SIGNALS (7D)</div><div id="s-tot" class="sval">—</div></div>
+  <div class="scard"><div class="slabel">AVG PNL</div><div id="s-pnl" class="sval g">—</div></div>
+</div>
+<div class="card" style="overflow-x:auto">
+  <div style="display:flex;gap:8px;margin-bottom:14px">
+    <button class="tbtn act" onclick="swTab('all',this)">All</button>
+    <button class="tbtn" onclick="swTab('open',this)">Open</button>
+    <button class="tbtn" onclick="swTab('closed',this)">Closed</button>
+  </div>
+  <div id="tp-all" style="overflow-x:auto">
+  <table>
+  <thead><tr><th>TIME</th><th>SYMBOL</th><th>SIDE</th><th>TF</th><th>CONF</th><th>RR</th><th>ENTRY</th><th>TP1</th><th>SL</th><th>STATUS</th><th>PNL</th></tr></thead>
+  <tbody id="tbl-all"><tr><td colspan="11" style="text-align:center;color:#627a99;padding:24px">Loading...</td></tr></tbody>
+  </table>
+  </div>
+  <div id="tp-open" style="display:none;overflow-x:auto">
+  <table>
+  <thead><tr><th>TIME</th><th>SYMBOL</th><th>SIDE</th><th>TF</th><th>CONF</th><th>RR</th><th>ENTRY</th><th>TP1</th><th>SL</th></tr></thead>
+  <tbody id="tbl-open"></tbody>
+  </table>
+  </div>
+  <div id="tp-closed" style="display:none;overflow-x:auto">
+  <table>
+  <thead><tr><th>TIME</th><th>SYMBOL</th><th>SIDE</th><th>TF</th><th>CONF</th><th>RR</th><th>STATUS</th><th>PNL</th></tr></thead>
+  <tbody id="tbl-closed"></tbody>
+  </table>
+  </div>
+</div>"""
+    js = """
+function sBadge(st){
+  if(st==='OPEN')return '<span class="bopen">OPEN</span>';
+  if(st==='SL')return '<span class="bsl">SL</span>';
+  if(st==='EXPIRED')return '<span class="bexp">EXP</span>';
+  return '<span class="btp">'+st+'</span>';
+}
+function pct(v){return v===null||v===undefined?'—':(v>=0?'+':'')+v+'%';}
+function cls(v){return v>=0?'g':'r';}
+let _all=[];
+function swTab(n,btn){
+  document.querySelectorAll('.tbtn').forEach(b=>b.classList.remove('act'));
+  btn.classList.add('act');
+  ['all','open','closed'].forEach(id=>{
+    document.getElementById('tp-'+id).style.display=id===n?'':'none';
+  });
+}
+async function load(){
+  const r=await fetch('/api/public/signals?limit=200');
+  if(!r.ok)return;
+  _all=await r.json();
+  const open=_all.filter(x=>x.status==='OPEN');
+  const closed=_all.filter(x=>x.status!=='OPEN');
+  function rowAll(x){
+    return '<tr><td>'+x.created_at.slice(5,16).replace('T',' ')+'</td>'+
+      '<td><b>'+x.symbol+'</b></td>'+
+      '<td><span class="'+(x.side==='LONG'?'bl2':'bs2')+'">'+x.side+'</span></td>'+
+      '<td>'+x.timeframe+'</td><td>'+x.confidence+'%</td><td>1:'+x.risk_reward+'</td>'+
+      '<td>'+x.entry_low+'</td><td>'+x.tp1+'</td><td>'+x.sl+'</td>'+
+      '<td>'+sBadge(x.status)+'</td>'+
+      '<td class="'+cls(x.pnl_pct)+'">'+pct(x.pnl_pct)+'</td></tr>';
+  }
+  function rowOpen(x){
+    return '<tr><td>'+x.created_at.slice(5,16).replace('T',' ')+'</td>'+
+      '<td><b>'+x.symbol+'</b></td>'+
+      '<td><span class="'+(x.side==='LONG'?'bl2':'bs2')+'">'+x.side+'</span></td>'+
+      '<td>'+x.timeframe+'</td><td>'+x.confidence+'%</td><td>1:'+x.risk_reward+'</td>'+
+      '<td>'+x.entry_low+'</td><td>'+x.tp1+'</td><td>'+x.sl+'</td></tr>';
+  }
+  function rowClosed(x){
+    return '<tr><td>'+x.created_at.slice(5,16).replace('T',' ')+'</td>'+
+      '<td><b>'+x.symbol+'</b></td>'+
+      '<td><span class="'+(x.side==='LONG'?'bl2':'bs2')+'">'+x.side+'</span></td>'+
+      '<td>'+x.timeframe+'</td><td>'+x.confidence+'%</td><td>1:'+x.risk_reward+'</td>'+
+      '<td>'+sBadge(x.status)+'</td>'+
+      '<td class="'+cls(x.pnl_pct)+'">'+pct(x.pnl_pct)+'</td></tr>';
+  }
+  document.getElementById('tbl-all').innerHTML=_all.map(rowAll).join('')||'<tr><td colspan="11" style="text-align:center;color:#627a99;padding:20px">No signals yet</td></tr>';
+  document.getElementById('tbl-open').innerHTML=open.map(rowOpen).join('')||'<tr><td colspan="9" style="text-align:center;color:#627a99;padding:20px">No open signals</td></tr>';
+  document.getElementById('tbl-closed').innerHTML=closed.map(rowClosed).join('')||'<tr><td colspan="8" style="text-align:center;color:#627a99;padding:20px">No closed signals</td></tr>';
+  document.getElementById('s-open').textContent=open.length;
+}
+async function loadStats(){
+  const r=await fetch('/api/public/stats');
+  if(!r.ok)return;
+  const d=await r.json();
+  document.getElementById('s-wr').textContent=d.winrate+'%';
+  document.getElementById('s-tot').textContent=d.signals7d;
+  const pe=document.getElementById('s-pnl');
+  pe.textContent=pct(d.avgpnl);pe.className='sval '+cls(d.avgpnl);
+}
+document.addEventListener('DOMContentLoaded',()=>{
+  load();loadStats();
+  setInterval(load,15000);setInterval(loadStats,15000);
+});
+var style=document.createElement('style');
+style.textContent='.tbtn{padding:7px 15px;border-radius:7px;border:1px solid #17314b;background:transparent;color:#8fa8c7;cursor:pointer;font-size:12px}.tbtn.act{background:#08a98f22;border-color:#20f0c0;color:#20f0c0}';
+document.head.appendChild(style);
+"""
+    return _page_shell("Live Signals", body, extra_js=js)
+
+
+def _performance_page_html() -> str:
+    body = """
+<div class="page-title">Performance Statistics</div>
+<div class="sbar" id="perf-bar">
+  <div class="scard"><div class="slabel">WIN RATE</div><div id="p-wr" class="sval g">—</div></div>
+  <div class="scard"><div class="slabel">PROFIT FACTOR</div><div id="p-pf" class="sval c">—</div></div>
+  <div class="scard"><div class="slabel">AVG RR</div><div id="p-rr" class="sval y">—</div></div>
+  <div class="scard"><div class="slabel">TOTAL CLOSED</div><div id="p-tot" class="sval">—</div></div>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+  <div class="card">
+    <div style="font-size:14px;font-weight:700;margin-bottom:14px;color:#eaf2ff">LONG Performance</div>
+    <p>Total: <span id="l-tot" class="c">—</span></p>
+    <p style="margin-top:8px">Wins: <span id="l-wins" class="g">—</span></p>
+    <p style="margin-top:8px">Win Rate: <span id="l-wr" class="g">—</span></p>
+  </div>
+  <div class="card">
+    <div style="font-size:14px;font-weight:700;margin-bottom:14px;color:#eaf2ff">SHORT Performance</div>
+    <p>Total: <span id="s-tot" class="c">—</span></p>
+    <p style="margin-top:8px">Wins: <span id="s-wins" class="g">—</span></p>
+    <p style="margin-top:8px">Win Rate: <span id="s-wr" class="g">—</span></p>
+  </div>
+</div>
+<div class="card" style="margin-top:16px">
+  <div style="font-size:14px;font-weight:700;margin-bottom:14px;color:#eaf2ff">Monthly Performance</div>
+  <table>
+  <thead><tr><th>MONTH</th><th>WINS</th><th>LOSSES</th><th>NET PNL</th></tr></thead>
+  <tbody id="monthly-tbl"><tr><td colspan="4" style="text-align:center;color:#627a99;padding:18px">Loading...</td></tr></tbody>
+  </table>
+</div>
+<div class="card">
+  <div style="font-size:14px;font-weight:700;margin-bottom:14px;color:#eaf2ff">Symbol Leaderboard</div>
+  <table>
+  <thead><tr><th>SYMBOL</th><th>AVG PNL</th><th>SIGNALS</th></tr></thead>
+  <tbody id="lb-tbl"><tr><td colspan="3" style="text-align:center;color:#627a99;padding:18px">Loading...</td></tr></tbody>
+  </table>
+</div>"""
+    js = """
+async function load(){
+  const r=await fetch('/api/public/performance');
+  if(!r.ok)return;
+  const d=await r.json();
+  document.getElementById('p-wr').textContent=d.win_rate+'%';
+  document.getElementById('p-pf').textContent=d.profit_factor;
+  document.getElementById('p-rr').textContent='1:'+d.avg_rr;
+  document.getElementById('p-tot').textContent=d.total_closed;
+  document.getElementById('l-tot').textContent=d.long.total;
+  document.getElementById('l-wins').textContent=d.long.wins;
+  document.getElementById('l-wr').textContent=d.long.win_rate+'%';
+  document.getElementById('s-tot').textContent=d.short.total;
+  document.getElementById('s-wins').textContent=d.short.wins;
+  document.getElementById('s-wr').textContent=d.short.win_rate+'%';
+  document.getElementById('monthly-tbl').innerHTML=(d.monthly||[]).reverse().map(m=>
+    '<tr><td>'+m.month+'</td><td class="g">'+m.wins+'</td><td class="r">'+m.losses+'</td>'+
+    '<td class="'+(m.pnl>=0?'g':'r')+'">'+(m.pnl>=0?'+':'')+m.pnl+'%</td></tr>'
+  ).join('')||'<tr><td colspan="4" style="text-align:center;color:#627a99;padding:18px">No data yet</td></tr>';
+  document.getElementById('lb-tbl').innerHTML=(d.leaderboard||[]).map((x,i)=>
+    '<tr><td><b>#'+(i+1)+' '+x.symbol+'</b></td>'+
+    '<td class="'+(x.avg>=0?'g':'r')+'">'+(x.avg>=0?'+':'')+x.avg+'%</td>'+
+    '<td>'+x.count+'</td></tr>'
+  ).join('')||'<tr><td colspan="3" style="text-align:center;color:#627a99;padding:18px">No data yet</td></tr>';
+}
+document.addEventListener('DOMContentLoaded',load);
+"""
+    return _page_shell("Performance", body, extra_js=js)
+
+
+def _stats_page_html() -> str:
+    body = """
+<div class="page-title">Statistics Overview</div>
+<div class="sbar">
+  <div class="scard"><div class="slabel">WIN RATE (7D)</div><div id="wr" class="sval g">—</div></div>
+  <div class="scard"><div class="slabel">SIGNALS (7D)</div><div id="tot" class="sval">—</div></div>
+  <div class="scard"><div class="slabel">OPEN SIGNALS</div><div id="open" class="sval c">—</div></div>
+  <div class="scard"><div class="slabel">UNIVERSE</div><div id="uni" class="sval y">—</div></div>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+  <div class="card" style="text-align:center">
+    <div class="slabel">WINS</div>
+    <div id="wins" class="sval g" style="font-size:40px;margin:12px 0">—</div>
+  </div>
+  <div class="card" style="text-align:center">
+    <div class="slabel">LOSSES</div>
+    <div id="losses" class="sval r" style="font-size:40px;margin:12px 0">—</div>
+  </div>
+</div>
+<div class="card">
+  <div style="font-size:14px;font-weight:700;margin-bottom:14px;color:#eaf2ff">Recent Signals</div>
+  <div style="overflow-x:auto">
+  <table>
+  <thead><tr><th>TIME</th><th>SYMBOL</th><th>SIDE</th><th>TF</th><th>CONF</th><th>RR</th><th>STATUS</th><th>PNL</th></tr></thead>
+  <tbody id="sig-tbl"><tr><td colspan="8" style="text-align:center;color:#627a99;padding:24px">Loading...</td></tr></tbody>
+  </table>
+  </div>
+</div>"""
+    js = """
+function sBadge(st){
+  if(st==='OPEN')return '<span class="bopen">OPEN</span>';
+  if(st==='SL')return '<span class="bsl">SL</span>';
+  if(st==='EXPIRED')return '<span class="bexp">EXP</span>';
+  return '<span class="btp">'+st+'</span>';
+}
+function pct(v){return v===null||v===undefined?'—':(v>=0?'+':'')+v+'%';}
+function cls(v){return v>=0?'g':'r';}
+async function load(){
+  const r=await fetch('/api/public/stats');
+  if(!r.ok)return;
+  const d=await r.json();
+  document.getElementById('wr').textContent=d.winrate+'%';
+  document.getElementById('tot').textContent=d.signals7d;
+  document.getElementById('open').textContent=d.open_signals;
+  document.getElementById('uni').textContent=d.universe;
+  document.getElementById('wins').textContent=d.wins;
+  document.getElementById('losses').textContent=d.losses;
+  document.getElementById('sig-tbl').innerHTML=(d.recent||[]).map(x=>
+    '<tr><td>'+x.time+'</td><td><b>'+x.symbol+'</b></td>'+
+    '<td><span class="'+(x.side==='LONG'?'bl2':'bs2')+'">'+x.side+'</span></td>'+
+    '<td>'+x.tf+'</td><td>'+x.conf+'%</td><td>1:'+x.rr+'</td>'+
+    '<td>'+sBadge(x.status)+'</td>'+
+    '<td class="'+cls(x.pnl)+'">'+pct(x.pnl)+'</td></tr>'
+  ).join('')||'<tr><td colspan="8" style="text-align:center;color:#627a99;padding:20px">No signals yet</td></tr>';
+}
+document.addEventListener('DOMContentLoaded',()=>{load();setInterval(load,10000);});
+"""
+    return _page_shell("Stats", body, extra_js=js)
+
+
+def _info_page(title: str, body: str) -> str:
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>{_esc(title)} — ALPHA RADAR SIGNALS</title>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{background:#070b12;color:#eaf2ff;font-family:Inter,Arial,sans-serif;line-height:1.7}}
+.container{{max-width:820px;margin:0 auto;padding:48px 24px}}
+h2{{color:#20f0c0;margin-bottom:18px;font-size:22px}}
+h3{{color:#eaf2ff;margin:24px 0 8px;font-size:16px}}
+p{{color:#c9d8e8;margin-bottom:12px;font-size:14px}}
+ul{{padding-left:24px;margin-bottom:12px}}
+.back{{margin-top:36px}}
+a{{color:#20e6c3}}
+header{{background:#08111c;border-bottom:1px solid #13263a;padding:13px 24px}}
+.brand{{font-size:16px;font-weight:900;letter-spacing:1px;color:#eaf2ff}}
+.brand em{{color:#20f0c0;font-style:normal}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><a href="/" style="text-decoration:none;color:#eaf2ff">ALPHA RADAR <em>SIGNALS</em></a></div>
+</header>
+<div class="container">
+{body}
+<div class="back"><a href="/">← Back to Home</a></div>
+</div>
+</body>
+</html>"""
 
 
 def create_app():
@@ -655,7 +1343,19 @@ __AFFILIATES__
 <footer>
 <p style="font-size:15px;font-weight:700;color:#eaf2ff;margin-bottom:5px">ALPHA RADAR SIGNALS</p>
 <p>Free AI-powered crypto futures signals &nbsp;·&nbsp; For educational use only</p>
-<p style="margin-top:8px"><a href="/admin" style="color:#627a99;font-size:11px">Admin Dashboard</a></p>
+<p style="margin-top:8px">
+  <a href="/signals" style="color:#627a99;font-size:11px">Signals</a> &nbsp;·&nbsp;
+  <a href="/performance" style="color:#627a99;font-size:11px">Performance</a> &nbsp;·&nbsp;
+  <a href="/stats" style="color:#627a99;font-size:11px">Stats</a> &nbsp;·&nbsp;
+  <a href="/about" style="color:#627a99;font-size:11px">About</a> &nbsp;·&nbsp;
+  <a href="/faq" style="color:#627a99;font-size:11px">FAQ</a>
+</p>
+<p style="margin-top:6px">
+  <a href="/terms" style="color:#627a99;font-size:11px">Terms</a> &nbsp;·&nbsp;
+  <a href="/privacy" style="color:#627a99;font-size:11px">Privacy</a> &nbsp;·&nbsp;
+  <a href="/risk-disclaimer" style="color:#627a99;font-size:11px">Risk Disclaimer</a> &nbsp;·&nbsp;
+  <a href="/admin" style="color:#627a99;font-size:11px">Admin</a>
+</p>
 <p style="margin-top:8px;font-size:11px">© 2026 ALPHA RADAR SIGNALS &nbsp;·&nbsp; Not financial advice.</p>
 </footer>
 
@@ -820,6 +1520,7 @@ th{color:#8fa8c7;font-size:11px;letter-spacing:1px}tr:last-child td{border-botto
     <div id="nav-performance" onclick="showTab('performance')">Performance</div>
     <div id="nav-leaderboard" onclick="showTab('leaderboard')">Leaderboard</div>
     <div id="nav-settings" onclick="showTab('settings')">Settings</div>
+    <div id="nav-health" onclick="showTab('health')">Health</div>
   </div>
   <div class="status"><b>Bot Status</b><p class="ok">● All Systems Operational</p><p style="color:#8fa8c7;margin-top:6px">Database OK<br>Redis OK<br>Telegram OK<br>Scanner OK</p></div>
 </aside>
@@ -900,6 +1601,20 @@ th{color:#8fa8c7;font-size:11px;letter-spacing:1px}tr:last-child td{border-botto
       <p>AI scoring active</p>
       <p>Daily reports active</p>
       <p>Production filters enabled</p>
+      <p style="margin-top:12px;color:#8fa8c7;font-size:13px">Min confidence: <span id="cfg-conf">--</span></p>
+      <p style="color:#8fa8c7;font-size:13px">Min RR: <span id="cfg-rr">--</span></p>
+      <p style="color:#8fa8c7;font-size:13px">Max signals/hr: <span id="cfg-max">--</span></p>
+      <p style="color:#8fa8c7;font-size:13px">Paper trading: <span id="cfg-paper">--</span></p>
+    </div>
+  </div>
+
+  <div id="tab-health" data-tab>
+    <div class="card"><h2>SYSTEM HEALTH</h2>
+      <div id="health-status" style="font-size:13px;color:#8fa8c7">Loading...</div>
+    </div>
+    <div class="card"><h2>AFFILIATE STATS</h2>
+      <table><thead><tr><th>EXCHANGE</th><th>CLICKS</th></tr></thead>
+      <tbody id="aff-tbl"></tbody></table>
     </div>
   </div>
 </main>
@@ -966,6 +1681,47 @@ async function tick(){
 }
 tick();loadPx();
 setInterval(tick,5000);setInterval(loadPx,2000);
+
+async function loadHealth(){
+  try{
+    const r=await fetch('/api/health');
+    if(!r.ok)return;
+    const d=await r.json();
+    const c=d.components||{};
+    const ok=v=>v?'<span class="g">● OK</span>':'<span class="r">● FAIL</span>';
+    const ms=v=>v>=0?` (${v}ms)`:'';
+    document.getElementById('health-status').innerHTML=
+      `<p>Overall: ${d.ok?'<span class="g">✅ All Systems OK</span>':'<span class="r">❌ Degraded</span>'}</p>`+
+      `<p style="margin-top:10px">Dashboard: ${ok(true)}</p>`+
+      `<p>Database: ${ok(c.database?.ok)}${ms(c.database?.latency_ms)}</p>`+
+      `<p>Redis: ${ok(c.redis?.ok)}${ms(c.redis?.latency_ms)}</p>`+
+      `<p>WebSocket: ${ok(c.websocket?.ok)}</p>`+
+      `<p style="margin-top:10px;color:#8fa8c7">Uptime: ${Math.floor(d.uptime_sec/3600)}h ${Math.floor((d.uptime_sec%3600)/60)}m</p>`+
+      `<p style="color:#8fa8c7">Auto-trading: ${d.config?.auto_trading_enabled?'<span class="y">ENABLED</span>':'Disabled'}</p>`+
+      `<p style="color:#8fa8c7">Paper trading: ${d.config?.paper_trading?'<span class="y">ENABLED</span>':'Disabled'}</p>`;
+    if(d.config){
+      document.getElementById('cfg-conf').textContent=d.config.min_confidence+'%';
+      document.getElementById('cfg-rr').textContent='1:'+d.config.min_rr;
+      document.getElementById('cfg-max').textContent=d.config.max_signals_per_hour;
+      document.getElementById('cfg-paper').textContent=d.config.paper_trading?'ON':'OFF';
+    }
+  }catch(e){}
+}
+
+async function loadAffiliateStats(){
+  try{
+    const r=await fetch('/api/admin/affiliate-stats');
+    if(!r.ok)return;
+    const d=await r.json();
+    document.getElementById('aff-tbl').innerHTML=(d||[]).map(x=>
+      `<tr><td>${x.exchange}</td><td>${x.clicks}</td></tr>`
+    ).join('')||'<tr><td colspan="2" style="text-align:center;color:#627a99;padding:14px">No clicks yet</td></tr>';
+  }catch(e){}
+}
+
+setInterval(loadHealth,30000);
+setInterval(loadAffiliateStats,60000);
+
 function showTab(name){
   document.querySelectorAll('[data-tab]').forEach(el=>el.classList.remove('show'));
   document.querySelectorAll('.nav div').forEach(el=>el.classList.remove('act'));
@@ -973,6 +1729,7 @@ function showTab(name){
   if(t)t.classList.add('show');
   const n=document.getElementById('nav-'+name);
   if(n)n.classList.add('act');
+  if(name==='health'){loadHealth();loadAffiliateStats();}
 }
 </script>
 </body>

@@ -4,6 +4,7 @@ Values are read from environment / .env via pydantic-settings.
 """
 from __future__ import annotations
 
+import sys
 from functools import lru_cache
 from typing import List
 
@@ -43,24 +44,25 @@ class Settings(BaseSettings):
     # --- Scanner ---
     universe_refresh_sec: int = 900
     scan_interval_sec: int = 30
-    scan_timeframes: str = "15m,1h,4h,1d"   # MTF pipeline: 15m entry → 1d trend
+    scan_timeframes: str = "15m,1h,4h,1d"
     max_symbols: int = 0
     min_quote_volume_usdt: float = 5_000_000
 
     # --- Signal engine ---
-    min_confidence: float = 75.0            # PUBLIC tier floor
+    min_confidence: float = 75.0
     signal_cooldown_sec: int = 1800
-    symbol_cooldown_minutes: int = 30       # same-direction cooldown (opposite always allowed)
+    symbol_cooldown_minutes: int = 30
     anti_duplicate_signal: bool = True
     max_signals_per_hour: int = 12
-    min_rr: float = 2.0                     # minimum risk-reward
+    min_rr: float = 2.0
 
     # --- Dashboard ---
     dashboard_host: str = "0.0.0.0"
     dashboard_port: int = 8010
-    dashboard_secret: str = "change_me"
+    dashboard_secret: str = ""
     dashboard_user: str = "admin"
     dashboard_password: str = ""
+    secret_key: str = ""
 
     # --- Community ---
     telegram_channel_url: str = ""
@@ -82,7 +84,32 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_dir: str = "/app/logs"
     log_rejection_detail: bool = False
+    log_retention_days: int = 30
+    log_max_size_mb: int = 100
 
+    # --- Paper Trading ---
+    paper_trading: bool = False
+    paper_initial_balance: float = 10_000.0
+    paper_risk_per_trade_pct: float = 1.0
+
+    # --- Auto Trading Foundation (architecture only, never enabled) ---
+    auto_trading_enabled: bool = False
+    auto_trading_max_position_pct: float = 2.0
+    auto_trading_daily_loss_limit_pct: float = 5.0
+
+    # --- Tier routing ---
+    public_min_confidence: float = 75.0
+    vip_min_confidence: float = 85.0
+    elite_min_confidence: float = 95.0
+    elite_min_rr: float = 2.5
+    high_priority_confidence: float = 97.0
+    high_priority_rr: float = 3.5
+    public_chat_id: str = ""
+    vip_chat_id: str = ""
+    elite_vip_chat_id: str = ""
+
+    # --- Misc ---
+    production_start_utc: str = ""
     timezone: str = "UTC"
 
     # ---------- helpers ----------
@@ -118,6 +145,47 @@ class Settings(BaseSettings):
         if not (0 <= v <= 100):
             raise ValueError("min_confidence must be 0..100")
         return v
+
+    @field_validator("auto_trading_enabled")
+    @classmethod
+    def _no_live_trading(cls, v: bool) -> bool:
+        # Auto-trading is architecture only — never allow live enabling
+        if v:
+            import warnings
+            warnings.warn(
+                "AUTO_TRADING_ENABLED=true is not supported yet — forced to false",
+                stacklevel=2,
+            )
+        return False
+
+
+def validate_startup(s: "Settings") -> None:
+    """
+    Called at startup. Raises SystemExit if critical env vars are missing.
+    This ensures misconfigured deployments fail fast instead of silently.
+    """
+    errors: List[str] = []
+
+    if not s.dashboard_password:
+        errors.append(
+            "DASHBOARD_PASSWORD is not set. "
+            "Set a strong password in .env before exposing the dashboard."
+        )
+
+    if not s.secret_key:
+        errors.append(
+            "SECRET_KEY is not set. "
+            "Generate a random secret: python -c \"import secrets; print(secrets.token_hex(32))\""
+        )
+
+    if errors:
+        print("=" * 60, file=sys.stderr)
+        print("  ALPHA RADAR SIGNALS — STARTUP CONFIGURATION ERROR", file=sys.stderr)
+        print("=" * 60, file=sys.stderr)
+        for err in errors:
+            print(f"  ❌  {err}", file=sys.stderr)
+        print("=" * 60, file=sys.stderr)
+        sys.exit(1)
 
 
 @lru_cache

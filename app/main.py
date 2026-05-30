@@ -21,7 +21,7 @@ from typing import Optional
 import uvicorn
 import uvloop
 
-from app.config import settings
+from app.config import settings, validate_startup
 from app.dashboard import create_app
 from app.database import init_db, shutdown_db
 from app.database import repo
@@ -280,6 +280,7 @@ async def _amain() -> None:
 
 
 def main() -> None:
+    validate_startup(settings)
     uvloop.install()
     asyncio.run(_amain())
 

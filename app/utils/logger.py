@@ -1,6 +1,10 @@
 """
 Structured rotating-file logging using loguru. Imported once at startup,
 then every module can use `from app.utils.logger import logger`.
+
+Retention and size caps are configurable via:
+  LOG_RETENTION_DAYS (default 30)
+  LOG_MAX_SIZE_MB    (default 100)
 """
 from __future__ import annotations
 
@@ -31,7 +35,10 @@ def setup_logging() -> None:
         "<level>{message}</level>"
     )
 
-    # stdout — all levels
+    retention = f"{settings.log_retention_days} days"
+    max_size = f"{settings.log_max_size_mb} MB"
+
+    # stdout
     logger.add(
         sys.stdout,
         level=settings.log_level.upper(),
@@ -41,29 +48,32 @@ def setup_logging() -> None:
         diagnose=False,
     )
 
-    # master app log
+    # master app log — configurable retention & size
     logger.add(
         os.path.join(settings.log_dir, "app.log"),
         level=settings.log_level.upper(),
         format=fmt,
-        rotation="20 MB",
-        retention="14 days",
+        rotation=max_size,
+        retention=retention,
         compression="zip",
         enqueue=True,
     )
 
-    # errors only
+    # errors-only log — always keep 30 days regardless of setting
+    errors_retention = f"{max(30, settings.log_retention_days)} days"
     logger.add(
         os.path.join(settings.log_dir, "errors.log"),
         level="ERROR",
         format=fmt,
         rotation="20 MB",
-        retention="30 days",
+        retention=errors_retention,
         compression="zip",
         enqueue=True,
     )
 
-    # per-subsystem logs
+    # per-subsystem logs — half the main size cap, 7 days minimum
+    sub_size = f"{max(10, settings.log_max_size_mb // 2)} MB"
+    sub_retention = f"{max(7, settings.log_retention_days // 4)} days"
     _subsystems = {
         "scanner.log":   "app.scanner",
         "telegram.log":  "app.telegram_bot",
@@ -75,8 +85,8 @@ def setup_logging() -> None:
             os.path.join(settings.log_dir, filename),
             level="DEBUG",
             format=fmt,
-            rotation="10 MB",
-            retention="7 days",
+            rotation=sub_size,
+            retention=sub_retention,
             compression="zip",
             enqueue=True,
             filter=lambda r, p=module_prefix: r["name"].startswith(p),

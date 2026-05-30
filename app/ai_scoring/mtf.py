@@ -198,46 +198,59 @@ def evaluate_pipeline(
 
     setup_reasons = [f"1H {k.replace('_', ' ')}" for k, v in setup_map.items() if v]
 
-    # ── Layer 4: 15M Entry Trigger ──────────────────────────────────────
+    # ── Layer 4: 15M Entry Trigger (score-based) ───────────────────────
+    #
+    # The old hard-BOS-only gate was killing too many valid signals.
+    # We now accept any combination of:
+    #   BOS        +2  (classic break-of-structure trigger)
+    #   FVG retest +2  (price returning into fair value gap)
+    #   OB retest  +2  (price returning into order block)
+    #   EMA pull   +1  (price bouncing off EMA in trend direction)
+    #   VWAP reclaim+1 (price reclaiming VWAP)
+    #   Momentum   +1  (RSI/MACD momentum aligned)
+    #   Vol spike  +1  (above-average volume on trigger candle)
+    #
+    # Minimum entry score to pass: 2 (configurable via ENTRY_MIN_SCORE).
+    # Score is also used to set the entry bonus toward final confidence.
+
+    ENTRY_MIN_SCORE = 2
+
     s15 = m15.structure
-    bos_ok = (side == "LONG" and s15.bos_bull) or (side == "SHORT" and s15.bos_bear)
+    entry_map = {
+        "BOS":         ((side == "LONG" and s15.bos_bull)   or (side == "SHORT" and s15.bos_bear),  2),
+        "FVG retest":  ((side == "LONG" and s15.fvg_bull)   or (side == "SHORT" and s15.fvg_bear),  2),
+        "OB retest":   ((side == "LONG" and s15.ob_bull)    or (side == "SHORT" and s15.ob_bear),   2),
+        "EMA pullback":((
+            (side == "LONG"  and m15.ema_fast > m15.ema_slow and m15.last_close > m15.ema_slow) or
+            (side == "SHORT" and m15.ema_fast < m15.ema_slow and m15.last_close < m15.ema_slow)
+        ), 1),
+        "VWAP reclaim":((side == "LONG" and m15.above_vwap) or (side == "SHORT" and not m15.above_vwap), 1),
+        "Momentum":    ((
+            (side == "LONG"  and m15.momentum_bull and m15.macd_hist > 0) or
+            (side == "SHORT" and m15.momentum_bear and m15.macd_hist < 0)
+        ), 1),
+        "Vol spike":   (m15.vol_spike_pct > 50.0, 1),
+    }
 
-    if not bos_ok:
+    entry_score = sum(weight for ok, weight in entry_map.values() if ok)
+    entry_reasons: List[str] = [
+        f"15M {trigger}" for trigger, (ok, _) in entry_map.items() if ok
+    ]
+
+    if entry_score < ENTRY_MIN_SCORE:
+        hit_list = ", ".join(
+            f"{k}={'✓' if ok else '✗'}" for k, (ok, _) in entry_map.items()
+        )
         return None, MTFRejection(
             side=side, stage="entry",
             detail=(
-                f"15M no BOS trigger — "
-                f"bos_bull={s15.bos_bull} bos_bear={s15.bos_bear}"
+                f"15M entry score too low ({entry_score}/{ENTRY_MIN_SCORE} required) — "
+                f"{hit_list}"
             ),
         )
 
-    momentum_ok = (
-        (side == "LONG"  and m15.momentum_bull and m15.macd_hist > 0) or
-        (side == "SHORT" and m15.momentum_bear and m15.macd_hist < 0)
-    )
-    vol_spike_ok = m15.vol_spike_pct > 50.0
-
-    if not (momentum_ok or vol_spike_ok):
-        return None, MTFRejection(
-            side=side, stage="entry",
-            detail=(
-                f"15M BOS confirmed but no confirmation — "
-                f"momentum={momentum_ok} vol_spike={vol_spike_ok} "
-                f"({m15.vol_spike_pct:.0f}% vs 50% threshold)"
-            ),
-        )
-
-    entry_bonus = 0.0
-    entry_reasons: List[str] = ["15M BOS trigger"]
-    if momentum_ok and vol_spike_ok:
-        entry_bonus = 10.0
-        entry_reasons += ["15M momentum breakout", f"15M volume spike +{m15.vol_spike_pct:.0f}%"]
-    elif momentum_ok:
-        entry_bonus = 5.0
-        entry_reasons.append("15M momentum breakout")
-    else:
-        entry_bonus = 3.0
-        entry_reasons.append(f"15M volume spike +{m15.vol_spike_pct:.0f}%")
+    # Map entry score (2-10) → entry bonus (3-10)
+    entry_bonus = min(10.0, max(3.0, float(entry_score) * 1.2))
 
     # ── Final confidence ────────────────────────────────────────────────
     # Base 75 for passing all 4 layers + bonuses (max 25) = 75-100

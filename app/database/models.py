@@ -106,6 +106,18 @@ class DailyStat(Base):
     worst_pnl: Mapped[float] = mapped_column(Float, default=0.0)
 
 
+class AffiliateClick(Base):
+    """Tracks affiliate link clicks for monetization reporting."""
+    __tablename__ = "affiliate_clicks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    exchange: Mapped[str] = mapped_column(String(32), index=True)  # binance/bybit/okx/bitget
+    clicked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    referrer: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+
+
 class SignalMessage(Base):
     __tablename__ = "signal_messages"
 

@@ -9,8 +9,14 @@ backups/
 archive/
 *.tar.gz
 *.zip
+*.bak
+*.bak.*
+*.patch
+.phase0-backup/
 __pycache__/
 *.pyc
 .venv/
 venv/
 .claude/
+*.before_*
+*.save
