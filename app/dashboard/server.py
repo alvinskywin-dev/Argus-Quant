@@ -821,6 +821,454 @@ async def api_public_backtest():
         return JSONResponse({"error": str(exc)}, status_code=500)
 
 
+# ── Lightweight in-memory cache (Sprint 12–13) ────────────────────
+_api_cache: dict = {}
+_API_CACHE_TTL = 45.0  # seconds
+
+
+def _cache_get(key: str):
+    entry = _api_cache.get(key)
+    if entry and time.time() - entry[0] < _API_CACHE_TTL:
+        return entry[1]
+    return None
+
+
+def _cache_set(key: str, val):
+    _api_cache[key] = (time.time(), val)
+
+
+# ── Sprint 12: Performance Analytics Center ───────────────────────
+
+@app.get("/api/public/performance-center")
+async def api_performance_center():
+    """Multi-period signal analytics: 24h/7D/30D, bands, pairs, distribution."""
+    cached = _cache_get("perf_center")
+    if cached is not None:
+        return JSONResponse(cached)
+
+    from collections import defaultdict as _dd
+
+    now = datetime.now(timezone.utc)
+    cutoff_24h = now - timedelta(hours=24)
+    cutoff_7d  = now - timedelta(days=7)
+    cutoff_30d = now - timedelta(days=30)
+
+    WIN_ST = ("TP1", "TP2", "TP3")
+
+    try:
+        async with SessionLocal() as session:
+            res = await session.execute(
+                select(Signal)
+                .where(
+                    Signal.strategy == _MTF_STRATEGY,
+                    Signal.timeframe.in_(_MTF_TIMEFRAMES),
+                    Signal.created_at >= cutoff_30d,
+                )
+                .order_by(Signal.created_at)
+            )
+            all_sigs = list(res.scalars().all())
+
+        def _period(sigs):
+            closed = [s for s in sigs if s.status in ("TP1", "TP2", "TP3", "SL", "EXPIRED")]
+            open_s  = [s for s in sigs if s.status == "OPEN"]
+            tp1 = [s for s in sigs if s.status == "TP1"]
+            tp2 = [s for s in sigs if s.status == "TP2"]
+            sl  = [s for s in sigs if s.status == "SL"]
+            exp = [s for s in sigs if s.status == "EXPIRED"]
+            wins = [s for s in closed if s.status in WIN_ST]
+            nc = max(1, len(closed))
+            wr = round(len(wins) / nc * 100, 1) if len(closed) >= 5 else None
+            return {
+                "total": len(sigs), "closed": len(closed),
+                "tp1": len(tp1), "tp2": len(tp2),
+                "sl": len(sl), "expired": len(exp),
+                "open": len(open_s),
+                "closed_winrate": wr, "sample_ok": len(closed) >= 30,
+            }
+
+        sigs_24h = [s for s in all_sigs if s.created_at and s.created_at >= cutoff_24h]
+        sigs_7d  = [s for s in all_sigs if s.created_at and s.created_at >= cutoff_7d]
+        sigs_30d = all_sigs
+
+        closed_30d = [s for s in sigs_30d if s.status in ("TP1", "TP2", "TP3", "SL")]
+
+        # Long vs Short
+        def _side(sigs):
+            wins = [s for s in sigs if s.status in WIN_ST]
+            n = max(1, len(sigs))
+            return {"total": len(sigs), "winrate": round(len(wins) / n * 100, 1)}
+
+        long_30d  = [s for s in closed_30d if s.side == "LONG"]
+        short_30d = [s for s in closed_30d if s.side == "SHORT"]
+
+        # Best / Worst pairs
+        sym_map: dict = _dd(list)
+        for s in closed_30d:
+            sym_map[s.symbol].append(s)
+
+        pair_rows = []
+        for sym, sigs in sym_map.items():
+            wins = [s for s in sigs if s.status in WIN_ST]
+            rrs  = [float(s.risk_reward or 0) for s in sigs]
+            n = len(sigs)
+            pair_rows.append({
+                "symbol": sym, "total": n,
+                "winrate": round(len(wins) / n * 100, 1),
+                "avg_rr": round(sum(rrs) / max(1, n), 2),
+            })
+
+        best_pairs  = sorted(pair_rows, key=lambda x: x["winrate"], reverse=True)[:5]
+        worst_pairs = sorted(pair_rows, key=lambda x: x["winrate"])[:5]
+
+        # Confidence bands (30D all statuses)
+        def _band(lo, hi):
+            bsigs = [s for s in sigs_30d if lo <= float(s.confidence or 0) < hi]
+            wins  = [s for s in bsigs if s.status in WIN_ST]
+            losses = [s for s in bsigs if s.status == "SL"]
+            n = len(bsigs)
+            return {
+                "signals": n, "wins": len(wins), "losses": len(losses),
+                "winrate": round(len(wins) / n * 100, 1) if n >= 3 else None,
+            }
+
+        # Status distribution (30D)
+        status_dist = {k: sum(1 for s in sigs_30d if s.status == k)
+                       for k in ("OPEN", "TP1", "TP2", "SL", "EXPIRED")}
+
+        total_closed_30d = len(closed_30d)
+
+        result = {
+            "sample_size": total_closed_30d,
+            "data_collecting": total_closed_30d < 30,
+            "period_24h": _period(sigs_24h),
+            "period_7d":  _period(sigs_7d),
+            "period_30d": _period(sigs_30d),
+            "long_vs_short": {"long": _side(long_30d), "short": _side(short_30d)},
+            "best_pairs":  best_pairs,
+            "worst_pairs": worst_pairs,
+            "confidence_bands": {
+                "75_80":   _band(75, 80),
+                "80_85":   _band(80, 85),
+                "85_90":   _band(85, 90),
+                "90_plus": _band(90, 200),
+            },
+            "status_distribution": status_dist,
+            "updated_at": now.isoformat(),
+        }
+        _cache_set("perf_center", result)
+        return JSONResponse(result)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+# ── Sprint 13: Market Radar ───────────────────────────────────────
+
+@app.get("/api/public/market-radar")
+async def api_market_radar():
+    """Daily market intelligence: bias, risk, setups, sentiment."""
+    cached = _cache_get("market_radar")
+    if cached is not None:
+        return JSONResponse(cached)
+
+    from collections import defaultdict as _dd
+
+    now = datetime.now(timezone.utc)
+    cutoff_24h = now - timedelta(hours=24)
+    cutoff_2h  = now - timedelta(hours=2)
+
+    WIN_ST = ("TP1", "TP2", "TP3")
+
+    try:
+        async with SessionLocal() as session:
+            sig_res = await session.execute(
+                select(Signal)
+                .where(
+                    Signal.strategy == _MTF_STRATEGY,
+                    Signal.timeframe.in_(_MTF_TIMEFRAMES),
+                    Signal.created_at >= cutoff_24h,
+                )
+                .order_by(desc(Signal.created_at))
+            )
+            recent_sigs = list(sig_res.scalars().all())
+
+            fund_subq = (
+                select(
+                    FundingRateSnapshot.symbol,
+                    _sqlfunc.max(FundingRateSnapshot.created_at).label("latest"),
+                )
+                .where(FundingRateSnapshot.created_at >= cutoff_2h)
+                .group_by(FundingRateSnapshot.symbol)
+                .subquery()
+            )
+            fund_res = await session.execute(
+                select(FundingRateSnapshot)
+                .join(fund_subq,
+                    (FundingRateSnapshot.symbol == fund_subq.c.symbol) &
+                    (FundingRateSnapshot.created_at == fund_subq.c.latest))
+            )
+            funding_snaps = list(fund_res.scalars().all())
+
+        def _bias(sigs):
+            if not sigs:
+                return "NEUTRAL"
+            longs = sum(1 for s in sigs if s.side == "LONG")
+            r = longs / len(sigs)
+            return "BULLISH" if r >= 0.65 else ("BEARISH" if r <= 0.35 else "NEUTRAL")
+
+        btc_sigs   = [s for s in recent_sigs if s.symbol == "BTCUSDT"]
+        eth_sigs   = [s for s in recent_sigs if s.symbol == "ETHUSDT"]
+        other_sigs = [s for s in recent_sigs if s.symbol not in ("BTCUSDT", "ETHUSDT")]
+
+        extreme_pos = sum(1 for s in funding_snaps if s.classification == "extreme_positive")
+        extreme_neg = sum(1 for s in funding_snaps if s.classification == "extreme_negative")
+        total_fund  = max(1, len(funding_snaps))
+        er = (extreme_pos + extreme_neg) / total_fund
+        market_risk = "HIGH" if er >= 0.30 else ("MEDIUM" if er >= 0.12 else "LOW")
+
+        strongest = [
+            {
+                "symbol": s.symbol, "side": s.side,
+                "confidence": round(float(s.confidence or 0), 1),
+                "rr": round(float(s.risk_reward or 0), 2),
+                "status": s.status, "tf": s.timeframe,
+            }
+            for s in sorted(recent_sigs, key=lambda x: float(x.confidence or 0), reverse=True)[:10]
+        ]
+
+        total_sigs   = len(recent_sigs)
+        long_count   = sum(1 for s in recent_sigs if s.side == "LONG")
+        short_count  = total_sigs - long_count
+        dir_score    = (long_count / max(1, total_sigs)) * 60
+        fund_adj     = -((extreme_pos - extreme_neg) / total_fund) * 20
+        sentiment_score = max(0, min(100, round(dir_score + 20 + fund_adj)))
+        sentiment_label = "GREED" if sentiment_score >= 60 else ("FEAR" if sentiment_score <= 40 else "NEUTRAL")
+
+        _SECTOR_MAP = {
+            "Layer 1":  {"BTCUSDT","ETHUSDT","SOLUSDT","AVAXUSDT","DOTUSDT","NEARUSDT","ADAUSDT","TRXUSDT"},
+            "DeFi":     {"UNIUSDT","AAVEUSDT","COMPUSDT","CRVUSDT","MKRUSDT","DYDXUSDT","SNXUSDT"},
+            "Layer 2":  {"MATICUSDT","OPUSDT","ARBUSDT","STRKUSDT"},
+            "Meme":     {"DOGEUSDT","SHIBUSDT","PEPEUSDT","FLOKIUSDT","BONKUSDT","WIFUSDT"},
+            "AI/Data":  {"FETUSDT","WLDUSDT","TAOUSDT","RENDERUSDT","OCEANUSDT"},
+            "Gaming":   {"AXSUSDT","SANDUSDT","MANAUSDT","GALAUSDT","IMXUSDT"},
+        }
+        sector_stats = []
+        for sector, syms in _SECTOR_MAP.items():
+            ssigs = [s for s in recent_sigs if s.symbol in syms]
+            if ssigs:
+                longs = sum(1 for s in ssigs if s.side == "LONG")
+                r = longs / len(ssigs)
+                sector_stats.append({
+                    "sector": sector, "signals": len(ssigs),
+                    "bias": "BULLISH" if r >= 0.6 else ("BEARISH" if r <= 0.4 else "NEUTRAL"),
+                })
+        if not sector_stats:
+            sector_stats = [{"sector": "Sector data collecting", "signals": 0, "bias": "NEUTRAL"}]
+
+        result = {
+            "market_bias": {
+                "btc": _bias(btc_sigs),
+                "eth": _bias(eth_sigs),
+                "altcoin": _bias(other_sigs),
+            },
+            "market_risk": market_risk,
+            "strongest_setups": strongest,
+            "sector_radar": sector_stats,
+            "futures_sentiment": {"score": sentiment_score, "label": sentiment_label},
+            "signals_24h": total_sigs,
+            "long_count_24h": long_count,
+            "short_count_24h": short_count,
+            "updated_at": now.isoformat(),
+        }
+        _cache_set("market_radar", result)
+        return JSONResponse(result)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+# ── Sprint 14: Setup Library ──────────────────────────────────────
+
+_SETUP_LIBRARY = [
+    {
+        "id": "trend_continuation",
+        "name": "Trend Continuation",
+        "description": "Enter in the direction of the dominant trend after a pullback, when momentum resumes.",
+        "required_conditions": [
+            "1D EMA50 above EMA200 (LONG) or below (SHORT)",
+            "4H Break of Structure in trend direction",
+            "1H pullback into OB or FVG zone",
+            "15M entry trigger (BOS + volume confirm)",
+        ],
+        "invalidation": "Trend reversal candle closes below EMA200 on 4H. New Lower Low (LONG) or Higher High (SHORT).",
+        "example": "BTCUSDT LONG: Daily trend is bullish. Price pulls back to 4H Order Block. 1H shows bullish engulfing. 15M BOS confirms. Entry zone: the OB level.",
+        "risk_notes": "Size at 1-2% account risk. SL below the Order Block. TP1 at previous HH.",
+        "status": "Active",
+    },
+    {
+        "id": "pullback_entry",
+        "name": "Pullback Entry",
+        "description": "After a strong impulse move, price retraces to a key level before continuing.",
+        "required_conditions": [
+            "Clear impulse leg identified on 4H",
+            "Retracement to 50-61.8% Fibonacci or Order Block",
+            "1H structure holds (no CHoCH against trade direction)",
+            "15M shows entry trigger",
+        ],
+        "invalidation": "Price breaks below pullback entry zone with volume. Structure fails on 1H.",
+        "example": "ETHUSDT LONG: Strong 4H rally. Price pulls back 50% to OB zone. 1H forms higher low. 15M BOS up confirms entry.",
+        "risk_notes": "Tighter SL possible (below the pullback low). Higher RR achievable.",
+        "status": "Active",
+    },
+    {
+        "id": "bos_retest",
+        "name": "BOS Retest",
+        "description": "After a Break of Structure, price often retests the broken level before continuing.",
+        "required_conditions": [
+            "Clean BOS identified on 4H (swing high or low broken)",
+            "Price retests the broken level (now flipped support/resistance)",
+            "1H shows rejection candle at retest zone",
+            "15M entry confirmation",
+        ],
+        "invalidation": "Price closes back through the BOS level in opposite direction.",
+        "example": "SOLUSDT LONG: 4H breaks above key resistance. Price retests that level. 1H pin bar at the retest. 15M BOS up is entry trigger.",
+        "risk_notes": "SL below the BOS retest zone. Invalidation is clear if level fails.",
+        "status": "Active",
+    },
+    {
+        "id": "liquidity_sweep",
+        "name": "Liquidity Sweep",
+        "description": "Price sweeps liquidity (stop hunts) above swing highs or below swing lows, then reverses.",
+        "required_conditions": [
+            "Identified liquidity pool (cluster of equal highs/lows)",
+            "Price sweeps the liquidity with a wick",
+            "Immediate rejection and reversal candle",
+            "4H and 1H structure supports the reversal direction",
+        ],
+        "invalidation": "Price continues in the sweep direction beyond the sweep candle body.",
+        "example": "BTCUSDT SHORT: Multiple equal highs create liquidity. Price wicks above, then closes bearish. 4H structure bearish. 15M entry down.",
+        "risk_notes": "SL above the sweep wick. High reward setups when caught correctly.",
+        "status": "Active",
+    },
+    {
+        "id": "funding_reversal",
+        "name": "Funding Reversal",
+        "description": "Extreme funding rates signal crowded positioning; counter-trend reversal setup.",
+        "required_conditions": [
+            "Funding rate classified as extreme_positive (>0.08%) or extreme_negative (<-0.08%)",
+            "Price shows reversal structure on 4H",
+            "1H confirms with setup conditions",
+            "15M entry in reversal direction",
+        ],
+        "invalidation": "Funding normalizes without price reversal. Strong momentum continues.",
+        "example": "Funding extremely positive (+0.12%). Market is overleveraged long. 4H shows bearish CHoCH. Setup triggers SHORT.",
+        "risk_notes": "Use smaller size — funding reversals can be violent. Don't fight strong trends alone on funding.",
+        "status": "Active",
+    },
+    {
+        "id": "order_block_retest",
+        "name": "Order Block Retest",
+        "description": "Institution order blocks (candles before strong impulse moves) act as support/resistance on retest.",
+        "required_conditions": [
+            "4H Order Block identified (last candle before impulse)",
+            "Price returns to the OB zone",
+            "1H shows rejection or reversal at OB",
+            "15M entry confirmation",
+        ],
+        "invalidation": "Price closes through the entire Order Block with follow-through.",
+        "example": "SOLUSDT: Strong bullish impulse on 4H. Last bearish candle before impulse is OB. Price retests. 1H bullish, 15M BOS up.",
+        "risk_notes": "OB midpoint or bottom (for bullish OB) as SL anchor.",
+        "status": "Active",
+    },
+    {
+        "id": "fvg_retest",
+        "name": "FVG Retest",
+        "description": "Fair Value Gaps (price imbalances) tend to get filled. Entry on retest of the FVG.",
+        "required_conditions": [
+            "Identified FVG on 4H or 1H (3-candle gap in price)",
+            "Price retraces into the FVG zone",
+            "Candle closes inside or at FVG boundary",
+            "15M entry confirmation at FVG",
+        ],
+        "invalidation": "Price closes completely through the FVG with no reaction.",
+        "example": "BTCUSDT: 4H bullish impulse leaves FVG. Price retraces to FVG. 1H bullish, volume dries up. 15M BOS up is entry.",
+        "risk_notes": "50% of FVG as SL anchor. FVGs are strong magnetic levels.",
+        "status": "Active",
+    },
+    {
+        "id": "vwap_reclaim",
+        "name": "VWAP Reclaim",
+        "description": "Price reclaims VWAP after being rejected, signaling institutional re-entry.",
+        "required_conditions": [
+            "Price was below VWAP (for LONG) or above VWAP (for SHORT)",
+            "Strong reclaim candle closes on the correct side of VWAP",
+            "Volume above average on reclaim candle",
+            "15M EMA alignment and entry trigger",
+        ],
+        "invalidation": "Price immediately fails back through VWAP after reclaim.",
+        "example": "ETHUSDT: Price below VWAP, then bullish engulf reclaims VWAP with high volume. 15M BOS up confirms entry.",
+        "risk_notes": "VWAP reclaim setups work best in trending sessions. Less reliable in low-volume periods.",
+        "status": "Active",
+    },
+]
+
+
+@app.get("/api/public/setup-library")
+async def api_setup_library():
+    """Educational setup library — trading concept explanations only."""
+    return JSONResponse({"setups": _SETUP_LIBRARY, "count": len(_SETUP_LIBRARY)})
+
+
+# ── Sprint 15: Public Watchlist ───────────────────────────────────
+
+@app.get("/api/public/watchlist")
+async def api_public_watchlist(symbols: str = ""):
+    """Return latest signal + status for each requested symbol (localStorage watchlist)."""
+    import re as _re
+    raw = [s.strip().upper() for s in symbols.split(",") if s.strip()][:20]
+    symbol_list = [_re.sub(r"[^A-Z0-9]", "", s)[:20] for s in raw]
+    symbol_list = [s for s in symbol_list if s]
+
+    if not symbol_list:
+        return JSONResponse({"error": "symbols parameter required"}, status_code=400)
+
+    try:
+        prices = ws_health().get("prices", {})
+        rows = []
+
+        async with SessionLocal() as session:
+            for sym in symbol_list:
+                res = await session.execute(
+                    select(Signal)
+                    .where(
+                        Signal.symbol == sym,
+                        Signal.strategy == _MTF_STRATEGY,
+                        Signal.timeframe.in_(_MTF_TIMEFRAMES),
+                    )
+                    .order_by(desc(Signal.created_at))
+                    .limit(1)
+                )
+                sig = res.scalar_one_or_none()
+                rows.append({
+                    "symbol": sym,
+                    "current_price": prices.get(sym),
+                    "status": sig.status if sig else "no_signal",
+                    "latest_signal": {
+                        "side": sig.side,
+                        "confidence": round(float(sig.confidence or 0), 1),
+                        "rr": round(float(sig.risk_reward or 0), 2),
+                        "status": sig.status,
+                        "entry": round(float(sig.entry_low or 0), 6),
+                        "tp1": round(float(sig.tp1 or 0), 6),
+                        "sl": round(float(sig.stop_loss or 0), 6),
+                        "timeframe": sig.timeframe,
+                        "created_at": sig.created_at.isoformat() if sig.created_at else None,
+                    } if sig else None,
+                })
+
+        return JSONResponse({"watchlist": rows, "count": len(rows)})
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
 @app.get("/aff/{exchange}")
 async def affiliate_redirect(exchange: str, request: Request):
     """Track affiliate click then redirect to the affiliate URL."""
@@ -1480,6 +1928,26 @@ async def stats_page():
     return HTMLResponse(_stats_page_html())
 
 
+@app.get("/performance-center", response_class=HTMLResponse)
+async def performance_center_page():
+    return HTMLResponse(_performance_center_page_html())
+
+
+@app.get("/market-radar", response_class=HTMLResponse)
+async def market_radar_page():
+    return HTMLResponse(_market_radar_page_html())
+
+
+@app.get("/setup-library", response_class=HTMLResponse)
+async def setup_library_page():
+    return HTMLResponse(_setup_library_page_html())
+
+
+@app.get("/watchlist", response_class=HTMLResponse)
+async def watchlist_page():
+    return HTMLResponse(_watchlist_page_html())
+
+
 @app.get("/about", response_class=HTMLResponse)
 async def about_page():
     return HTMLResponse(_info_page(
@@ -1655,10 +2123,10 @@ footer{{border-top:1px solid #13263a;padding:26px 24px;text-align:center;color:#
   <div class="brand"><a href="/" style="text-decoration:none;color:#eaf2ff">ALPHA RADAR <em>SIGNALS</em></a></div>
   <div class="hnav">
     <a href="/signals">Signals</a>
-    <a href="/performance">Performance</a>
-    <a href="/paper">Paper</a>
-    <a href="/backtest">Backtest</a>
-    <a href="/health">Health</a>
+    <a href="/market-radar">Market Radar</a>
+    <a href="/performance-center">Performance</a>
+    <a href="/setup-library">Setup Library</a>
+    <a href="/watchlist">Watchlist</a>
     <a href="/faq">FAQ</a>
   </div>
 </div>
@@ -3159,6 +3627,574 @@ document.addEventListener('DOMContentLoaded', loadLegacy);
     return _page_shell("Historical Backtest", body, extra_css=css, extra_js=js)
 
 
+# ══════════════════════════════════════════════════════════════════
+#  Sprint 12 — Performance Analytics Center
+# ══════════════════════════════════════════════════════════════════
+
+def _performance_center_page_html() -> str:
+    css = """
+.pc2-hdr{margin-bottom:22px}
+.pc2-title{font-size:26px;font-weight:900;color:#eaf2ff;letter-spacing:.5px}
+.pc2-sub{font-size:12px;color:#7fa0c8;margin-top:4px;letter-spacing:1px}
+.pc2-warn{background:#1a140833;border:1px solid #ffd84d55;border-radius:9px;padding:10px 16px;margin-bottom:18px;font-size:12px;color:#ffd84d}
+.pc2-tabs{display:flex;gap:8px;margin-bottom:18px}
+.pc2-tab{padding:7px 18px;border-radius:8px;border:1px solid #17314b;background:transparent;color:#8fa8c7;cursor:pointer;font-size:12px;font-weight:700;transition:all .15s}
+.pc2-tab.act{background:#08a98f22;border-color:#20f0c0;color:#20f0c0}
+.pc2-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}
+.pc2-card{background:linear-gradient(180deg,#101827,#0b1320);border:1px solid #17314b;border-radius:12px;padding:16px;text-align:center}
+.pc2-lbl{font-size:9px;color:#7fa0c8;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px}
+.pc2-val{font-size:24px;font-weight:900}
+.pc2-2col{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px}
+.pc2-sec{background:linear-gradient(180deg,#101827,#0b1320);border:1px solid #17314b;border-radius:12px;padding:18px}
+.pc2-sec-title{font-size:10px;font-weight:900;color:#7fa0c8;letter-spacing:2px;text-transform:uppercase;margin-bottom:14px;padding-bottom:8px;border-bottom:1px solid #17314b}
+.pc2-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #0e1e2e;font-size:13px}
+.pc2-row:last-child{border-bottom:none}
+.pc2-rlbl{color:#7fa0c8;font-size:12px}
+.pc2-rval{font-weight:700;color:#eaf2ff}
+.pc2-disclaimer{background:#0a1520;border:1px solid #17314b;border-radius:10px;padding:14px;font-size:11px;color:#627a99;margin-top:18px}
+.pc2-collect{background:rgba(8,232,210,.07);border:1px solid rgba(8,232,210,.2);border-radius:12px;padding:28px;text-align:center;margin-bottom:18px}
+.pc2-collect h3{color:#20f0c0;margin-bottom:8px}
+.pc2-collect p{color:#7fa0c8;font-size:13px}
+@media(max-width:860px){.pc2-grid{grid-template-columns:1fr 1fr}.pc2-2col{grid-template-columns:1fr}}
+@media(max-width:480px){.pc2-grid{grid-template-columns:1fr}}
+"""
+    body = """
+<div class="pc2-hdr">
+  <div class="pc2-title">PERFORMANCE ANALYTICS CENTER</div>
+  <div class="pc2-sub">MTF_SMC_STRICT ENGINE &nbsp;·&nbsp; 15M / 1H / 4H / 1D &nbsp;·&nbsp; Live Production Signals</div>
+</div>
+
+<div class="pc2-warn">
+  ⚠&nbsp; Only MTF_SMC_STRICT signals on 15m–1D timeframes are included. Legacy signals are excluded.
+  &nbsp;|&nbsp; <a href="/risk-disclaimer" style="color:#ffd84d">Risk Disclaimer</a>
+</div>
+
+<div class="pc2-tabs">
+  <button class="pc2-tab act" onclick="swPeriod('30d',this)">30 Days</button>
+  <button class="pc2-tab" onclick="swPeriod('7d',this)">7 Days</button>
+  <button class="pc2-tab" onclick="swPeriod('24h',this)">24 Hours</button>
+</div>
+
+<div id="collect-msg" class="pc2-collect" style="display:none">
+  <h3>Collecting Verified Performance Data</h3>
+  <p>Alpha Radar requires at least 30 closed signals before showing headline statistics. Check back as more signals close.</p>
+</div>
+
+<div id="main-data">
+  <div class="pc2-grid">
+    <div class="pc2-card"><div class="pc2-lbl">Total Signals</div><div id="pc-total" class="pc2-val" style="color:#eaf2ff">—</div></div>
+    <div class="pc2-card"><div class="pc2-lbl">Closed</div><div id="pc-closed" class="pc2-val" style="color:#20e6c3">—</div></div>
+    <div class="pc2-card"><div class="pc2-lbl">Win Rate</div><div id="pc-wr" class="pc2-val g">—</div></div>
+    <div class="pc2-card"><div class="pc2-lbl">Open</div><div id="pc-open" class="pc2-val" style="color:#20a7ff">—</div></div>
+    <div class="pc2-card"><div class="pc2-lbl">TP1 Hit</div><div id="pc-tp1" class="pc2-val g">—</div></div>
+    <div class="pc2-card"><div class="pc2-lbl">TP2 Hit</div><div id="pc-tp2" class="pc2-val g">—</div></div>
+    <div class="pc2-card"><div class="pc2-lbl">SL Hit</div><div id="pc-sl" class="pc2-val r">—</div></div>
+    <div class="pc2-card"><div class="pc2-lbl">Expired</div><div id="pc-exp" class="pc2-val y">—</div></div>
+  </div>
+
+  <div class="pc2-2col">
+    <!-- Long vs Short -->
+    <div class="pc2-sec">
+      <div class="pc2-sec-title">Long vs Short (30D Closed)</div>
+      <div class="pc2-row"><span class="pc2-rlbl">LONG Signals</span><span id="ls-long-tot" class="pc2-rval g">—</span></div>
+      <div class="pc2-row"><span class="pc2-rlbl">LONG Win Rate</span><span id="ls-long-wr" class="pc2-rval g">—</span></div>
+      <div class="pc2-row"><span class="pc2-rlbl">SHORT Signals</span><span id="ls-short-tot" class="pc2-rval r">—</span></div>
+      <div class="pc2-row"><span class="pc2-rlbl">SHORT Win Rate</span><span id="ls-short-wr" class="pc2-rval r">—</span></div>
+    </div>
+    <!-- Status Distribution -->
+    <div class="pc2-sec">
+      <div class="pc2-sec-title">Status Distribution (30D)</div>
+      <div id="status-dist"></div>
+    </div>
+  </div>
+
+  <div class="pc2-2col">
+    <!-- Best Pairs -->
+    <div class="pc2-sec">
+      <div class="pc2-sec-title">Best Pairs (30D)</div>
+      <div id="best-pairs"></div>
+    </div>
+    <!-- Worst Pairs -->
+    <div class="pc2-sec">
+      <div class="pc2-sec-title">Worst Pairs (30D)</div>
+      <div id="worst-pairs"></div>
+    </div>
+  </div>
+
+  <!-- Confidence Bands -->
+  <div class="pc2-sec" style="margin-bottom:18px">
+    <div class="pc2-sec-title">Confidence Bands (30D)</div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px" id="conf-bands"></div>
+  </div>
+</div>
+
+<div class="pc2-disclaimer">
+  ⚠ Risk Disclaimer: Past performance does not guarantee future results. All signals are for educational purposes only.
+  Trading crypto futures involves substantial risk of loss.
+  <a href="/risk-disclaimer" style="color:#20e6c3">Read full disclaimer →</a>
+</div>
+"""
+    js = """
+let _perfData = null;
+let _curPeriod = '30d';
+
+function swPeriod(p, btn) {
+  _curPeriod = p;
+  document.querySelectorAll('.pc2-tab').forEach(b => b.classList.remove('act'));
+  btn.classList.add('act');
+  renderPeriod();
+}
+
+function renderPeriod() {
+  if (!_perfData) return;
+  const pd = _perfData['period_' + _curPeriod];
+  if (!pd) return;
+  document.getElementById('pc-total').textContent = pd.total;
+  document.getElementById('pc-closed').textContent = pd.closed;
+  document.getElementById('pc-open').textContent = pd.open;
+  document.getElementById('pc-tp1').textContent = pd.tp1;
+  document.getElementById('pc-tp2').textContent = pd.tp2;
+  document.getElementById('pc-sl').textContent = pd.sl;
+  document.getElementById('pc-exp').textContent = pd.expired;
+  const wrEl = document.getElementById('pc-wr');
+  if (pd.closed_winrate !== null && pd.closed_winrate !== undefined) {
+    wrEl.textContent = pd.closed_winrate + '%';
+    wrEl.className = 'pc2-val ' + (pd.closed_winrate >= 50 ? 'g' : 'r');
+  } else {
+    wrEl.textContent = '—';
+    wrEl.className = 'pc2-val';
+  }
+}
+
+function renderPairs(id, rows) {
+  const el = document.getElementById(id);
+  if (!rows || !rows.length) { el.innerHTML = '<div style="color:#627a99;font-size:13px;padding:10px">Not enough data</div>'; return; }
+  el.innerHTML = rows.map(r =>
+    '<div class="pc2-row"><span class="pc2-rlbl"><b>' + r.symbol + '</b> (' + r.total + ' sigs)</span>' +
+    '<span class="pc2-rval ' + (r.winrate >= 50 ? 'g' : 'r') + '">' + r.winrate + '%</span></div>'
+  ).join('');
+}
+
+async function load() {
+  try {
+    const r = await fetch('/api/public/performance-center');
+    if (!r.ok) return;
+    _perfData = await r.json();
+
+    const dc = _perfData.data_collecting;
+    document.getElementById('collect-msg').style.display = dc ? 'block' : 'none';
+    document.getElementById('main-data').style.display = dc ? 'none' : 'block';
+    if (dc) return;
+
+    renderPeriod();
+
+    // Long vs Short
+    const ls = _perfData.long_vs_short;
+    document.getElementById('ls-long-tot').textContent = ls.long.total;
+    document.getElementById('ls-long-wr').textContent = ls.long.winrate + '%';
+    document.getElementById('ls-short-tot').textContent = ls.short.total;
+    document.getElementById('ls-short-wr').textContent = ls.short.winrate + '%';
+
+    // Status distribution
+    const sd = _perfData.status_distribution;
+    const sdEl = document.getElementById('status-dist');
+    sdEl.innerHTML = Object.entries(sd).map(([k, v]) =>
+      '<div class="pc2-row"><span class="pc2-rlbl">' + k + '</span><span class="pc2-rval">' + v + '</span></div>'
+    ).join('');
+
+    // Pairs
+    renderPairs('best-pairs', _perfData.best_pairs);
+    renderPairs('worst-pairs', _perfData.worst_pairs);
+
+    // Confidence bands
+    const cb = _perfData.confidence_bands;
+    const cbLabels = {'75_80':'75–80%','80_85':'80–85%','85_90':'85–90%','90_plus':'90%+'};
+    const cbEl = document.getElementById('conf-bands');
+    cbEl.innerHTML = Object.entries(cb).map(([k, v]) =>
+      '<div class="pc2-card">' +
+      '<div class="pc2-lbl">' + (cbLabels[k] || k) + '</div>' +
+      '<div class="pc2-val" style="font-size:18px">' + v.signals + ' sigs</div>' +
+      '<div style="font-size:11px;margin-top:4px;color:#20ff80">' + (v.winrate !== null ? v.winrate + '% wr' : '—') + '</div>' +
+      '<div style="font-size:10px;color:#627a99">' + v.wins + 'W / ' + v.losses + 'L</div>' +
+      '</div>'
+    ).join('');
+  } catch(e) { console.error(e); }
+}
+
+document.addEventListener('DOMContentLoaded', () => { load(); setInterval(load, 60000); });
+"""
+    return _page_shell("Performance Analytics Center", body, extra_css=css, extra_js=js)
+
+
+# ══════════════════════════════════════════════════════════════════
+#  Sprint 13 — Market Radar
+# ══════════════════════════════════════════════════════════════════
+
+def _market_radar_page_html() -> str:
+    css = """
+.mr-title{font-size:26px;font-weight:900;color:#eaf2ff;margin-bottom:4px}
+.mr-sub{font-size:12px;color:#7fa0c8;margin-bottom:20px;letter-spacing:1px}
+.mr-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px}
+.mr-card{background:linear-gradient(180deg,#101827,#0b1320);border:1px solid #17314b;border-radius:13px;padding:18px}
+.mr-card-title{font-size:10px;font-weight:900;letter-spacing:2px;text-transform:uppercase;color:#7fa0c8;margin-bottom:14px;padding-bottom:8px;border-bottom:1px solid #17314b}
+.mr-bias{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #0e1e2e;font-size:13px}
+.mr-bias:last-child{border-bottom:none}
+.mr-lbl{color:#7fa0c8;font-size:12px}
+.bias-bull{color:#20ff80;font-weight:900}
+.bias-bear{color:#ff4f61;font-weight:900}
+.bias-neut{color:#ffd84d;font-weight:900}
+.risk-low{color:#20ff80;font-size:28px;font-weight:900}
+.risk-med{color:#ffd84d;font-size:28px;font-weight:900}
+.risk-high{color:#ff4f61;font-size:28px;font-weight:900}
+.mr-sentiment{text-align:center;padding:10px 0}
+.mr-score{font-size:48px;font-weight:900;margin:8px 0}
+.mr-sentiment-bar{height:10px;background:#0b1320;border-radius:999px;overflow:hidden;margin:8px 0}
+.mr-sentiment-fill{height:100%;background:linear-gradient(90deg,#ff4f61,#ffd84d,#20ff80);border-radius:999px;transition:width .4s}
+.mr-3col{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px}
+.mr-setup-row{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid #0e1e2e;font-size:13px}
+.mr-setup-row:last-child{border-bottom:none}
+.mr-24h{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px}
+.mr-24h-card{background:linear-gradient(180deg,#101827,#0b1320);border:1px solid #17314b;border-radius:12px;padding:14px;text-align:center}
+.mr-24h-lbl{font-size:9px;color:#7fa0c8;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px}
+.mr-24h-val{font-size:22px;font-weight:900}
+@media(max-width:860px){.mr-grid{grid-template-columns:1fr 1fr}.mr-3col{grid-template-columns:1fr}.mr-24h{grid-template-columns:1fr 1fr}}
+@media(max-width:480px){.mr-grid{grid-template-columns:1fr}.mr-24h{grid-template-columns:1fr}}
+"""
+    body = """
+<div class="mr-title">TODAY'S MARKET RADAR</div>
+<div class="mr-sub">LIVE MARKET INTELLIGENCE &nbsp;·&nbsp; Updated every 45 seconds</div>
+
+<div class="mr-24h">
+  <div class="mr-24h-card"><div class="mr-24h-lbl">Signals (24H)</div><div id="mr-sig24h" class="mr-24h-val" style="color:#20e6c3">—</div></div>
+  <div class="mr-24h-card"><div class="mr-24h-lbl">Long Signals</div><div id="mr-long24h" class="mr-24h-val g">—</div></div>
+  <div class="mr-24h-card"><div class="mr-24h-lbl">Short Signals</div><div id="mr-short24h" class="mr-24h-val r">—</div></div>
+</div>
+
+<div class="mr-grid">
+  <!-- Market Bias -->
+  <div class="mr-card">
+    <div class="mr-card-title">Market Bias</div>
+    <div class="mr-bias"><span class="mr-lbl">BTC</span><span id="mr-btc" class="bias-neut">—</span></div>
+    <div class="mr-bias"><span class="mr-lbl">ETH</span><span id="mr-eth" class="bias-neut">—</span></div>
+    <div class="mr-bias"><span class="mr-lbl">Altcoins</span><span id="mr-alt" class="bias-neut">—</span></div>
+  </div>
+  <!-- Market Risk -->
+  <div class="mr-card" style="text-align:center">
+    <div class="mr-card-title">Market Risk</div>
+    <div id="mr-risk" class="risk-med">—</div>
+    <div style="font-size:11px;color:#7fa0c8;margin-top:8px">Based on funding rate extremes</div>
+  </div>
+  <!-- Futures Sentiment -->
+  <div class="mr-card">
+    <div class="mr-card-title">Futures Sentiment</div>
+    <div class="mr-sentiment">
+      <div style="font-size:11px;color:#7fa0c8">Fear ← → Greed</div>
+      <div id="mr-sentiment-score" class="mr-score" style="color:#ffd84d">—</div>
+      <div class="mr-sentiment-bar"><div id="mr-sentiment-fill" class="mr-sentiment-fill" style="width:50%"></div></div>
+      <div id="mr-sentiment-lbl" style="font-weight:900;font-size:14px;color:#ffd84d">—</div>
+    </div>
+  </div>
+</div>
+
+<div class="mr-3col">
+  <!-- Strongest Setups -->
+  <div class="mr-card" style="grid-column:1/-1">
+    <div class="mr-card-title">Strongest Setups Today</div>
+    <div id="mr-setups">
+      <div style="color:#627a99;padding:16px;text-align:center">Loading...</div>
+    </div>
+  </div>
+</div>
+
+<!-- Sector Radar -->
+<div class="mr-card" style="margin-bottom:18px">
+  <div class="mr-card-title">Sector Radar</div>
+  <div id="mr-sectors"></div>
+</div>
+"""
+    js = """
+function biasCls(b) {
+  if(b==='BULLISH') return 'bias-bull';
+  if(b==='BEARISH') return 'bias-bear';
+  return 'bias-neut';
+}
+function riskCls(r) {
+  if(r==='HIGH') return 'risk-high';
+  if(r==='LOW') return 'risk-low';
+  return 'risk-med';
+}
+
+async function loadRadar() {
+  try {
+    const r = await fetch('/api/public/market-radar');
+    if (!r.ok) return;
+    const d = await r.json();
+
+    document.getElementById('mr-sig24h').textContent = d.signals_24h || 0;
+    document.getElementById('mr-long24h').textContent = d.long_count_24h || 0;
+    document.getElementById('mr-short24h').textContent = d.short_count_24h || 0;
+
+    const mb = d.market_bias || {};
+    ['btc','eth','alt'].forEach((id, i) => {
+      const key = ['btc','eth','altcoin'][i];
+      const el = document.getElementById('mr-' + id);
+      el.textContent = mb[key] || 'NEUTRAL';
+      el.className = biasCls(mb[key]);
+    });
+
+    const rEl = document.getElementById('mr-risk');
+    rEl.textContent = d.market_risk || '—';
+    rEl.className = riskCls(d.market_risk);
+
+    const sent = d.futures_sentiment || {};
+    document.getElementById('mr-sentiment-score').textContent = sent.score ?? '—';
+    document.getElementById('mr-sentiment-lbl').textContent = sent.label || '—';
+    const fill = document.getElementById('mr-sentiment-fill');
+    fill.style.width = (sent.score || 50) + '%';
+    const sc = sent.score || 50;
+    document.getElementById('mr-sentiment-score').style.color = sc>=60?'#20ff80':(sc<=40?'#ff4f61':'#ffd84d');
+    document.getElementById('mr-sentiment-lbl').style.color = sc>=60?'#20ff80':(sc<=40?'#ff4f61':'#ffd84d');
+
+    const setups = d.strongest_setups || [];
+    const sEl = document.getElementById('mr-setups');
+    if (!setups.length) {
+      sEl.innerHTML = '<div style="color:#627a99;padding:16px;text-align:center">No signals in last 24 hours</div>';
+    } else {
+      sEl.innerHTML = setups.map(s =>
+        '<div class="mr-setup-row">' +
+        '<span><b>' + s.symbol + '</b> <span style="color:#7fa0c8;font-size:11px">' + s.tf + '</span></span>' +
+        '<span><span class="' + (s.side==='LONG'?'bl2':'bs2') + '">' + s.side + '</span></span>' +
+        '<span style="color:#20e6c3">' + s.confidence + '%</span>' +
+        '<span style="color:#ffd84d">1:' + s.rr + '</span>' +
+        '<span class="' + (s.status==='OPEN'?'bopen':s.status==='SL'?'bsl':'btp') + '">' + s.status + '</span>' +
+        '</div>'
+      ).join('');
+    }
+
+    const sectors = d.sector_radar || [];
+    const secEl = document.getElementById('mr-sectors');
+    secEl.innerHTML = sectors.length
+      ? '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px">' +
+        sectors.map(s =>
+          '<div style="background:#0a111a;border:1px solid #0e1e2e;border-radius:10px;padding:12px">' +
+          '<div style="font-size:12px;font-weight:700;color:#eaf2ff">' + s.sector + '</div>' +
+          '<div class="' + biasCls(s.bias) + '" style="font-size:11px;margin-top:5px">' + s.bias + ' (' + s.signals + ' sigs)</div>' +
+          '</div>'
+        ).join('') + '</div>'
+      : '<div style="color:#627a99;padding:10px">Sector data collecting</div>';
+
+  } catch(e) { console.error(e); }
+}
+
+document.addEventListener('DOMContentLoaded', () => { loadRadar(); setInterval(loadRadar, 45000); });
+"""
+    return _page_shell("Market Radar", body, extra_css=css, extra_js=js)
+
+
+# ══════════════════════════════════════════════════════════════════
+#  Sprint 14 — Setup Library
+# ══════════════════════════════════════════════════════════════════
+
+def _setup_library_page_html() -> str:
+    css = """
+.sl-title{font-size:26px;font-weight:900;color:#eaf2ff;margin-bottom:4px}
+.sl-sub{font-size:12px;color:#7fa0c8;margin-bottom:20px;letter-spacing:1px}
+.sl-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
+.sl-card{background:linear-gradient(180deg,#101827,#0b1320);border:1px solid #17314b;border-radius:14px;padding:22px;position:relative;overflow:hidden}
+.sl-card:before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,#08a98f,#20f0c0)}
+.sl-card-name{font-size:16px;font-weight:900;color:#eaf2ff;margin-bottom:8px}
+.sl-card-desc{font-size:13px;color:#8fa8c7;margin-bottom:14px;line-height:1.6}
+.sl-section{margin-bottom:12px}
+.sl-section-lbl{font-size:9px;font-weight:900;letter-spacing:2px;text-transform:uppercase;color:#20f0c0;margin-bottom:6px}
+.sl-item{font-size:12px;color:#c9d8e8;padding:3px 0;display:flex;gap:8px;align-items:flex-start}
+.sl-dot{width:5px;height:5px;border-radius:50%;background:#20f0c0;margin-top:5px;flex-shrink:0}
+.sl-status{display:inline-flex;padding:3px 10px;border-radius:5px;font-size:10px;font-weight:900;letter-spacing:1px;margin-top:12px}
+.sl-active{background:rgba(32,255,128,.12);color:#20ff80;border:1px solid rgba(32,255,128,.3)}
+.sl-diag{background:rgba(255,216,77,.12);color:#ffd84d;border:1px solid rgba(255,216,77,.3)}
+.sl-plan{background:rgba(32,167,255,.12);color:#20a7ff;border:1px solid rgba(32,167,255,.3)}
+.sl-example{background:#061522;border:1px solid #17314b;border-radius:8px;padding:12px;font-size:11px;color:#7fa0c8;margin-top:10px;font-style:italic;line-height:1.6}
+.sl-risk{font-size:11px;color:#ffd84d;margin-top:8px;background:rgba(255,216,77,.06);border:1px solid rgba(255,216,77,.18);border-radius:7px;padding:8px 12px}
+@media(max-width:860px){.sl-grid{grid-template-columns:1fr}}
+"""
+    body = """
+<div class="sl-title">SETUP LIBRARY</div>
+<div class="sl-sub">EDUCATIONAL STRATEGY GUIDE &nbsp;·&nbsp; Trading concept explanations — no private source code exposed</div>
+<div id="sl-grid" class="sl-grid">
+  <div style="color:#627a99;padding:20px">Loading setup library...</div>
+</div>
+"""
+    js = """
+function statusCls(s) {
+  if (s === 'Active') return 'sl-active';
+  if (s === 'Diagnostic') return 'sl-diag';
+  return 'sl-plan';
+}
+
+async function loadLibrary() {
+  try {
+    const r = await fetch('/api/public/setup-library');
+    if (!r.ok) return;
+    const d = await r.json();
+    const grid = document.getElementById('sl-grid');
+    grid.innerHTML = (d.setups || []).map(s =>
+      '<div class="sl-card">' +
+      '<div class="sl-card-name">' + s.name + '</div>' +
+      '<div class="sl-card-desc">' + s.description + '</div>' +
+      '<div class="sl-section">' +
+      '<div class="sl-section-lbl">Required Conditions</div>' +
+      s.required_conditions.map(c => '<div class="sl-item"><div class="sl-dot"></div><span>' + c + '</span></div>').join('') +
+      '</div>' +
+      '<div class="sl-section">' +
+      '<div class="sl-section-lbl">Invalidation</div>' +
+      '<div class="sl-item"><div class="sl-dot" style="background:#ff4f61"></div><span style="color:#ff9aaa">' + s.invalidation + '</span></div>' +
+      '</div>' +
+      '<div class="sl-example">📖 Example: ' + s.example + '</div>' +
+      '<div class="sl-risk">⚠ Risk: ' + s.risk_notes + '</div>' +
+      '<span class="sl-status ' + statusCls(s.status) + '">' + s.status + '</span>' +
+      '</div>'
+    ).join('');
+  } catch(e) { console.error(e); }
+}
+
+document.addEventListener('DOMContentLoaded', loadLibrary);
+"""
+    return _page_shell("Setup Library", body, extra_css=css, extra_js=js)
+
+
+# ══════════════════════════════════════════════════════════════════
+#  Sprint 15 — Watchlist
+# ══════════════════════════════════════════════════════════════════
+
+def _watchlist_page_html() -> str:
+    css = """
+.wl-title{font-size:26px;font-weight:900;color:#eaf2ff;margin-bottom:4px}
+.wl-sub{font-size:12px;color:#7fa0c8;margin-bottom:20px;letter-spacing:1px}
+.wl-add{display:flex;gap:10px;margin-bottom:18px;flex-wrap:wrap}
+.wl-input{flex:1;min-width:180px;background:#07101a;border:1px solid #17314b;border-radius:9px;color:#eaf2ff;padding:11px 14px;font-size:14px;outline:none;font-family:inherit}
+.wl-input:focus{border-color:#20f0c0}
+.wl-add-btn{background:linear-gradient(90deg,#08a98f,#20f0c0);color:#001b18;border:none;border-radius:9px;font-weight:900;font-size:13px;padding:11px 22px;cursor:pointer;letter-spacing:1px;white-space:nowrap}
+.wl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;margin-bottom:24px}
+.wl-card{background:linear-gradient(180deg,#101827,#0b1320);border:1px solid #17314b;border-radius:13px;padding:18px;position:relative}
+.wl-card-sym{font-size:16px;font-weight:900;color:#eaf2ff;margin-bottom:4px}
+.wl-card-price{font-size:13px;color:#7fa0c8;margin-bottom:12px}
+.wl-card-sig{font-size:12px;margin-bottom:10px}
+.wl-remove{position:absolute;top:14px;right:14px;background:rgba(255,79,97,.1);border:1px solid rgba(255,79,97,.25);border-radius:6px;color:#ff4f61;padding:4px 9px;cursor:pointer;font-size:11px;font-weight:700}
+.wl-remove:hover{background:rgba(255,79,97,.2)}
+.wl-tg-cta{background:rgba(32,230,195,.06);border:1px solid rgba(32,230,195,.2);border-radius:13px;padding:20px;text-align:center;margin-bottom:18px}
+.wl-tg-cta h3{color:#20e6c3;margin-bottom:8px;font-size:16px}
+.wl-tg-cta p{color:#7fa0c8;font-size:13px;margin-bottom:12px}
+.wl-empty{background:#0b1320;border:1px solid #17314b;border-radius:13px;padding:40px;text-align:center;color:#627a99}
+.wl-empty h3{font-size:18px;margin-bottom:8px;color:#8fa8c7}
+.no-sig{color:#627a99;font-size:12px;font-style:italic}
+@media(max-width:480px){.wl-add{flex-direction:column}}
+"""
+    body = """
+<div class="wl-title">MY WATCHLIST</div>
+<div class="wl-sub">TRACK FAVORITE PAIRS &nbsp;·&nbsp; Stored locally in your browser &nbsp;·&nbsp; No login required</div>
+
+<div class="wl-add">
+  <input id="wl-input" class="wl-input" placeholder="Add symbol e.g. BTCUSDT, ETHUSDT" maxlength="30" onkeydown="if(event.key==='Enter')addSymbol()">
+  <button class="wl-add-btn" onclick="addSymbol()">+ Add Symbol</button>
+</div>
+
+<div id="wl-grid" class="wl-grid">
+  <div class="wl-empty"><h3>Your watchlist is empty</h3><p>Add symbols above to track their latest signals.</p></div>
+</div>
+
+<div class="wl-tg-cta">
+  <h3>Get Notified on Telegram</h3>
+  <p>Join our Telegram channel to receive real-time alerts when new signals appear for your watched pairs.</p>
+  <a href="/faq" style="background:linear-gradient(90deg,#08a98f,#20f0c0);color:#001b18;border:none;border-radius:9px;font-weight:900;font-size:13px;padding:10px 22px;display:inline-block">Notify me on Telegram →</a>
+</div>
+"""
+    js = """
+const WL_KEY = 'alpha_radar_watchlist';
+
+function loadWatchlist() {
+  try { return JSON.parse(localStorage.getItem(WL_KEY) || '[]'); }
+  catch(e) { return []; }
+}
+
+function saveWatchlist(list) {
+  localStorage.setItem(WL_KEY, JSON.stringify(list));
+}
+
+function addSymbol() {
+  const raw = document.getElementById('wl-input').value.trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
+  if (!raw || raw.length > 20) return;
+  const list = loadWatchlist();
+  if (list.includes(raw)) { alert(raw + ' is already in your watchlist'); return; }
+  list.push(raw);
+  saveWatchlist(list);
+  document.getElementById('wl-input').value = '';
+  renderAll();
+}
+
+function removeSymbol(sym) {
+  const list = loadWatchlist().filter(s => s !== sym);
+  saveWatchlist(list);
+  renderAll();
+}
+
+function statusBadge(s) {
+  if (!s || s === 'no_signal') return '<span style="color:#627a99;font-size:11px">No signal</span>';
+  if (s === 'OPEN') return '<span class="bopen">OPEN</span>';
+  if (s === 'SL') return '<span class="bsl">SL</span>';
+  if (s === 'EXPIRED') return '<span class="bexp">EXP</span>';
+  return '<span class="btp">' + s + '</span>';
+}
+
+function sideBadge(s) {
+  return '<span class="' + (s==='LONG'?'bl2':'bs2') + '">' + s + '</span>';
+}
+
+async function renderAll() {
+  const list = loadWatchlist();
+  const grid = document.getElementById('wl-grid');
+  if (!list.length) {
+    grid.innerHTML = '<div class="wl-empty"><h3>Your watchlist is empty</h3><p>Add symbols above to track their latest signals.</p></div>';
+    return;
+  }
+  grid.innerHTML = list.map(sym =>
+    '<div class="wl-card" id="wl-' + sym + '">' +
+    '<div class="wl-card-sym">' + sym + '</div>' +
+    '<div class="wl-card-price" id="wlp-' + sym + '">Loading...</div>' +
+    '<div class="wl-card-sig" id="wls-' + sym + '">Loading signal...</div>' +
+    '<button class="wl-remove" onclick="removeSymbol(\'' + sym + '\')">✕ Remove</button>' +
+    '</div>'
+  ).join('');
+
+  try {
+    const r = await fetch('/api/public/watchlist?symbols=' + list.join(','));
+    if (!r.ok) return;
+    const d = await r.json();
+    (d.watchlist || []).forEach(item => {
+      const priceEl = document.getElementById('wlp-' + item.symbol);
+      const sigEl = document.getElementById('wls-' + item.symbol);
+      if (priceEl) {
+        priceEl.textContent = item.current_price ? 'Price: $' + parseFloat(item.current_price).toFixed(4) : 'Price: —';
+      }
+      if (sigEl) {
+        const sig = item.latest_signal;
+        if (!sig) {
+          sigEl.innerHTML = '<span class="no-sig">No signals found</span>';
+        } else {
+          sigEl.innerHTML =
+            sideBadge(sig.side) + ' ' + statusBadge(sig.status) +
+            ' <span style="color:#20e6c3">' + sig.confidence + '%</span>' +
+            ' <span style="color:#ffd84d">1:' + sig.rr + '</span>' +
+            '<div style="font-size:10px;color:#627a99;margin-top:4px">Entry: ' + sig.entry + ' | TP1: ' + sig.tp1 + '</div>';
+        }
+      }
+    });
+  } catch(e) { console.error(e); }
+}
+
+document.addEventListener('DOMContentLoaded', renderAll);
+"""
+    return _page_shell("Watchlist", body, extra_css=css, extra_js=js)
+
+
 def create_app():
     return app
 
@@ -3282,16 +4318,17 @@ a{color:inherit;text-decoration:none}button{font-family:inherit}.container{width
 </style>
 </head>
 <body>
-<nav class="nav"><div class="container nav-in"><a class="brand" href="/"><svg class="logo-svg" viewBox="0 0 100 100" fill="none"><circle cx="50" cy="50" r="44" stroke="#18f28b" stroke-width="5"/><path d="M50 12 84 84H68L58 62H42L32 84H16L50 12Z" fill="url(#g)"/><path d="M37 58 50 31l13 27H37Z" fill="#031020" opacity=".85"/><path d="M25 76c13-10 30-15 50-16" stroke="#08e8d2" stroke-width="5" stroke-linecap="round"/><defs><linearGradient id="g" x1="20" y1="12" x2="82" y2="85"><stop stop-color="#08e8d2"/><stop offset="1" stop-color="#18f28b"/></linearGradient></defs></svg><div class="brand-word">ALPHA RADAR<b>SIGNALS</b></div></a><div class="nav-links"><a href="/signals" data-i18n="nav.signals">Signals</a><a href="/performance" data-i18n="nav.performance">Performance</a><a href="/stats" data-i18n="nav.stats">Stats</a><a href="/about" data-i18n="nav.about">About</a><a href="/faq" data-i18n="nav.faq">FAQ</a></div>__TG_BTN__<div class="lang-sel"><button class="lang-btn" id="lang-btn" onclick="toggleLangMenu(event)" aria-label="Select language">🌐 <span id="lang-cur">EN</span> ▾</button><div class="lang-menu" id="lang-menu"></div></div></div></nav>
+<nav class="nav"><div class="container nav-in"><a class="brand" href="/"><svg class="logo-svg" viewBox="0 0 100 100" fill="none"><circle cx="50" cy="50" r="44" stroke="#18f28b" stroke-width="5"/><path d="M50 12 84 84H68L58 62H42L32 84H16L50 12Z" fill="url(#g)"/><path d="M37 58 50 31l13 27H37Z" fill="#031020" opacity=".85"/><path d="M25 76c13-10 30-15 50-16" stroke="#08e8d2" stroke-width="5" stroke-linecap="round"/><defs><linearGradient id="g" x1="20" y1="12" x2="82" y2="85"><stop stop-color="#08e8d2"/><stop offset="1" stop-color="#18f28b"/></linearGradient></defs></svg><div class="brand-word">ALPHA RADAR<b>SIGNALS</b></div></a><div class="nav-links"><a href="/signals">Signals</a><a href="/market-radar">Market Radar</a><a href="/performance-center">Performance</a><a href="/setup-library">Setup Library</a><a href="/watchlist">Watchlist</a><a href="/faq">FAQ</a></div>__TG_BTN__<div class="lang-sel"><button class="lang-btn" id="lang-btn" onclick="toggleLangMenu(event)" aria-label="Select language">🌐 <span id="lang-cur">EN</span> ▾</button><div class="lang-menu" id="lang-menu"></div></div></div></nav>
 <header class="hero"><div class="container"><div class="hero-grid"><div><h1 class="hero-title"><span>AI-POWERED</span><span><b class="futures">FUTURES</b> <b class="signals">SIGNALS</b></span></h1><p class="hero-sub">Multi-Timeframe Analysis • Risk Managed • 24/7 Scanner</p><div class="feature-row"><div class="fitem"><div class="ficon">◎</div><div class="ftxt"><b>High Accuracy</b>AI Validated</div></div><div class="fitem"><div class="ficon">盾</div><div class="ftxt"><b>Risk Managed</b>Smart Entries</div></div><div class="fitem"><div class="ficon">⚡</div><div class="ftxt"><b>24/7 Scanner</b>Never Miss Setup</div></div><div class="fitem"><div class="ficon">▥</div><div class="ftxt"><b>Live Performance</b>Transparent Stats</div></div></div><div class="hero-btns">__HERO_BTNS__</div></div><div class="radar-wrap"><div class="radar"><div class="sweep"></div><div class="dot d1"></div><div class="dot d2"></div><div class="dot d3"></div><div class="dot d4"></div><div class="radar-a"><svg viewBox="0 0 100 100"><path d="M50 14 83 84H66L58 63H42L34 84H17L50 14Z" fill="url(#ra)"/><path d="M38 58 50 32l12 26H38Z" fill="#061329"/><defs><linearGradient id="ra" x1="20" y1="10" x2="80" y2="90"><stop stop-color="#08e8d2"/><stop offset="1" stop-color="#18f28b"/></linearGradient></defs></svg></div></div><div class="chip btc">BTCUSDT<small>LONG</small></div><div class="chip eth">ETHUSDT<small style="color:#ff4564">SHORT</small></div><div class="chip sol">SOLUSDT<small>LONG</small></div></div></div><div class="stats-strip card"><div class="stat"><div class="slbl" data-i18n="stats.total">Total Signals (30D)</div><div id="s-total" class="sval" style="color:var(--cyan)">--</div><div class="spark"></div></div><div class="stat"><div class="slbl" data-i18n="stats.win_rate">Win Rate (30D)</div><div id="s-wr" class="sval">--</div><div class="spark"></div></div><div class="stat"><div class="slbl" data-i18n="stats.avg_rr">Avg RR (30D)</div><div id="s-rr" class="sval">1:2.2</div><div class="spark"></div></div><div class="stat"><div class="slbl" data-i18n="stats.markets">Markets Scanned</div><div id="s-mkts" class="sval">206</div><div class="spark"></div></div><div class="stat"><div class="slbl" data-i18n="stats.positions">Open Positions</div><div id="s-active" class="sval">--</div><div class="spark"></div></div></div></div></header>
 <section class="section" id="exchanges-section"><div class="container"><div class="center-head"><span class="eyebrow">♛ Partners</span><h2 class="section-title" data-i18n="section.exchanges">Trusted Partner Exchanges</h2><p class="section-sub" data-i18n="section.exchanges_sub">Trade on the best platforms with exclusive bonuses</p></div>__AFFILIATES__<p style="text-align:center;color:var(--muted);font-size:12px;margin-top:12px">🛡 We only recommend trusted exchanges. We may earn a commission at no extra cost to you.</p></div></section>
 <section class="section"><div class="container"><div class="tg-cta"><div class="tg-inner"><div class="phone"><div class="phone-frame"><div class="phone-top"></div><div class="msg">🚀 BTCUSDT LONG<br/>Entry: 97,450<br/>TP1: 98,800<br/>RR: 1:2.5</div><div class="msg good">✅ ETHUSDT TP1 hit<br/>+3.2% profit</div><div class="msg">📊 Weekly Summary<br/>Win Rate: 62.4%</div></div></div><div class="tg-copy"><h2>JOIN 12,000+ TRADERS<br/><span>ON TELEGRAM</span></h2><div class="tg-list"><div><b>✓</b> Real-time Signals</div><div><b>✓</b> Market Alerts</div><div><b>✓</b> Weekly Reports</div><div><b>✓</b> Strategy Insights</div><div><b>✓</b> Community Support</div></div></div><div class="tg-action"><a class="tg-big" href="__TG_URL__" target="_blank" rel="noopener">➤ JOIN TELEGRAM NOW</a><div class="tg-hint">No Spam • No Ads • 100% Free</div></div></div></div></div></section>
+<section class="section" id="radar-mini-section"><div class="container"><div class="center-head"><span class="eyebrow">📡 Intelligence</span><h2 class="section-title">TODAY'S MARKET RADAR</h2><p class="section-sub">Live market bias, risk level, and sentiment — updated every 45 seconds</p></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px" id="radar-mini-grid"><div style="background:var(--card);border:1px solid rgba(49,159,208,.22);border-radius:var(--r);padding:18px;text-align:center"><div style="font-size:10px;text-transform:uppercase;letter-spacing:1.8px;color:var(--muted);margin-bottom:8px">BTC Bias</div><div id="rml-btc" style="font-size:20px;font-weight:900;color:var(--yellow)">—</div></div><div style="background:var(--card);border:1px solid rgba(49,159,208,.22);border-radius:var(--r);padding:18px;text-align:center"><div style="font-size:10px;text-transform:uppercase;letter-spacing:1.8px;color:var(--muted);margin-bottom:8px">ETH Bias</div><div id="rml-eth" style="font-size:20px;font-weight:900;color:var(--yellow)">—</div></div><div style="background:var(--card);border:1px solid rgba(49,159,208,.22);border-radius:var(--r);padding:18px;text-align:center"><div style="font-size:10px;text-transform:uppercase;letter-spacing:1.8px;color:var(--muted);margin-bottom:8px">Market Risk</div><div id="rml-risk" style="font-size:20px;font-weight:900;color:var(--yellow)">—</div></div><div style="background:var(--card);border:1px solid rgba(49,159,208,.22);border-radius:var(--r);padding:18px;text-align:center"><div style="font-size:10px;text-transform:uppercase;letter-spacing:1.8px;color:var(--muted);margin-bottom:8px">Sentiment</div><div id="rml-sent" style="font-size:20px;font-weight:900;color:var(--yellow)">—</div></div><div style="background:var(--card);border:1px solid rgba(49,159,208,.22);border-radius:var(--r);padding:18px;text-align:center"><div style="font-size:10px;text-transform:uppercase;letter-spacing:1.8px;color:var(--muted);margin-bottom:8px">Signals 24H</div><div id="rml-24h" style="font-size:20px;font-weight:900;color:var(--cyan)">—</div></div></div><div style="text-align:center;margin-top:18px"><a href="/market-radar" style="color:var(--cyan);font-weight:800">View Full Market Radar →</a></div></div></section>
 <section class="section" id="strategy-section"><div class="container"><div class="center-head"><span class="eyebrow">⚙ Engine</span><h2 class="section-title" data-i18n="section.strategy">LIVE STRATEGY ENGINE</h2><p class="section-sub" data-i18n="section.strategy_sub">Exact strategy logic currently used by the bot — updated from live config</p></div><div class="strat-grid"><div class="strat-card"><div class="strat-title"><span>📈 1D Trend Engine</span><span class="strat-tf">1D</span></div><div class="strat-row"><span class="strat-lbl">EMA200 Direction</span><span class="strat-val sv-pass">Above = Bullish</span></div><div class="strat-row"><span class="strat-lbl">EMA50 vs EMA200</span><span class="strat-val sv-pass">LONG: EMA50 &gt; EMA200</span></div><div class="strat-row"><span class="strat-lbl">Current Trend Bias</span><span class="strat-val sv-pass">EMA cross required</span></div><div class="strat-row"><span class="strat-lbl">Structure Confirm</span><span class="strat-val">BOS / MSS</span></div><div class="strat-row"><span class="strat-lbl">Trend Score Max</span><span class="strat-val">20 pts</span></div></div><div class="strat-card"><div class="strat-title"><span>🏗 4H Market Structure</span><span class="strat-tf">4H</span></div><div class="strat-row"><span class="strat-lbl">BOS / CHoCH</span><span class="strat-val sv-pass">Checked</span></div><div class="strat-row"><span class="strat-lbl">Range / Expansion</span><span class="strat-val sv-pass">Checked</span></div><div class="strat-row"><span class="strat-lbl">Higher High / Lower Low</span><span class="strat-val sv-pass">Checked</span></div><div class="strat-row"><span class="strat-lbl">Order Block + FVG</span><span class="strat-val sv-pass">Checked</span></div><div class="strat-row"><span class="strat-lbl">Min Confluence</span><span class="strat-val sv-warn">2 / 5 required</span></div></div><div class="strat-card"><div class="strat-title"><span>🎯 1H Setup Engine</span><span class="strat-tf">1H</span></div><div class="strat-row"><span class="strat-lbl">Pullback Zone</span><span class="strat-val sv-pass">Checked</span></div><div class="strat-row"><span class="strat-lbl">Fair Value Gap</span><span class="strat-val sv-pass">Checked</span></div><div class="strat-row"><span class="strat-lbl">Order Block</span><span class="strat-val sv-pass">Checked</span></div><div class="strat-row"><span class="strat-lbl">Momentum Confirmation</span><span class="strat-val sv-pass">Checked</span></div><div class="strat-row"><span class="strat-lbl">Min Confluence</span><span class="strat-val sv-warn">3 / 5 required</span></div></div><div class="strat-card"><div class="strat-title"><span>⚡ 15M Entry Timing</span><span class="strat-tf">15M</span></div><div class="strat-row"><span class="strat-lbl">BOS (Break of Structure)</span><span class="strat-val">Factor 1</span></div><div class="strat-row"><span class="strat-lbl">FVG Retest</span><span class="strat-val">Factor 2</span></div><div class="strat-row"><span class="strat-lbl">OB Retest</span><span class="strat-val">Factor 3</span></div><div class="strat-row"><span class="strat-lbl">EMA Pullback</span><span class="strat-val">Factor 4</span></div><div class="strat-row"><span class="strat-lbl">VWAP Reclaim</span><span class="strat-val">Factor 5</span></div><div class="strat-row"><span class="strat-lbl">Entry Pass Score</span><span id="se-entry-score" class="strat-val sv-warn">-- / 5</span></div></div><div class="strat-card"><div class="strat-title"><span>💰 Funding Filter</span><span class="strat-tf">LIVE</span></div><div class="strat-row"><span class="strat-lbl">Current Funding Mode</span><span id="se-funding-mode" class="strat-val sv-pass">Loading…</span></div><div class="strat-row"><span class="strat-lbl">Neutral Zone</span><span class="strat-val sv-pass">|rate| &lt; 0.03%</span></div><div class="strat-row"><span class="strat-lbl">Crowded Long</span><span class="strat-val sv-warn">rate &gt; +0.08%</span></div><div class="strat-row"><span class="strat-lbl">Crowded Short</span><span class="strat-val sv-warn">rate &lt; -0.08%</span></div><div class="strat-row"><span class="strat-lbl">Filter Weight</span><span class="strat-val">10 pts</span></div></div><div class="strat-card"><div class="strat-title"><span>🛡 Risk Filter</span><span class="strat-tf">CONFIG</span></div><div class="strat-row"><span class="strat-lbl">Min Confidence</span><span id="se-min-conf" class="strat-val sv-warn">--</span></div><div class="strat-row"><span class="strat-lbl">Min RR</span><span id="se-min-rr" class="strat-val sv-warn">--</span></div><div class="strat-row"><span class="strat-lbl">Entry Pass Score</span><span id="se-entry-score2" class="strat-val sv-warn">--</span></div><div class="strat-row"><span class="strat-lbl">Max Signals / Hour</span><span id="se-max-sig" class="strat-val sv-warn">--</span></div><div class="strat-row"><span class="strat-lbl">Cooldown</span><span id="se-cooldown" class="strat-val sv-warn">--</span></div></div></div></div></section>
-<section class="section" id="signals-section"><div class="container"><div class="table-card card"><div class="table-head"><h2 style="margin:0" data-i18n="section.signals">Latest Live Signals</h2><span class="live-dot">● Live</span></div><div class="table-wrap"><table><thead><tr><th data-i18n="table.time">Time</th><th data-i18n="table.symbol">Symbol</th><th data-i18n="table.side">Side</th><th data-i18n="table.tf">TF</th><th data-i18n="table.confidence">Confidence</th><th data-i18n="table.rr">RR</th><th data-i18n="table.status">Status</th><th data-i18n="table.pnl">PNL</th><th></th></tr></thead><tbody id="sig-tbl"><tr><td colspan="9">Loading signals...</td></tr></tbody></table></div><div style="text-align:center;margin-top:18px"><a href="/signals" style="color:var(--cyan);font-weight:800" data-i18n="section.signals_all">View All Signals →</a></div></div></div></section>
-<section class="section" id="perf-section"><div class="container"><div class="perf-box card"><div class="perf-title"><h3>Performance Summary</h3><p>Transparent. Verified. Real results.</p></div><div id="perf-data" class="collecting"><h3>Collecting Verified Performance Data</h3><p>Alpha Radar uses real production signals. We only show headline performance when enough verified closed trades are available.</p></div><div class="pmetric perf-live"><div class="plabel">Win Rate (30D)</div><div id="ps-wr" class="pval">--</div></div><div class="pmetric perf-live"><div class="plabel">Profit Factor</div><div id="ps-pf" class="pval">--</div></div><div class="pmetric perf-live"><div class="plabel">Total PNL (30D)</div><div id="ps-pnl" class="pval">--</div></div><div class="pmetric perf-live"><div class="plabel">Avg RR</div><div id="ps-rr" class="pval">--</div></div><div class="equity-mini perf-live"></div></div></div></section>
+<section class="section" id="signals-section"><div class="container"><div class="table-card card"><div class="table-head"><h2 style="margin:0" data-i18n="section.signals">Latest Live Signals</h2><span class="live-dot">● Live</span></div><div class="table-wrap"><table><thead><tr><th data-i18n="table.time">Time</th><th data-i18n="table.symbol">Symbol</th><th data-i18n="table.side">Side</th><th data-i18n="table.tf">TF</th><th data-i18n="table.confidence">Confidence</th><th data-i18n="table.rr">RR</th><th data-i18n="table.status">Status</th><th data-i18n="table.pnl">PNL</th><th></th></tr></thead><tbody id="sig-tbl"><tr><td colspan="9">Loading signals...</td></tr></tbody></table></div><div style="text-align:center;margin-top:18px;display:flex;gap:16px;justify-content:center;flex-wrap:wrap"><a href="/signals" style="color:var(--cyan);font-weight:800" data-i18n="section.signals_all">View All Signals →</a><a href="/watchlist" style="color:var(--green);font-weight:800">⭐ Track Favorite Coins →</a></div></div></div></section>
+<section class="section" id="perf-section"><div class="container"><div class="perf-box card"><div class="perf-title"><h3>Performance Summary</h3><p>Transparent. Verified. Real results.</p><div style="margin-top:12px"><a href="/performance-center" style="display:inline-flex;align-items:center;gap:6px;color:var(--cyan);font-size:13px;font-weight:800;border:1px solid rgba(8,232,210,.25);border-radius:8px;padding:6px 14px;background:rgba(8,232,210,.06)">📊 View Full Performance Analytics →</a></div></div><div id="perf-data" class="collecting"><h3>Collecting Verified Performance Data</h3><p>Alpha Radar uses real production signals. We only show headline performance when enough verified closed trades are available.</p></div><div class="pmetric perf-live"><div class="plabel">Win Rate (30D)</div><div id="ps-wr" class="pval">--</div></div><div class="pmetric perf-live"><div class="plabel">Profit Factor</div><div id="ps-pf" class="pval">--</div></div><div class="pmetric perf-live"><div class="plabel">Total PNL (30D)</div><div id="ps-pnl" class="pval">--</div></div><div class="pmetric perf-live"><div class="plabel">Avg RR</div><div id="ps-rr" class="pval">--</div></div><div class="equity-mini perf-live"></div></div></div></section>
 <section class="section"><div class="container">__DONATE__</div></section>
 <section class="section"><div class="container"><div class="center-head"><span class="eyebrow">FAQ</span><h2 class="section-title" data-i18n="section.faq">Frequently Asked Questions</h2></div><div><div class="faq-item card" onclick="toggleFaq(this)"><div class="faq-q">What is Alpha Radar Signals?<span>⌄</span></div><div class="faq-a">A free AI-powered crypto futures signal platform scanning 200+ Binance USDT perpetual pairs with a multi-timeframe engine.</div></div><div class="faq-item card" onclick="toggleFaq(this)"><div class="faq-q">Is this financial advice?<span>⌄</span></div><div class="faq-a">No. All signals are for educational and informational purposes only. Futures trading is high risk.</div></div><div class="faq-item card" onclick="toggleFaq(this)"><div class="faq-q">Does the bot trade automatically?<span>⌄</span></div><div class="faq-a">No. The public system broadcasts signals only. It does not connect to your exchange account or place real trades.</div></div><div class="faq-item card" onclick="toggleFaq(this)"><div class="faq-q">How are signals generated?<span>⌄</span></div><div class="faq-a">Signals use 1D trend, 4H structure, 1H setup and 15M entry timing with risk/reward filters.</div></div><div class="faq-item card" onclick="toggleFaq(this)"><div class="faq-q">What exchanges are supported?<span>⌄</span></div><div class="faq-a">Signals are calibrated for Binance USDT Perpetual Futures and are compatible with Bybit, OKX and Bitget pairs.</div></div></div><div class="disc"><b>⚠ Risk Disclaimer</b><br/>Signals are for educational purposes only. Trading futures is high risk. Past performance does not guarantee future results.</div></div></section>
-<footer><div class="container"><div class="footer-in"><div><div class="brand"><svg class="logo-svg" viewBox="0 0 100 100" fill="none"><circle cx="50" cy="50" r="44" stroke="#18f28b" stroke-width="5"/><path d="M50 12 84 84H68L58 62H42L32 84H16L50 12Z" fill="#18f28b"/><path d="M25 76c13-10 30-15 50-16" stroke="#08e8d2" stroke-width="5" stroke-linecap="round"/></svg><div class="brand-word">ALPHA RADAR<b>SIGNALS</b></div></div><p class="ftagline" data-i18n="footer.tagline">AI-Powered. Data-Driven. Trader-Focused.</p></div><div><div class="fcol-ttl" data-i18n="footer.links">Links</div><div class="flinks"><a href="/signals" data-i18n="nav.signals">Signals</a><a href="/performance" data-i18n="nav.performance">Performance</a><a href="/stats" data-i18n="nav.stats">Stats</a><a href="/about" data-i18n="nav.about">About</a><a href="/faq" data-i18n="nav.faq">FAQ</a></div></div><div><div class="fcol-ttl" data-i18n="footer.community">Community</div><div class="flinks">__FOOTER_COMM__</div></div><div><div class="fcol-ttl" data-i18n="footer.legal">Legal</div><div class="flinks"><a href="/terms" data-i18n="footer.terms">Terms of Service</a><a href="/privacy" data-i18n="footer.privacy">Privacy Policy</a><a href="/risk-disclaimer" data-i18n="footer.risk_disc">Risk Disclaimer</a><a href="/admin">Admin</a></div></div></div><div class="fbot"><span class="fcopy">© 2026 ALPHA RADAR SIGNALS. All rights reserved.</span><span class="fcopy"><a href="/signals">Signals</a> · <a href="/performance">Performance</a> · <a href="/stats">Stats</a></span></div></div></footer>
+<footer><div class="container"><div class="footer-in"><div><div class="brand"><svg class="logo-svg" viewBox="0 0 100 100" fill="none"><circle cx="50" cy="50" r="44" stroke="#18f28b" stroke-width="5"/><path d="M50 12 84 84H68L58 62H42L32 84H16L50 12Z" fill="#18f28b"/><path d="M25 76c13-10 30-15 50-16" stroke="#08e8d2" stroke-width="5" stroke-linecap="round"/></svg><div class="brand-word">ALPHA RADAR<b>SIGNALS</b></div></div><p class="ftagline" data-i18n="footer.tagline">AI-Powered. Data-Driven. Trader-Focused.</p></div><div><div class="fcol-ttl" data-i18n="footer.links">Links</div><div class="flinks"><a href="/signals">Signals</a><a href="/market-radar">Market Radar</a><a href="/performance-center">Performance</a><a href="/setup-library">Setup Library</a><a href="/watchlist">Watchlist</a><a href="/faq">FAQ</a></div></div><div><div class="fcol-ttl" data-i18n="footer.community">Community</div><div class="flinks">__FOOTER_COMM__</div></div><div><div class="fcol-ttl" data-i18n="footer.legal">Legal</div><div class="flinks"><a href="/terms" data-i18n="footer.terms">Terms of Service</a><a href="/privacy" data-i18n="footer.privacy">Privacy Policy</a><a href="/risk-disclaimer" data-i18n="footer.risk_disc">Risk Disclaimer</a><a href="/admin">Admin</a></div></div></div><div class="fbot"><span class="fcopy">© 2026 ALPHA RADAR SIGNALS. All rights reserved.</span><span class="fcopy"><a href="/signals">Signals</a> · <a href="/performance">Performance</a> · <a href="/stats">Stats</a></span></div></div></footer>
 <div id="am-modal" class="am-bg" onclick="if(event.target===this)closeAnalysis()"><div class="am-box"><div class="am-hdr"><div class="am-title">Signal Analysis</div><button class="am-close" onclick="closeAnalysis()">✕ Close</button></div><div id="am-content"><p style="text-align:center;color:var(--muted);padding:40px">Loading…</p></div></div></div>
 <a class="float-tg" href="__TG_URL__" target="_blank" rel="noopener">➤</a><div id="v7-toast" class="toast">Copied!</div><div id="qr-modal" class="modal-bg" onclick="closeQR(event)"><div class="modal-box"><h3 id="qr-ttl">Wallet</h3><div id="qr-net" style="color:var(--muted)"></div><div class="modal-qr"><div id="qr-canvas"></div></div><div id="qr-addr" class="modal-addr"></div><button class="modal-close" onclick="closeQRBtn()">Close</button></div></div>
 <script>
@@ -3301,7 +4338,8 @@ async function loadStrategy(){try{const r=await fetch('/api/public/strategy');if
 async function loadFundingMode(){try{const r=await fetch('/api/funding/status');if(!r.ok)return;const d=await r.json();const modeEl=document.getElementById('se-funding-mode');if(!modeEl)return;const ep=d.extreme_positive_funding||0;const en=d.extreme_negative_funding||0;const tot=d.total_symbols||1;if(ep/tot>0.25){modeEl.textContent='Crowded Long ('+ep+' syms)';modeEl.className='strat-val sv-warn';}else if(en/tot>0.25){modeEl.textContent='Crowded Short ('+en+' syms)';modeEl.className='strat-val sv-warn';}else{modeEl.textContent='Neutral';modeEl.className='strat-val sv-pass';}}catch(e){}}
 async function openAnalysis(id){const modal=document.getElementById('am-modal');modal.classList.add('open');document.getElementById('am-content').innerHTML='<p style="text-align:center;color:var(--muted);padding:40px">Loading…</p>';try{const r=await fetch('/api/public/signal/'+id);if(!r.ok)throw new Error('Signal not found');const d=await r.json();if(d.error)throw new Error(d.error);const sc=d.side==='LONG'?'var(--green)':'var(--red)';const cc=d.confidence>=85?'var(--green)':d.confidence>=75?'var(--yellow)':'var(--red)';const reasons=d.reasons||[];const t1d=reasons.filter(x=>/^1[Dd]/i.test(x));const s4h=reasons.filter(x=>/^4[Hh]/i.test(x));const h1=reasons.filter(x=>/^1[Hh]/i.test(x));const m15=reasons.filter(x=>/^15[Mm]/i.test(x));const noData='<p style="color:var(--muted);font-size:12px;font-style:italic">Detailed diagnostics not available for this signal yet.</p>';function rList(arr){return arr.length?arr.map(s=>'<div class="am-reason"><div class="am-dot"></div><span>'+s+'</span></div>').join(''):noData;}document.getElementById('am-content').innerHTML='<div class="am-meta"><div class="am-mcard"><div class="am-mlbl">Symbol</div><div class="am-mval">'+d.symbol+'</div></div><div class="am-mcard"><div class="am-mlbl">Side</div><div class="am-mval" style="color:'+sc+'">'+d.side+'</div></div><div class="am-mcard"><div class="am-mlbl">Confidence</div><div class="am-mval" style="color:'+cc+'">'+d.confidence+'%</div></div><div class="am-mcard"><div class="am-mlbl">RR</div><div class="am-mval" style="color:var(--yellow)">1:'+d.risk_reward+'</div></div></div><div class="am-layer"><div class="am-layer-hdr"><span>1D</span> Trend Engine</div><div class="am-layer-body">'+rList(t1d)+'</div></div><div class="am-layer"><div class="am-layer-hdr"><span>4H</span> Market Structure</div><div class="am-layer-body">'+rList(s4h)+'</div></div><div class="am-layer"><div class="am-layer-hdr"><span>1H</span> Setup Engine</div><div class="am-layer-body">'+rList(h1)+'</div></div><div class="am-layer"><div class="am-layer-hdr"><span>15M</span> Entry Timing</div><div class="am-layer-body">'+rList(m15)+'</div></div><div class="am-layer"><div class="am-layer-hdr"><span>💰</span> Funding Filter</div><div class="am-layer-body">'+noData+'</div></div><div class="am-layer"><div class="am-layer-hdr"><span>🛡</span> Risk Filter</div><div class="am-layer-body">'+noData+'</div></div>';}catch(e){document.getElementById('am-content').innerHTML='<p style="color:var(--red);padding:20px">'+e.message+'</p>';}}
 function closeAnalysis(){document.getElementById('am-modal').classList.remove('open');}
-document.addEventListener('DOMContentLoaded',()=>{loadStats();setInterval(loadStats,6000);loadStrategy();loadFundingMode();setInterval(loadFundingMode,60000);i18nInit()})
+async function loadRadarMini(){try{const r=await fetch('/api/public/market-radar');if(!r.ok)return;const d=await r.json();const biasColor=b=>b==='BULLISH'?'var(--green)':b==='BEARISH'?'var(--red)':'var(--yellow)';const mb=d.market_bias||{};['btc','eth'].forEach(k=>{const el=document.getElementById('rml-'+k);if(el){el.textContent=mb[k]||'NEUTRAL';el.style.color=biasColor(mb[k]);}});const rEl=document.getElementById('rml-risk');if(rEl){rEl.textContent=d.market_risk||'—';rEl.style.color=d.market_risk==='HIGH'?'var(--red)':d.market_risk==='LOW'?'var(--green)':'var(--yellow)';}const sEl=document.getElementById('rml-sent');if(sEl){const sc=(d.futures_sentiment||{}).label||'—';sEl.textContent=sc;sEl.style.color=sc==='GREED'?'var(--green)':sc==='FEAR'?'var(--red)':'var(--yellow)';}const h24=document.getElementById('rml-24h');if(h24)h24.textContent=d.signals_24h||0;}catch(e){}}
+document.addEventListener('DOMContentLoaded',()=>{loadStats();setInterval(loadStats,6000);loadStrategy();loadFundingMode();setInterval(loadFundingMode,60000);loadRadarMini();setInterval(loadRadarMini,45000);i18nInit()})
 /* ── i18n engine ──────────────────────────────────────────── */
 const RTL_LANGS=new Set(['ar','ur']);
 let _i18nCache={};
