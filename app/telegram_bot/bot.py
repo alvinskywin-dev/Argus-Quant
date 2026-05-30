@@ -537,6 +537,27 @@ class TelegramBot:
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"could not check pause state: {exc}")
 
+        # ── Publisher-level duplicate guard (layer 3 of 3) ──────────────
+        # Catches race conditions where two signals for the same symbol
+        # were both persisted before either was broadcast.
+        # Uses has_active_signal_excluding() so we don't block the signal
+        # that was JUST created (its ID is passed via _signal_id).
+        if settings.block_same_symbol_while_open:
+            symbol     = sig.get("symbol", "")
+            signal_id  = sig.get("_signal_id")
+            if symbol and signal_id is not None:
+                try:
+                    from app.database.repo import has_active_signal_excluding
+                    if await has_active_signal_excluding(symbol, int(signal_id)):
+                        logger.warning(
+                            f"SKIP_DUPLICATE_ACTIVE_SIGNAL symbol={symbol} "
+                            f"side={sig.get('side')} "
+                            f"reason=existing_open_signal (publisher guard)"
+                        )
+                        return []
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(f"publisher duplicate check failed: {exc}")
+
         chats = _route_signal_chats(sig)
         if not chats:
             logger.warning(

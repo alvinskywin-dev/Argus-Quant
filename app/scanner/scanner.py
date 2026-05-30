@@ -20,6 +20,7 @@ from typing import Awaitable, Callable, Dict, List, Optional
 
 from app.ai_scoring import MTFDecision, MTFRejection, evaluate_pipeline
 from app.config import settings
+from app.database.repo import has_active_signal, in_post_close_cooldown
 from app.market_data import fetch_klines, universe
 from app.risk import build_levels, cooldown, passes_market_filters, rate_limiter
 from app.strategies import FeatureSnapshot, build_snapshot
@@ -121,6 +122,48 @@ class MarketScanner:
                     "side": decision.side, "rr": levels.risk_reward,
                 }
 
+            # ── Active-signal guard ─────────────────────────────────────
+            # Block any new signal while the same symbol already has an OPEN position.
+            if settings.block_same_symbol_while_open:
+                if await has_active_signal(symbol):
+                    logger.info(
+                        f"SKIP_DUPLICATE_ACTIVE_SIGNAL symbol={symbol} "
+                        f"side={decision.side} reason=existing_open_signal"
+                    )
+                    return {
+                        "_DIAG_": True,
+                        "stage": "duplicate_active",
+                        "side": decision.side,
+                    }
+            elif settings.block_same_symbol_side_while_open:
+                if await has_active_signal(symbol, side=decision.side):
+                    logger.info(
+                        f"SKIP_DUPLICATE_ACTIVE_SIGNAL symbol={symbol} "
+                        f"side={decision.side} reason=existing_open_signal_same_side"
+                    )
+                    return {
+                        "_DIAG_": True,
+                        "stage": "duplicate_active",
+                        "side": decision.side,
+                    }
+
+            # ── Post-close cooldown ──────────────────────────────────────
+            # Suppress re-entry for the same symbol+side for N hours after TP/SL.
+            if settings.signal_duplicate_cooldown_hours > 0:
+                if await in_post_close_cooldown(
+                    symbol, decision.side, settings.signal_duplicate_cooldown_hours
+                ):
+                    logger.info(
+                        f"SKIP_DUPLICATE_ACTIVE_SIGNAL symbol={symbol} "
+                        f"side={decision.side} "
+                        f"reason=post_close_cooldown_{settings.signal_duplicate_cooldown_hours}h"
+                    )
+                    return {
+                        "_DIAG_": True,
+                        "stage": "post_close_cooldown",
+                        "side": decision.side,
+                    }
+
             # ── Cooldown (same direction only) ───────────────────────────
             if not await cooldown.can_emit(symbol, decision.side):
                 if settings.log_rejection_detail:
@@ -184,17 +227,19 @@ class MarketScanner:
         emitted = 0
 
         counters: Dict[str, int] = {
-            "analyzed":   len(symbols),
-            "no_data":    0,
-            "trend":      0,
-            "structure":  0,
-            "setup":      0,
-            "entry":      0,
-            "confidence": 0,
-            "rr":         0,
-            "cooldown":   0,
-            "rate_limit": 0,
-            "error":      0,
+            "analyzed":        len(symbols),
+            "no_data":         0,
+            "trend":           0,
+            "structure":       0,
+            "setup":           0,
+            "entry":           0,
+            "confidence":      0,
+            "rr":              0,
+            "duplicate_active":0,
+            "post_close_cooldown": 0,
+            "cooldown":        0,
+            "rate_limit":      0,
+            "error":           0,
         }
 
         for fut in asyncio.as_completed(tasks):
@@ -226,6 +271,7 @@ class MarketScanner:
         conf_pass      = entry_pass    - c["confidence"]
         rr_pass        = conf_pass     - c["rr"]
 
+        dup_skip = c["duplicate_active"] + c["post_close_cooldown"]
         logger.info(
             f"\n{'─'*52}\n"
             f"  📊 SCAN SUMMARY\n"
@@ -236,6 +282,7 @@ class MarketScanner:
             f"  Entry pass:      {entry_pass}\n"
             f"  Confidence pass: {conf_pass}\n"
             f"  RR pass:         {rr_pass}\n"
+            f"  Dup skipped:     {dup_skip}\n"
             f"  Emitted:         {emitted}\n"
             f"{'─'*52}"
         )

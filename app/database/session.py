@@ -17,14 +17,21 @@ from app.config import settings
 from app.database.models import Base
 from app.utils.logger import logger
 
-# Idempotent ALTER TABLE statements applied on every startup.
-# Using IF NOT EXISTS so they are safe to run against both new and existing databases.
+# Idempotent DDL statements applied on every startup.
+# All statements use IF NOT EXISTS so they are safe to run against both
+# new and existing databases.
 _SCHEMA_UPGRADES: list[str] = [
     # V3.1 — MTF layer score columns on signals
     "ALTER TABLE signals ADD COLUMN IF NOT EXISTS trend_score     FLOAT",
     "ALTER TABLE signals ADD COLUMN IF NOT EXISTS structure_score FLOAT",
     "ALTER TABLE signals ADD COLUMN IF NOT EXISTS setup_score     FLOAT",
     "ALTER TABLE signals ADD COLUMN IF NOT EXISTS entry_score     FLOAT",
+    # V3.1 Sprint 3 — DB-level active-signal uniqueness per symbol.
+    # Prevents duplicate OPEN signals at the database layer as a last resort.
+    # Uses a partial index (PostgreSQL-specific) so only active rows are constrained.
+    """CREATE UNIQUE INDEX IF NOT EXISTS uq_active_signal_symbol
+       ON signals(symbol)
+       WHERE status IN ('OPEN', 'ACTIVE', 'PENDING')""",
 ]
 
 engine = create_async_engine(
@@ -42,11 +49,28 @@ SessionLocal: async_sessionmaker[AsyncSession] = async_sessionmaker(
 
 
 async def init_db() -> None:
-    """Create tables and apply incremental schema upgrades."""
+    """
+    Create tables and apply incremental schema upgrades.
+
+    Each upgrade statement is run individually.  Failures are logged as
+    warnings rather than crashing startup — some upgrades (e.g. the partial
+    unique index) require clean data and must be applied manually after a
+    deduplication migration has run.
+    """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        for stmt in _SCHEMA_UPGRADES:
-            await conn.execute(text(stmt))
+
+    for stmt in _SCHEMA_UPGRADES:
+        try:
+            async with engine.begin() as conn:
+                await conn.execute(text(stmt))
+        except Exception as exc:
+            # Non-fatal: log and continue.  The index/column may already exist
+            # or the data may need cleaning up first.
+            logger.warning(
+                f"schema upgrade skipped (non-fatal): {exc!s:.200} | SQL: {stmt[:80]}"
+            )
+
     logger.info("database initialized")
 
 

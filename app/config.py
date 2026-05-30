@@ -56,6 +56,14 @@ class Settings(BaseSettings):
     max_signals_per_hour: int = 12
     min_rr: float = 2.0
 
+    # --- Duplicate signal prevention ---
+    # Block any new signal for a symbol while it still has an OPEN position
+    block_same_symbol_while_open: bool = True
+    # Also block if same symbol AND same side is open (applies when block_same_symbol_while_open=False)
+    block_same_symbol_side_while_open: bool = True
+    # Hours to suppress re-entry for the same symbol+side after a TP or SL close (0 = disabled)
+    signal_duplicate_cooldown_hours: int = 24
+
     # --- Dashboard ---
     dashboard_host: str = "0.0.0.0"
     dashboard_port: int = 8010

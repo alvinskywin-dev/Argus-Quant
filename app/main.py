@@ -137,6 +137,20 @@ class App:
 
     async def _handle_signal(self, sig: dict) -> None:
         """Called by the scanner whenever a new signal is emitted."""
+        # ── Pre-persist duplicate guard (layer 2 of 3) ───────────────
+        # Layer 1 is in the scanner.  This layer catches race conditions
+        # where two concurrent scan tasks both passed layer 1 before either
+        # was written to the DB.
+        if settings.block_same_symbol_while_open:
+            symbol = sig.get("symbol", "")
+            if symbol and await repo.has_active_signal(symbol):
+                logger.warning(
+                    f"SKIP_DUPLICATE_ACTIVE_SIGNAL symbol={symbol} "
+                    f"side={sig.get('side')} "
+                    f"reason=existing_open_signal (pre-persist guard)"
+                )
+                return
+
         try:
             persisted = await repo.create_signal({
                 "symbol":         sig["symbol"],
@@ -169,6 +183,10 @@ class App:
             f"{sig['symbol']} {sig['side']} "
             f"conf={sig['confidence']}% rr=1:{sig['risk_reward']}"
         )
+
+        # Tag the signal dict with the DB ID so the publisher guard can
+        # use has_active_signal_excluding() and not block the new signal itself.
+        sig["_signal_id"] = persisted.id
 
         try:
             sent_messages = await self.bot.broadcast_signal(sig)

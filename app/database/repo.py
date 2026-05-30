@@ -11,6 +11,97 @@ from sqlalchemy import and_, delete, desc, func, select, update
 from app.database.models import DailyStat, Signal, SignalMessage, SystemSetting, User, Watchlist
 from app.database.session import get_session
 
+# Statuses that mean a signal is still active (position is open)
+ACTIVE_STATUSES: list[str] = ["OPEN", "ACTIVE", "PENDING"]
+
+
+# ---------------- duplicate-signal guard ----------------
+
+async def has_active_signal(symbol: str, side: str | None = None) -> bool:
+    """
+    Return True if there is at least one active (OPEN/ACTIVE/PENDING) signal
+    for *symbol*.  Pass *side* to restrict to a specific direction.
+    """
+    async with get_session() as s:
+        q = (
+            select(Signal.id)
+            .where(
+                Signal.symbol == symbol,
+                Signal.status.in_(ACTIVE_STATUSES),
+            )
+        )
+        if side is not None:
+            q = q.where(Signal.side == side)
+        row = await s.execute(q.limit(1))
+        return row.scalar_one_or_none() is not None
+
+
+async def has_active_signal_excluding(symbol: str, exclude_id: int) -> bool:
+    """
+    Same as *has_active_signal* but ignores the signal with *exclude_id*.
+    Used by the publisher guard to avoid blocking the signal that was JUST created.
+    """
+    async with get_session() as s:
+        row = await s.execute(
+            select(Signal.id)
+            .where(
+                Signal.symbol == symbol,
+                Signal.status.in_(ACTIVE_STATUSES),
+                Signal.id != exclude_id,
+            )
+            .limit(1)
+        )
+        return row.scalar_one_or_none() is not None
+
+
+async def in_post_close_cooldown(symbol: str, side: str, hours: int) -> bool:
+    """
+    Return True if a closed (TP/SL) signal for *symbol*+*side* was closed within
+    the last *hours* hours.  Enforces a re-entry silence period after a trade ends.
+    Returns False when *hours* <= 0 (feature disabled).
+    """
+    if hours <= 0:
+        return False
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    async with get_session() as s:
+        row = await s.execute(
+            select(Signal.id)
+            .where(
+                Signal.symbol == symbol,
+                Signal.side == side,
+                Signal.status.in_(["TP1", "TP2", "TP3", "SL"]),
+                Signal.closed_at >= cutoff,
+            )
+            .limit(1)
+        )
+        return row.scalar_one_or_none() is not None
+
+
+async def get_active_signals_summary() -> list[dict[str, Any]]:
+    """Return one row per symbol that currently has an active signal."""
+    async with get_session() as s:
+        rows = await s.execute(
+            select(
+                Signal.symbol,
+                Signal.side,
+                Signal.status,
+                Signal.confidence,
+                Signal.created_at,
+            )
+            .where(Signal.status.in_(ACTIVE_STATUSES))
+            .order_by(desc(Signal.created_at))
+        )
+        return [
+            {
+                "symbol":     r[0],
+                "side":       r[1],
+                "status":     r[2],
+                "confidence": round(float(r[3] or 0), 1),
+                "opened":     r[4].strftime("%m-%d %H:%M") if r[4] else "-",
+            }
+            for r in rows.all()
+        ]
+
 
 # ---------------- signals ----------------
 async def create_signal(data: dict[str, Any]) -> Signal:

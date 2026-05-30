@@ -16,6 +16,7 @@ from sqlalchemy import select, desc
 from app.config import settings
 from app.database.session import SessionLocal
 from app.database.models import Signal, AffiliateClick, PaperPosition
+from app.database.repo import get_active_signals_summary, ACTIVE_STATUSES
 from app.market_data import universe
 from app.market_data.ws_engine import ws_health
 
@@ -577,6 +578,18 @@ async def affiliate_stats(request: Request):
             )
             rows = res.fetchall()
         return JSONResponse([{"exchange": r[0], "clicks": r[1]} for r in rows])
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+@app.get("/api/admin/active-signals")
+async def admin_active_signals(request: Request):
+    """Return all currently active (OPEN/ACTIVE/PENDING) signals for duplicate monitoring."""
+    if not _is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        rows = await get_active_signals_summary()
+        return JSONResponse({"active": rows, "count": len(rows)})
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=500)
 
@@ -2281,7 +2294,15 @@ th{color:#8fa8c7;font-size:11px;letter-spacing:1px}tr:last-child td{border-botto
     <div class="card"><h2>SYSTEM HEALTH</h2>
       <div id="health-status" style="font-size:13px;color:#8fa8c7">Loading...</div>
     </div>
-    <div class="card"><h2>AFFILIATE STATS</h2>
+    <div class="card" style="margin-top:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h2 style="margin:0">ACTIVE SIGNALS <span id="active-sig-count" style="font-size:14px;color:#20e6c3">—</span></h2>
+        <span style="font-size:11px;color:#627a99">Duplicate guard: one active signal per symbol</span>
+      </div>
+      <table><thead><tr><th>SYMBOL</th><th>SIDE</th><th>STATUS</th><th>CONF</th><th>OPENED</th></tr></thead>
+      <tbody id="active-sig-tbl"><tr><td colspan="5" style="text-align:center;color:#627a99;padding:12px">Loading...</td></tr></tbody></table>
+    </div>
+    <div class="card" style="margin-top:14px"><h2>AFFILIATE STATS</h2>
       <table><thead><tr><th>EXCHANGE</th><th>CLICKS</th></tr></thead>
       <tbody id="aff-tbl"></tbody></table>
     </div>
@@ -2392,8 +2413,28 @@ async function loadAffiliateStats(){
   }catch(e){}
 }
 
+async function loadActiveSignals(){
+  try{
+    const r=await fetch('/api/admin/active-signals');
+    if(!r.ok)return;
+    const d=await r.json();
+    if(d.error)return;
+    const rows=d.active||[];
+    document.getElementById('active-sig-count').textContent='('+rows.length+')';
+    document.getElementById('active-sig-tbl').innerHTML=rows.map(x=>
+      '<tr>'+
+      '<td><b>'+x.symbol+'</b></td>'+
+      '<td><span class="'+(x.side==='LONG'?'bl2':'bs2')+'">'+x.side+'</span></td>'+
+      '<td class="bopen">'+x.status+'</td>'+
+      '<td>'+x.confidence+'%</td>'+
+      '<td style="color:#8fa8c7">'+x.opened+'</td>'+
+      '</tr>'
+    ).join('')||'<tr><td colspan="5" style="text-align:center;color:#20ff80;padding:12px">✅ No active signals — clean</td></tr>';
+  }catch(e){}
+}
 setInterval(loadHealth,30000);
 setInterval(loadAffiliateStats,60000);
+setInterval(loadActiveSignals,15000);
 
 function showTab(name){
   document.querySelectorAll('[data-tab]').forEach(el=>el.classList.remove('show'));
@@ -2402,7 +2443,7 @@ function showTab(name){
   if(t)t.classList.add('show');
   const n=document.getElementById('nav-'+name);
   if(n)n.classList.add('act');
-  if(name==='health'){loadHealth();loadAffiliateStats();}
+  if(name==='health'){loadHealth();loadAffiliateStats();loadActiveSignals();}
   if(name==='performance'){loadPerfDetail();}
 }
 async function loadPerfDetail(){
