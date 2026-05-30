@@ -59,6 +59,8 @@ class Settings(BaseSettings):
     dashboard_host: str = "0.0.0.0"
     dashboard_port: int = 8010
     dashboard_secret: str = "change_me"
+    dashboard_user: str = "admin"
+    dashboard_password: str = ""
 
     # --- Community ---
     telegram_channel_url: str = ""
@@ -79,6 +81,7 @@ class Settings(BaseSettings):
     # --- Logging ---
     log_level: str = "INFO"
     log_dir: str = "/app/logs"
+    log_rejection_detail: bool = False
 
     timezone: str = "UTC"
 

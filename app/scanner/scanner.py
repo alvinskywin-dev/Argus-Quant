@@ -78,9 +78,10 @@ class MarketScanner:
                     "entry":     "Entry failed",
                 }.get(stage, f"{stage.capitalize()} failed")
 
-                logger.info(
-                    f"⛔ {symbol} {side} — {stage_label}: {rejection.detail}"
-                )
+                if settings.log_rejection_detail:
+                    logger.info(
+                        f"⛔ {symbol} {side} — {stage_label}: {rejection.detail}"
+                    )
                 return {"_DIAG_": True, "stage": stage, "side": side}
 
             # ── Market quality filters (confidence adjustments + hard rejects) ─
@@ -88,11 +89,12 @@ class MarketScanner:
 
             ok, reason = passes_market_filters(primary_snap, decision)
             if not ok:
-                logger.info(
-                    f"⛔ {symbol} {decision.side} — Confidence failed: "
-                    f"conf={decision.confidence:.1f}% (need>={settings.min_confidence}) "
-                    f"filter={reason}"
-                )
+                if settings.log_rejection_detail:
+                    logger.info(
+                        f"⛔ {symbol} {decision.side} — Confidence failed: "
+                        f"conf={decision.confidence:.1f}% (need>={settings.min_confidence}) "
+                        f"filter={reason}"
+                    )
                 return {
                     "_DIAG_": True, "stage": "confidence",
                     "side": decision.side, "conf": decision.confidence,
@@ -101,17 +103,19 @@ class MarketScanner:
             # ── RR check ────────────────────────────────────────────────
             levels = build_levels(primary_snap, decision.side)
             if levels is None:
-                logger.info(
-                    f"⛔ {symbol} {decision.side} — RR failed: "
-                    f"build_levels returned None (min_rr={settings.min_rr})"
-                )
+                if settings.log_rejection_detail:
+                    logger.info(
+                        f"⛔ {symbol} {decision.side} — RR failed: "
+                        f"build_levels returned None (min_rr={settings.min_rr})"
+                    )
                 return {"_DIAG_": True, "stage": "rr", "side": decision.side}
 
             if levels.risk_reward < settings.min_rr:
-                logger.info(
-                    f"⛔ {symbol} {decision.side} — RR failed: "
-                    f"rr={levels.risk_reward:.2f} < {settings.min_rr}"
-                )
+                if settings.log_rejection_detail:
+                    logger.info(
+                        f"⛔ {symbol} {decision.side} — RR failed: "
+                        f"rr={levels.risk_reward:.2f} < {settings.min_rr}"
+                    )
                 return {
                     "_DIAG_": True, "stage": "rr",
                     "side": decision.side, "rr": levels.risk_reward,
@@ -119,19 +123,21 @@ class MarketScanner:
 
             # ── Cooldown (same direction only) ───────────────────────────
             if not await cooldown.can_emit(symbol, decision.side):
-                logger.info(
-                    f"⛔ {symbol} {decision.side} — Cooldown failed: "
-                    f"same-direction cooldown active ({settings.symbol_cooldown_minutes}m)"
-                )
+                if settings.log_rejection_detail:
+                    logger.info(
+                        f"⛔ {symbol} {decision.side} — Cooldown failed: "
+                        f"same-direction cooldown active ({settings.symbol_cooldown_minutes}m)"
+                    )
                 return {"_DIAG_": True, "stage": "cooldown", "side": decision.side}
 
             # ── Hourly rate cap ──────────────────────────────────────────
             if not await rate_limiter.acquire():
                 used = await rate_limiter.used()
-                logger.info(
-                    f"⛔ {symbol} {decision.side} — Rate limit: "
-                    f"{used}/{settings.max_signals_per_hour} signals this hour"
-                )
+                if settings.log_rejection_detail:
+                    logger.info(
+                        f"⛔ {symbol} {decision.side} — Rate limit: "
+                        f"{used}/{settings.max_signals_per_hour} signals this hour"
+                    )
                 return {"_DIAG_": True, "stage": "rate_limit", "side": decision.side}
 
             await cooldown.mark_emitted(symbol, decision.side)

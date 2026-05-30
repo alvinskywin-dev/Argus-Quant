@@ -16,7 +16,7 @@ and exposes a FastAPI dashboard — all running 24/7 on Docker.
 - Auto-delivery to Telegram (groups/channels) with live TP/SL updates
 - Full signal tracking: TP1/2/3, SL, PnL, drawdown, winrate, leaderboard
 - PostgreSQL storage + Redis cache
-- FastAPI dashboard + REST API
+- Public free signal website + protected admin dashboard + REST API
 - Healthchecks, structured logging, graceful shutdown
 - Single-command Docker deployment
 
@@ -25,10 +25,26 @@ and exposes a FastAPI dashboard — all running 24/7 on Docker.
 ```bash
 git clone <this-repo> futures-bot
 cd futures-bot
-cp .env.example .env       # fill in keys
+cp .env.example .env       # fill in keys, admin password, donate/affiliate links
 docker compose up -d
 docker compose logs -f bot
 ```
 
 Full setup, Telegram bot creation, Binance API setup, scaling and backup
 instructions are in **DEPLOYMENT.md**.
+
+## Public Website / Monetization
+
+The root URL `/` is a public read-only signal website. Admin tools stay behind `/login` and `/admin`.
+
+Before exposing the server publicly, set these values in `.env`:
+
+- `DASHBOARD_USER`
+- `DASHBOARD_PASSWORD`
+- `TELEGRAM_CHANNEL_URL`
+- `DISCORD_URL`
+- `DONATE_USDT_TRC20`, `DONATE_USDT_BEP20`, `DONATE_BTC`, `DONATE_ETH`
+- `BINANCE_AFFILIATE_URL`, `BYBIT_AFFILIATE_URL`, `OKX_AFFILIATE_URL`, `BITGET_AFFILIATE_URL`
+
+Keep `LOG_REJECTION_DETAIL=false` in production unless debugging scanner filters.
+

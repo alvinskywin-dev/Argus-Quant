@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import html as html_lib
 import os
+import re
 import time
+from urllib.parse import urlparse
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
@@ -23,15 +26,50 @@ def _admin_user() -> str:
 
 
 def _admin_password() -> str:
-    return os.getenv("DASHBOARD_PASSWORD", "AlphaRadar@2026")
+    """Admin password must be supplied via .env in public deployments."""
+    return os.getenv("DASHBOARD_PASSWORD", "").strip()
 
+
+def _admin_auth_configured() -> bool:
+    return bool(_admin_user() and _admin_password())
+
+
+def _esc(value: str) -> str:
+    return html_lib.escape(str(value or ""), quote=True)
+
+
+def _safe_url(value: str) -> str:
+    """Allow only http(s) URLs in public href attributes."""
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    parsed = urlparse(raw)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return ""
+    return _esc(raw)
+
+
+def _safe_wallet(value: str, max_len: int = 140) -> str:
+    """Conservative wallet/address renderer for public donate section."""
+    raw = str(value or "").strip()[:max_len]
+    # Keep wallet display resilient; still escape everything before rendering.
+    return _esc(raw)
+
+
+def _js_single_quote(value: str) -> str:
+    """Escape value for use inside a single-quoted inline JS string."""
+    raw = str(value or "")
+    raw = raw.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "").replace("\r", "")
+    return _esc(raw)
 
 def _is_logged_in(request: Request) -> bool:
     return request.cookies.get("alpha_radar_auth") == "ok"
 
 
 def _login_page(error: str = "") -> HTMLResponse:
-    err = f"<div class='err'>{error}</div>" if error else ""
+    if not _admin_auth_configured():
+        error = "Admin login is disabled until DASHBOARD_USER and DASHBOARD_PASSWORD are set in .env"
+    err = f"<div class='err'>{_esc(error)}</div>" if error else ""
     return HTMLResponse(_LOGIN_HTML.replace("__ERR__", err))
 
 
@@ -208,9 +246,11 @@ async def login_get():
 
 @app.post("/login")
 async def login_post(username: str = Form(...), password: str = Form(...)):
+    if not _admin_auth_configured():
+        return _login_page("Admin login is disabled until DASHBOARD_USER and DASHBOARD_PASSWORD are set in .env")
     if username == _admin_user() and password == _admin_password():
         resp = RedirectResponse("/admin", status_code=302)
-        resp.set_cookie("alpha_radar_auth", "ok", httponly=True, max_age=86400)
+        resp.set_cookie("alpha_radar_auth", "ok", httponly=True, max_age=86400, samesite="lax")
         return resp
     return _login_page("Invalid username or password")
 
@@ -235,16 +275,16 @@ async def admin_index(request: Request):
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    tg_url = os.getenv("TELEGRAM_CHANNEL_URL", "")
-    dc_url = os.getenv("DISCORD_URL", "")
-    trc20 = os.getenv("DONATE_USDT_TRC20", "")
-    bep20 = os.getenv("DONATE_USDT_BEP20", "")
-    btc_addr = os.getenv("DONATE_BTC", "")
-    eth_addr = os.getenv("DONATE_ETH", "")
-    binance_aff = os.getenv("BINANCE_AFFILIATE_URL", "")
-    bybit_aff = os.getenv("BYBIT_AFFILIATE_URL", "")
-    okx_aff = os.getenv("OKX_AFFILIATE_URL", "")
-    bitget_aff = os.getenv("BITGET_AFFILIATE_URL", "")
+    tg_url = _safe_url(settings.telegram_channel_url or os.getenv("TELEGRAM_CHANNEL_URL", ""))
+    dc_url = _safe_url(settings.discord_url or os.getenv("DISCORD_URL", ""))
+    trc20 = _safe_wallet(settings.donate_usdt_trc20 or os.getenv("DONATE_USDT_TRC20", ""))
+    bep20 = _safe_wallet(settings.donate_usdt_bep20 or os.getenv("DONATE_USDT_BEP20", ""))
+    btc_addr = _safe_wallet(settings.donate_btc or os.getenv("DONATE_BTC", ""))
+    eth_addr = _safe_wallet(settings.donate_eth or os.getenv("DONATE_ETH", ""))
+    binance_aff = _safe_url(settings.binance_affiliate_url or os.getenv("BINANCE_AFFILIATE_URL", ""))
+    bybit_aff = _safe_url(settings.bybit_affiliate_url or os.getenv("BYBIT_AFFILIATE_URL", ""))
+    okx_aff = _safe_url(settings.okx_affiliate_url or os.getenv("OKX_AFFILIATE_URL", ""))
+    bitget_aff = _safe_url(settings.bitget_affiliate_url or os.getenv("BITGET_AFFILIATE_URL", ""))
 
     html = _PUBLIC_HTML
 
