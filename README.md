@@ -8,7 +8,7 @@ and exposes a FastAPI dashboard — all running 24/7 on Docker.
 ## Features
 
 - Realtime scanner over **all** USDT-M futures pairs (REST + WebSocket)
-- Multi-timeframe (1m/5m/15m/1h/4h/1d) analysis
+- Multi-timeframe (/15m/1h/4h/1d) analysis
 - 18+ indicators (EMA, RSI, MACD, BB, ATR, VWAP, Supertrend, StochRSI, ADX, …)
 - Smart Money Concepts: BOS, MSS, liquidity sweep detection
 - AI-weighted confidence scoring (0–100%) with risk classification
