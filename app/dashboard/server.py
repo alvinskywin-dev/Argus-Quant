@@ -1116,121 +1116,108 @@ async def index():
 
     html = _PUBLIC_HTML
 
-    # header nav community buttons
+    # ── nav buttons ─────────────────────────────────────────────────
     tg_btn = (
-        f'<a href="{tg_url}" target="_blank" style="background:#0088cc22;border:1px solid #0088cc;'
-        f'color:#5bb7e3;padding:7px 13px;border-radius:7px;font-size:13px;text-decoration:none">Telegram</a>'
+        f'<a href="{tg_url}" target="_blank" rel="noopener" class="nav-tg">Telegram</a>'
         if tg_url else ""
     )
     dc_btn = (
-        f'<a href="{dc_url}" target="_blank" style="background:#5865f222;border:1px solid #5865f2;'
-        f'color:#8b95f7;padding:7px 13px;border-radius:7px;font-size:13px;text-decoration:none">Discord</a>'
+        f'<a href="{dc_url}" target="_blank" rel="noopener" class="nav-dc">Discord</a>'
         if dc_url else ""
     )
     html = html.replace("__TG_BTN__", tg_btn).replace("__DC_BTN__", dc_btn)
 
-    # hero CTA buttons
+    # ── hero CTA buttons ────────────────────────────────────────────
     hero_btns = []
     if tg_url:
         hero_btns.append(
-            f'<a href="{tg_url}" target="_blank" style="background:linear-gradient(90deg,#0077b6,#00bbf0);'
-            f'color:#fff;padding:14px 28px;border-radius:12px;font-weight:700;font-size:15px;text-decoration:none">✈ Join Telegram</a>'
+            f'<a href="{tg_url}" target="_blank" rel="noopener" class="btn-primary">'
+            f'<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.96 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg>'
+            f'Join Telegram</a>'
         )
     if dc_url:
         hero_btns.append(
-            f'<a href="{dc_url}" target="_blank" style="background:#5865f2;color:#fff;padding:14px 28px;'
-            f'border-radius:12px;font-weight:700;font-size:15px;text-decoration:none">💬 Join Discord</a>'
+            f'<a href="{dc_url}" target="_blank" rel="noopener" class="btn-primary" style="background:#5865f2;box-shadow:none">'
+            f'Join Discord</a>'
         )
-    # "View Live Signals" always present regardless of .env
     hero_btns.append(
-        '<a href="/signals" style="background:#0b1320;border:2px solid #20f0c0;'
-        'color:#20f0c0;padding:14px 28px;border-radius:12px;font-weight:700;'
-        'font-size:15px;text-decoration:none">📊 View Live Signals</a>'
+        '<a href="/performance" class="btn-outline">&#128200; View Performance</a>'
     )
-    if not hero_btns[:-1]:   # no community buttons configured
-        pass  # view signals btn is still there
     html = html.replace("__HERO_BTNS__", "".join(hero_btns))
 
-    # community section
-    comm_cards = []
-    if tg_url:
-        comm_cards.append(
-            f'<div class="comm-card"><div class="comm-ico">✈</div>'
-            f'<div><div class="comm-t">Telegram Channel</div>'
-            f'<div class="comm-d">Get free AI signals instantly in Telegram. Real-time alerts.</div>'
-            f'<a href="{tg_url}" target="_blank" class="btn btntg">Join Free</a></div></div>'
-        )
-    if dc_url:
-        comm_cards.append(
-            f'<div class="comm-card"><div class="comm-ico">💬</div>'
-            f'<div><div class="comm-t">Discord Server</div>'
-            f'<div class="comm-d">Chat with traders, analysis channels and signal alerts.</div>'
-            f'<a href="{dc_url}" target="_blank" class="btn btndc">Join Server</a></div></div>'
-        )
-    community_section = (
-        '<div class="container"><section>'
-        '<div class="stitle"><b></b>Join the Community</div>'
-        '<div class="comm-grid">' + "".join(comm_cards) + '</div>'
-        '</section></div>'
-    ) if comm_cards else ""
-    html = html.replace("__COMMUNITY__", community_section)
+    # ── raw URLs for inline CTA / float button / footer ─────────────
+    html = html.replace("__TG_URL__", tg_url or "#")
+    html = html.replace("__DC_URL__", dc_url or "#")
 
-    # donate section
+    # ── footer community links ───────────────────────────────────────
+    footer_comm = []
+    if tg_url:
+        footer_comm.append(f'<a href="{tg_url}" target="_blank" rel="noopener">Telegram</a>')
+    if dc_url:
+        footer_comm.append(f'<a href="{dc_url}" target="_blank" rel="noopener">Discord</a>')
+    html = html.replace("__FOOTER_COMM__", "".join(footer_comm))
+
+    # ── donation wallets ─────────────────────────────────────────────
     don_cards = []
-    if trc20:
-        don_cards.append(
-            f'<div class="don-card"><div class="don-coin">USDT</div><div class="don-net">TRC20 (Tron Network)</div>'
-            f'<div class="don-addr" onclick="copyAddr(this,\'{trc20}\')">{trc20}</div>'
-            f'<div class="don-hint">Click to copy address</div></div>'
-        )
-    if bep20:
-        don_cards.append(
-            f'<div class="don-card"><div class="don-coin">USDT</div><div class="don-net">BEP20 (BSC Network)</div>'
-            f'<div class="don-addr" onclick="copyAddr(this,\'{bep20}\')">{bep20}</div>'
-            f'<div class="don-hint">Click to copy address</div></div>'
-        )
-    if btc_addr:
-        don_cards.append(
-            f'<div class="don-card"><div class="don-coin">BTC</div><div class="don-net">Bitcoin Network</div>'
-            f'<div class="don-addr" onclick="copyAddr(this,\'{btc_addr}\')">{btc_addr}</div>'
-            f'<div class="don-hint">Click to copy address</div></div>'
-        )
-    if eth_addr:
-        don_cards.append(
-            f'<div class="don-card"><div class="don-coin">ETH</div><div class="don-net">Ethereum (ERC20)</div>'
-            f'<div class="don-addr" onclick="copyAddr(this,\'{eth_addr}\')">{eth_addr}</div>'
-            f'<div class="don-hint">Click to copy address</div></div>'
-        )
+    wallets = [
+        ("USDT", "TRC20", "Tron Network", trc20, "#26a17b"),
+        ("USDT", "BEP20", "BSC Network", bep20, "#f3ba2f"),
+        ("BTC", "BTC", "Bitcoin", btc_addr, "#f7931a"),
+        ("ETH", "ETH", "Ethereum", eth_addr, "#627eea"),
+    ]
+    for coin, net, netname, addr, color in wallets:
+        if addr:
+            safe_coin = _esc(coin)
+            safe_net = _esc(net)
+            safe_netname = _esc(netname)
+            don_cards.append(
+                f'<div class="don-card card">'
+                f'<div class="don-hdr">'
+                f'<span class="don-coin" style="color:{color}">{safe_coin} &mdash; {safe_net}</span>'
+                f'<span class="don-net">{safe_netname}</span>'
+                f'</div>'
+                f'<div class="don-addr">{addr}</div>'
+                f'<div class="don-acts">'
+                f'<button class="don-btn don-copy" onclick="copyDonAddr(this,\'{addr}\')">Copy</button>'
+                f'<button class="don-btn don-qr" onclick="showQR(\'{safe_coin}\',\'{safe_net} &mdash; {safe_netname}\',\'{addr}\')">QR Code</button>'
+                f'</div></div>'
+            )
     donate_section = (
-        '<div class="container"><section>'
-        '<div class="stitle"><b></b>Support the Project</div>'
-        '<p style="color:#8fa8c7;margin-bottom:18px;font-size:14px">All signals are 100% free. Donations help keep the servers running.</p>'
+        '<div class="sh">'
+        '<div class="sh-lbl">&#9829; SUPPORT</div>'
+        '<div class="sh-title">Support the Project</div>'
+        '<div class="sh-sub">All signals are 100% free. Donations help keep the servers running 24/7.</div>'
+        '</div>'
         '<div class="don-grid">' + "".join(don_cards) + '</div>'
-        '</section></div>'
     ) if don_cards else ""
     html = html.replace("__DONATE__", donate_section)
 
-    # affiliates section
+    # ── exchange affiliate cards ─────────────────────────────────────
     aff_cards = []
     exchanges = [
-        ("Binance", binance_aff, "#f0b90b", "World's largest crypto exchange"),
-        ("Bybit", bybit_aff, "#ffcc00", "Top derivatives & futures"),
-        ("OKX", okx_aff, "#1a82ff", "Leading altcoin exchange"),
-        ("Bitget", bitget_aff, "#00e6b3", "Copy trading platform"),
+        ("Binance", binance_aff, "#f3ba2f", "B", "World's largest crypto exchange. Deepest liquidity for futures trading."),
+        ("Bybit", bybit_aff, "#f7a600", "By", "Top derivatives & perpetual futures platform with low fees."),
+        ("OKX", okx_aff, "#1a82ff", "OK", "Leading altcoin exchange with advanced trading tools."),
+        ("Bitget", bitget_aff, "#00e6b3", "Bg", "Copy trading platform &mdash; follow top traders automatically."),
     ]
-    for name, url, color, desc in exchanges:
+    for name, url, color, ico, desc in exchanges:
         if url:
+            safe_name = _esc(name)
             aff_cards.append(
-                f'<div class="aff-card"><div class="aff-name" style="color:{color}">{name}</div>'
-                f'<div class="aff-desc">{desc}</div>'
-                f'<a href="{url}" target="_blank" class="btn-aff">Register Free</a></div>'
+                f'<div class="exch-card card">'
+                f'<div class="exch-ico" style="color:{color};border-color:{color}40;background:{color}0d">{ico}</div>'
+                f'<div class="exch-name" style="color:{color}">{safe_name}</div>'
+                f'<div class="exch-desc">{desc}</div>'
+                f'<a href="{url}" target="_blank" rel="noopener" class="exch-btn">Register Free &rarr;</a>'
+                f'</div>'
             )
     aff_section = (
-        '<div class="container"><section>'
-        '<div class="stitle"><b></b>Recommended Exchanges</div>'
-        '<p style="color:#8fa8c7;margin-bottom:18px;font-size:14px">Register through our partner links to support free signals.</p>'
-        '<div class="aff-grid">' + "".join(aff_cards) + '</div>'
-        '</section></div>'
+        '<div class="sh">'
+        '<div class="sh-lbl">&#127974; EXCHANGES</div>'
+        '<div class="sh-title">Partner Exchanges</div>'
+        '<div class="sh-sub">Register through our partner links to support free signals. No extra cost to you.</div>'
+        '</div>'
+        '<div class="exch-grid">' + "".join(aff_cards) + '</div>'
     ) if aff_cards else ""
     html = html.replace("__AFFILIATES__", aff_section)
 
@@ -2994,400 +2981,625 @@ _PUBLIC_HTML = """\
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>ALPHA RADAR SIGNALS — Free AI Crypto Futures Signals</title>
-<meta name="description" content="Free AI-powered crypto futures signals. Multi-timeframe analysis. Real-time results. No subscription required."/>
-<meta property="og:title" content="ALPHA RADAR SIGNALS — Free AI Crypto Futures Signals"/>
-<meta property="og:description" content="Free AI-powered crypto futures signals. Multi-timeframe analysis. Real-time results. No subscription required."/>
+<title>ALPHA RADAR SIGNALS &#8212; AI-Powered Binance Futures Signals</title>
+<meta name="description" content="Free AI-powered Binance Futures signals. Multi-timeframe analysis. Risk managed entries. 24/7 market scanner."/>
+<meta property="og:title" content="ALPHA RADAR SIGNALS &#8212; AI-Powered Futures Signals"/>
+<meta property="og:description" content="Multi-Timeframe Analysis &#183; Risk Managed &#183; 24/7 Scanner &#183; Free on Telegram"/>
 <meta property="og:type" content="website"/>
-<meta property="og:site_name" content="ALPHA RADAR SIGNALS"/>
-<meta name="twitter:card" content="summary"/>
-<meta name="twitter:title" content="ALPHA RADAR SIGNALS — Free AI Crypto Futures Signals"/>
-<meta name="twitter:description" content="Free AI-powered crypto futures signals. No subscription required."/>
+<meta name="twitter:card" content="summary_large_image"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" crossorigin/>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:#070b12;color:#eaf2ff;font-family:Inter,Arial,sans-serif;line-height:1.6}
-a{color:#20e6c3;text-decoration:none}
-.container{max-width:1200px;margin:0 auto;padding:0 24px}
-header{background:#08111c;border-bottom:1px solid #13263a;position:sticky;top:0;z-index:100}
-.hdr{display:flex;align-items:center;justify-content:space-between;padding:13px 24px;max-width:1200px;margin:0 auto;gap:12px}
-.logo{display:flex;align-items:center;gap:11px;flex-shrink:0}
-.mark{width:42px;height:42px;border:2px solid #20f0c0;border-radius:50%;display:grid;place-items:center;color:#20f0c0;font-weight:900;font-size:20px;box-shadow:0 0 16px #00ffc855;flex-shrink:0}
-.brand{font-size:16px;font-weight:900;letter-spacing:1px;color:#eaf2ff}
-.brand em{color:#20f0c0;font-style:normal}
-.hnav{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
-.live{background:#073d35;color:#20ffc8;border:1px solid #19d9b5;border-radius:5px;padding:3px 9px;font-weight:800;font-size:11px;animation:pulse 2s infinite;white-space:nowrap}
-@keyframes pulse{0%,100%{box-shadow:0 0 0 #20ffc800}50%{box-shadow:0 0 14px #20ffc855}}
-.hero-wrap{background:radial-gradient(ellipse 80% 40% at 50% 0%,#0d2a1e,transparent);padding:68px 24px 48px;text-align:center}
-.hero-wrap h1{font-size:46px;font-weight:900;letter-spacing:2px;margin-bottom:14px}
-.hero-wrap h1 em{color:#20f0c0;font-style:normal}
-.hero-wrap p{font-size:16px;color:#8fa8c7;max-width:540px;margin:0 auto 34px}
-.hero-btns{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
-.sbar{display:grid;grid-template-columns:repeat(4,1fr);gap:15px;margin:28px 0}
-.scard{background:linear-gradient(180deg,#101827,#0b1320);border:1px solid #17314b;border-radius:13px;padding:19px;text-align:center}
-.slabel{color:#7fa0c8;font-size:10px;letter-spacing:2px;text-transform:uppercase}
-.sval{font-size:32px;font-weight:900;margin-top:8px}
-.g{color:#20ff80}.r{color:#ff4f61}.c{color:#20e6c3}.y{color:#ffd84d}
-section{padding:36px 0}
-.stitle{font-size:19px;font-weight:900;margin-bottom:18px;display:flex;align-items:center;gap:10px}
-.stitle b{width:4px;height:21px;background:linear-gradient(180deg,#08a98f,#20f0c0);border-radius:2px;display:inline-block;flex-shrink:0}
-.card{background:linear-gradient(180deg,#101827,#0b1320);border:1px solid #17314b;border-radius:13px;padding:20px;box-shadow:0 0 18px #0005}
-.mkt-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px}
-.mkt-card{text-align:center;padding:16px;background:#0b1320;border:1px solid #17314b;border-radius:10px}
-.mkt-sym{font-size:10px;color:#8fa8c7;letter-spacing:1px;margin-bottom:5px;text-transform:uppercase}
-.mkt-px{font-size:24px;font-weight:900}
-.bias-row{display:flex;gap:18px;justify-content:center;flex-wrap:wrap;background:#0b1320;border:1px solid #17314b;border-radius:10px;padding:13px}
-.bi{text-align:center}.bi .bl{font-size:9px;color:#8fa8c7;margin-bottom:2px;text-transform:uppercase;letter-spacing:1px}.bi .bv{font-size:14px;font-weight:700}
-table{width:100%;border-collapse:collapse}
-th,td{text-align:left;padding:10px 12px;border-bottom:1px solid #17283d;font-size:13px}
-th{color:#8fa8c7;font-size:10px;letter-spacing:1px;text-transform:uppercase}
-tr:last-child td{border-bottom:none}
-.bl2{background:#0a3a1f44;color:#20ff80;border:1px solid #20ff8033;padding:2px 7px;border-radius:4px;font-size:11px;font-weight:700}
-.bs2{background:#3a0a1244;color:#ff4f61;border:1px solid #ff4f6133;padding:2px 7px;border-radius:4px;font-size:11px;font-weight:700}
-.bopen{color:#20ffc8;font-weight:700}.btp{color:#20ff80;font-weight:700}.bsl{color:#ff4f61;font-weight:700}.bexp{color:#ffd84d;font-weight:700}
-.stats3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
-.tabs{display:flex;gap:7px;margin-bottom:14px}
-.tbtn{padding:7px 15px;border-radius:7px;border:1px solid #17314b;background:transparent;color:#8fa8c7;cursor:pointer;font-size:12px}
-.tbtn.act{background:#08a98f22;border-color:#20f0c0;color:#20f0c0}
-.tpane{display:none}.tpane.act{display:block}
-.lb-row{display:flex;align-items:center;gap:11px;padding:10px 0;border-bottom:1px solid #17283d}
-.lb-row:last-child{border-bottom:none}
-.lb-rank{font-size:16px;font-weight:900;width:28px;color:#8fa8c7}
-.lb-sym{font-size:14px;font-weight:700;flex:1}
-.lb-avg{font-size:14px;font-weight:900}.lb-cnt{font-size:10px;color:#8fa8c7}
-.comm-grid{display:grid;grid-template-columns:1fr 1fr;gap:13px}
-.comm-card{background:#0b1320;border:1px solid #17314b;border-radius:11px;padding:20px;display:flex;align-items:flex-start;gap:14px}
-.comm-ico{font-size:32px;line-height:1;flex-shrink:0}
-.comm-t{font-size:14px;font-weight:700;margin-bottom:3px}
-.comm-d{font-size:12px;color:#8fa8c7;margin-bottom:11px}
-.btn{padding:8px 16px;border-radius:7px;font-weight:700;font-size:12px;display:inline-block;cursor:pointer;text-decoration:none}
-.btntg{background:#0088cc;color:#fff}.btndc{background:#5865f2;color:#fff}
-.don-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:13px}
-.don-card{background:#0b1320;border:1px solid #17314b;border-radius:11px;padding:17px}
-.don-coin{font-size:11px;font-weight:700;color:#8fa8c7;letter-spacing:1px;margin-bottom:3px}
-.don-net{font-size:10px;color:#627a99;margin-bottom:7px}
-.don-addr{background:#070b12;border:1px solid #17314b;border-radius:7px;padding:8px;font-family:monospace;font-size:11px;color:#20e6c3;word-break:break-all;cursor:pointer;transition:border-color .2s}
-.don-addr:hover{border-color:#20f0c0}
-.don-hint{font-size:10px;color:#627a99;margin-top:4px}
-.aff-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:13px}
-.aff-card{background:#0b1320;border:1px solid #17314b;border-radius:11px;padding:17px;text-align:center}
-.aff-name{font-size:15px;font-weight:900;margin-bottom:4px}
-.aff-desc{font-size:11px;color:#8fa8c7;margin-bottom:11px}
-.btn-aff{background:linear-gradient(90deg,#08a98f,#20f0c0);color:#001b18;font-weight:700;font-size:12px;padding:7px 12px;border-radius:7px;display:block;text-align:center;text-decoration:none}
-.disc{background:#1a0c0c;border:1px solid #5a1a1a;border-radius:13px;padding:20px;margin-bottom:40px}
-.disc h3{color:#ff7b8a;margin-bottom:9px;font-size:14px;display:flex;align-items:center;gap:6px}
-.disc p{color:#c57a7a;font-size:13px;line-height:1.7}
-.faq-list{display:flex;flex-direction:column;gap:10px}
-.faq-item{background:#0b1320;border:1px solid #17314b;border-radius:10px;padding:16px 18px}
-.faq-q{font-size:14px;font-weight:700;color:#eaf2ff;margin-bottom:6px}
-.faq-a{font-size:13px;color:#8fa8c7;line-height:1.6}
-footer{border-top:1px solid #13263a;padding:26px 24px;text-align:center;color:#627a99;font-size:12px}
-@media(max-width:860px){.sbar{grid-template-columns:1fr 1fr}.mkt-grid{grid-template-columns:1fr}.comm-grid{grid-template-columns:1fr}.aff-grid{grid-template-columns:1fr 1fr}.stats3{grid-template-columns:1fr}.hero-wrap h1{font-size:30px}}
-@media(max-width:480px){.sbar{grid-template-columns:1fr}.aff-grid{grid-template-columns:1fr}.don-grid{grid-template-columns:1fr}}
+:root{--bg:#040d1a;--surf:rgba(6,16,34,0.92);--card:rgba(7,18,40,0.88);--bdr:rgba(0,220,190,0.12);--bdr-h:rgba(0,220,190,0.32);--teal:#00f5d4;--green:#00ff7f;--red:#ff3d5a;--yellow:#ffd84d;--blue:#1a8cff;--text:#dce9f8;--sub:#8ab0cc;--muted:#4e6a87;--glow:rgba(0,245,212,0.1);--glows:rgba(0,245,212,0.25);--r:15px}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:'Inter',Arial,sans-serif;line-height:1.6;overflow-x:hidden;-webkit-font-smoothing:antialiased}
+a{color:var(--teal);text-decoration:none}
+button{font-family:inherit;cursor:pointer;border:none;background:none}
+.container{max-width:1200px;margin:0 auto;padding:0 22px}
+.section{padding:60px 0}
+.section-sm{padding:40px 0}
+.card{background:var(--card);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid var(--bdr);border-radius:var(--r);transition:border-color .25s,box-shadow .25s}
+.card:hover{border-color:var(--bdr-h);box-shadow:0 0 28px var(--glow)}
+
+/* NAV */
+nav{position:sticky;top:0;z-index:100;background:rgba(4,13,26,0.9);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border-bottom:1px solid var(--bdr)}
+.nav-in{display:flex;align-items:center;justify-content:space-between;padding:13px 22px;max-width:1200px;margin:0 auto;gap:14px}
+.nav-logo{display:flex;align-items:center;gap:11px;flex-shrink:0}
+.logo-mark{width:38px;height:38px;border:2px solid var(--teal);border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--teal);font-weight:900;font-size:17px;box-shadow:0 0 16px var(--glow)}
+.logo-txt{font-size:14px;font-weight:900;letter-spacing:.5px}
+.logo-txt em{color:var(--teal);font-style:normal}
+.live-pill{background:rgba(0,245,212,0.08);color:var(--teal);border:1px solid rgba(0,245,212,0.28);border-radius:4px;padding:3px 9px;font-weight:800;font-size:10px;letter-spacing:2px;animation:liveblink 2s infinite}
+@keyframes liveblink{0%,100%{opacity:1}50%{opacity:.55}}
+.nav-links{display:flex;align-items:center;gap:18px}
+.nav-links a{color:var(--sub);font-size:13px;font-weight:600;transition:color .2s}
+.nav-links a:hover{color:var(--teal)}
+.nav-right{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.nav-tg{background:rgba(0,136,204,0.15);border:1px solid rgba(0,136,204,0.35);color:#5bb7e3;padding:6px 13px;border-radius:7px;font-size:13px;font-weight:700;transition:all .2s}
+.nav-tg:hover{background:rgba(0,136,204,0.25);color:#7dcef5}
+.nav-dc{background:rgba(88,101,242,0.15);border:1px solid rgba(88,101,242,0.35);color:#8b95f7;padding:6px 13px;border-radius:7px;font-size:13px;font-weight:700;transition:all .2s}
+.nav-dc:hover{background:rgba(88,101,242,0.25)}
+.nav-admin{color:var(--muted);font-size:11px;padding:5px 10px;border:1px solid rgba(255,255,255,0.07);border-radius:6px;transition:all .2s}
+.nav-admin:hover{border-color:var(--bdr-h);color:var(--sub)}
+
+/* HERO */
+.hero{padding:80px 0 56px;background:radial-gradient(ellipse 80% 45% at 15% 55%,rgba(0,245,212,0.05),transparent 60%),radial-gradient(ellipse 60% 45% at 85% 50%,rgba(26,140,255,0.04),transparent 60%)}
+.hero-in{display:grid;grid-template-columns:1fr 1fr;gap:48px;align-items:center}
+.hero-eyebrow{display:inline-flex;align-items:center;gap:7px;background:rgba(0,245,212,0.07);border:1px solid rgba(0,245,212,0.22);border-radius:100px;padding:5px 16px;font-size:11px;letter-spacing:1px;color:var(--teal);font-weight:700;margin-bottom:18px}
+.eye-dot{width:6px;height:6px;border-radius:50%;background:var(--teal);box-shadow:0 0 8px var(--teal);animation:liveblink 1.5s infinite}
+.hero-h1{font-size:52px;font-weight:900;line-height:1.06;letter-spacing:-1px;margin-bottom:18px}
+.h1-l1{display:block;color:var(--text)}
+.h1-l2{display:block;color:var(--teal)}
+.hero-p{font-size:16px;color:var(--sub);margin-bottom:26px;max-width:420px;line-height:1.7}
+.hero-feats{display:flex;flex-direction:column;gap:9px;margin-bottom:34px}
+.feat{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--sub)}
+.feat-chk{width:18px;height:18px;border-radius:50%;background:rgba(0,245,212,0.1);border:1px solid rgba(0,245,212,0.3);display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--teal);flex-shrink:0}
+.hero-btns{display:flex;gap:12px;flex-wrap:wrap}
+.btn-primary{background:linear-gradient(135deg,#00c9a7,#00f5d4);color:#020f18;padding:13px 26px;border-radius:10px;font-weight:800;font-size:14px;letter-spacing:.3px;transition:transform .2s,box-shadow .2s;display:inline-flex;align-items:center;gap:8px}
+.btn-primary:hover{transform:translateY(-2px);box-shadow:0 8px 28px rgba(0,245,212,0.3);color:#020f18}
+.btn-outline{background:rgba(0,245,212,0.05);color:var(--teal);padding:13px 26px;border-radius:10px;font-weight:700;font-size:14px;border:1.5px solid rgba(0,245,212,0.28);transition:all .2s;display:inline-flex;align-items:center;gap:8px}
+.btn-outline:hover{background:rgba(0,245,212,0.1);border-color:var(--teal);transform:translateY(-2px)}
+
+/* RADAR */
+.radar-wrap{position:relative;width:420px;height:420px;max-width:100%;margin:0 auto}
+.radar-bg{position:absolute;inset:0;border-radius:50%;background:radial-gradient(circle,rgba(0,245,212,0.04),transparent 70%)}
+.rring{position:absolute;border-radius:50%;border:1px solid;top:50%;left:50%;transform:translate(-50%,-50%)}
+.rr1{width:100%;height:100%;border-color:rgba(0,245,212,0.1)}
+.rr2{width:67%;height:67%;border-color:rgba(0,245,212,0.17)}
+.rr3{width:33%;height:33%;border-color:rgba(0,245,212,0.26)}
+.radar-sweep{position:absolute;inset:0;border-radius:50%;background:conic-gradient(from 0deg,transparent 300deg,rgba(0,245,212,0.06) 335deg,rgba(0,245,212,0.22) 360deg);animation:rsweep 3s linear infinite}
+@keyframes rsweep{to{transform:rotate(360deg)}}
+.radar-cx{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:60px;height:60px;border-radius:50%;background:radial-gradient(circle,rgba(0,245,212,0.18),transparent 70%);border:2px solid var(--teal);display:flex;align-items:center;justify-content:center;font-size:21px;font-weight:900;color:var(--teal);box-shadow:0 0 30px rgba(0,245,212,0.38),0 0 60px rgba(0,245,212,0.1);z-index:2}
+.rdot{position:absolute;width:6px;height:6px;border-radius:50%;background:var(--teal);box-shadow:0 0 10px var(--teal);animation:rdotblink 2s ease-in-out infinite}
+@keyframes rdotblink{0%,100%{opacity:.9;transform:scale(1)}50%{opacity:.3;transform:scale(.6)}}
+.rd1{top:22%;left:68%;animation-delay:.3s}
+.rd2{top:64%;left:73%;animation-delay:.9s}
+.rd3{top:76%;left:37%;animation-delay:1.5s}
+.rd4{top:28%;left:26%;animation-delay:2.1s}
+.fchip{position:absolute;background:rgba(4,13,26,0.88);backdrop-filter:blur(10px);border:1px solid rgba(0,245,212,0.28);border-radius:9px;padding:7px 14px;font-size:12px;font-weight:700;color:var(--teal);white-space:nowrap;box-shadow:0 4px 14px rgba(0,0,0,0.4)}
+.fc-btc{top:6%;left:54%;animation:fc1 4s ease-in-out infinite}
+.fc-eth{top:54%;left:76%;animation:fc2 4s ease-in-out infinite .8s}
+.fc-sol{top:80%;left:14%;animation:fc3 4s ease-in-out infinite 1.6s}
+@keyframes fc1{0%,100%{transform:translateY(0)}50%{transform:translateY(-11px)}}
+@keyframes fc2{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+@keyframes fc3{0%,100%{transform:translateY(0)}50%{transform:translateY(-13px)}}
+
+/* STATS BAR */
+.stats-bar{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin:0 0 14px}
+.scard{padding:20px;text-align:center}
+.sc-lbl{font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:10px}
+.sc-val{font-size:28px;font-weight:900;line-height:1}
+.sc-hint{font-size:10px;color:var(--muted);margin-top:5px}
+.ct{color:var(--teal)}.cg{color:var(--green)}.cr{color:var(--red)}.cy{color:var(--yellow)}.cb{color:var(--blue)}
+
+/* SECTION HEADER */
+.sh{margin-bottom:28px}
+.sh-lbl{display:inline-flex;align-items:center;gap:6px;background:rgba(0,245,212,0.07);border:1px solid rgba(0,245,212,0.18);border-radius:5px;padding:4px 12px;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--teal);font-weight:700;margin-bottom:10px}
+.sh-title{font-size:26px;font-weight:900;color:var(--text)}
+.sh-sub{font-size:14px;color:var(--sub);margin-top:6px}
+
+/* SIGNAL TABLE */
+.stbl{width:100%;border-collapse:collapse}
+.stbl th{text-align:left;padding:10px 13px;font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--muted);border-bottom:1px solid rgba(255,255,255,0.05)}
+.stbl td{padding:11px 13px;font-size:13px;border-bottom:1px solid rgba(255,255,255,0.04)}
+.stbl tr:last-child td{border-bottom:none}
+.stbl tr:hover td{background:rgba(0,245,212,0.02)}
+.bl{background:rgba(0,255,127,0.1);color:var(--green);border:1px solid rgba(0,255,127,0.22);padding:2px 7px;border-radius:4px;font-size:11px;font-weight:700}
+.bs{background:rgba(255,61,90,0.1);color:var(--red);border:1px solid rgba(255,61,90,0.22);padding:2px 7px;border-radius:4px;font-size:11px;font-weight:700}
+.bopen{color:var(--teal);font-weight:700}
+.btp{color:var(--green);font-weight:700}
+.bsl{color:var(--red);font-weight:700}
+.bexp{color:var(--yellow);font-weight:700}
+.ovx{overflow-x:auto;-webkit-overflow-scrolling:touch}
+
+/* PERF */
+.perf-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:15px;margin-bottom:20px}
+.pcrd{padding:22px;text-align:center}
+.plbl{font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:10px}
+.pval{font-size:34px;font-weight:900;line-height:1}
+.phint{font-size:11px;color:var(--muted);margin-top:6px}
+
+/* TABS */
+.tabs{display:flex;gap:7px;margin-bottom:14px;padding:0 0 0 2px}
+.tbtn{padding:7px 15px;border-radius:7px;border:1px solid var(--bdr);color:var(--muted);font-size:12px;font-weight:600;transition:all .2s}
+.tbtn.on{background:rgba(0,245,212,0.07);border-color:rgba(0,245,212,0.28);color:var(--teal)}
+.tpn{display:none}.tpn.on{display:block}
+
+/* EXCHANGE CARDS */
+.exch-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+.exch-card{padding:24px;border-radius:16px;text-align:center;transition:transform .25s,box-shadow .25s}
+.exch-card:hover{transform:translateY(-5px);box-shadow:0 12px 36px rgba(0,0,0,0.5)}
+.exch-ico{width:54px;height:54px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:900;margin:0 auto 14px;border:2px solid}
+.exch-name{font-size:17px;font-weight:900;margin-bottom:6px}
+.exch-desc{font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.5}
+.exch-btn{display:block;padding:10px;border-radius:8px;font-weight:700;font-size:13px;transition:all .2s;background:rgba(0,245,212,0.07);border:1px solid rgba(0,245,212,0.25);color:var(--teal)}
+.exch-btn:hover{background:rgba(0,245,212,0.14);border-color:var(--teal);color:var(--teal)}
+
+/* TELEGRAM CTA */
+.tg-cta{background:linear-gradient(135deg,rgba(0,136,204,0.07),rgba(0,245,212,0.05));border:1px solid rgba(0,136,204,0.18);border-radius:22px;padding:56px 40px;text-align:center;position:relative;overflow:hidden}
+.tg-cta::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse 70% 60% at 50% 50%,rgba(0,136,204,0.05),transparent 70%);pointer-events:none}
+.tg-title{font-size:36px;font-weight:900;margin-bottom:10px}
+.tg-sub{font-size:15px;color:var(--sub);max-width:480px;margin:0 auto 32px}
+.tg-bens{display:flex;flex-wrap:wrap;justify-content:center;gap:10px 22px;margin-bottom:32px}
+.tg-ben{display:flex;align-items:center;gap:7px;font-size:14px;color:var(--sub)}
+.ben-dot{width:6px;height:6px;border-radius:50%;background:var(--teal);flex-shrink:0}
+.btn-tg{display:inline-flex;align-items:center;gap:9px;background:#0088cc;color:#fff;padding:15px 34px;border-radius:11px;font-weight:800;font-size:16px;transition:all .22s;box-shadow:0 8px 24px rgba(0,136,204,0.28)}
+.btn-tg:hover{background:#009ee0;transform:translateY(-2px);box-shadow:0 12px 32px rgba(0,136,204,0.42);color:#fff}
+
+/* DONATIONS */
+.don-grid{display:grid;grid-template-columns:1fr 1fr;gap:15px}
+.don-card{padding:20px}
+.don-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.don-coin{font-size:14px;font-weight:900;letter-spacing:.5px}
+.don-net{font-size:10px;color:var(--muted);background:rgba(255,255,255,0.05);padding:3px 9px;border-radius:4px}
+.don-addr{font-family:monospace,monospace;font-size:11px;color:var(--teal);background:rgba(0,0,0,0.28);border:1px solid var(--bdr);border-radius:8px;padding:9px;word-break:break-all;line-height:1.5;margin-bottom:10px;transition:border-color .2s;cursor:default}
+.don-addr:hover{border-color:rgba(0,245,212,0.3)}
+.don-acts{display:flex;gap:7px}
+.don-btn{flex:1;padding:8px;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;transition:all .2s;border:1px solid}
+.don-copy{background:rgba(0,245,212,0.07);border-color:rgba(0,245,212,0.22);color:var(--teal)}
+.don-copy:hover{background:rgba(0,245,212,0.14);border-color:var(--teal)}
+.don-qr{background:rgba(255,255,255,0.04);border-color:var(--bdr);color:var(--sub)}
+.don-qr:hover{border-color:var(--bdr-h);color:var(--text)}
+
+/* FAQ */
+.faq-item{margin-bottom:7px}
+.faq-q{padding:15px 18px;font-size:14px;font-weight:700;cursor:pointer;display:flex;justify-content:space-between;align-items:center;border-radius:var(--r)}
+.faq-q:hover{background:rgba(0,245,212,0.03)}
+.faq-arr{color:var(--muted);transition:transform .2s;font-size:11px}
+.faq-a{font-size:13px;color:var(--sub);line-height:1.7;max-height:0;overflow:hidden;padding:0 18px;transition:max-height .3s ease,padding .3s}
+.faq-item.open .faq-a{max-height:200px;padding:0 18px 15px}
+.faq-item.open .faq-arr{transform:rotate(180deg)}
+
+/* LEADERBOARD */
+.lbrow{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.04)}
+.lbrow:last-child{border-bottom:none}
+.lbrank{font-size:14px;font-weight:900;width:26px;color:var(--muted)}
+.lbsym{font-size:13px;font-weight:700;flex:1}
+.lbr{text-align:right}
+.lbpnl{font-size:13px;font-weight:800}
+.lbcnt{font-size:10px;color:var(--muted);margin-top:2px}
+
+/* DISC */
+.disc{background:rgba(255,61,90,0.04);border:1px solid rgba(255,61,90,0.1);border-radius:13px;padding:18px;margin-top:36px}
+.disc h4{color:rgba(255,110,130,0.9);font-size:12px;margin-bottom:7px;display:flex;align-items:center;gap:6px}
+.disc p{font-size:12px;color:rgba(170,100,110,0.9);line-height:1.7}
+
+/* FOOTER */
+footer{border-top:1px solid var(--bdr);padding:48px 0 32px;margin-top:40px}
+.footer-in{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:32px;margin-bottom:36px}
+.fbrand{font-size:14px;font-weight:900;margin-bottom:7px}
+.ftagline{font-size:12px;color:var(--muted);line-height:1.7}
+.fcol-ttl{font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:14px}
+.flinks{display:flex;flex-direction:column;gap:8px}
+.flinks a{font-size:13px;color:var(--sub);transition:color .2s}
+.flinks a:hover{color:var(--teal)}
+.fbot{border-top:1px solid var(--bdr);padding-top:20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px}
+.fcopy{font-size:11px;color:var(--muted)}
+
+/* FLOAT TG */
+.ftg{position:fixed;bottom:22px;right:22px;width:54px;height:54px;background:#0088cc;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 8px 22px rgba(0,136,204,0.42);z-index:90;transition:all .2s}
+.ftg:hover{transform:scale(1.1);box-shadow:0 12px 30px rgba(0,136,204,0.58)}
+.ftg svg{width:26px;height:26px;fill:#fff}
+
+/* TOAST */
+.toast{position:fixed;bottom:88px;right:22px;background:rgba(0,245,212,0.1);backdrop-filter:blur(14px);border:1px solid rgba(0,245,212,0.28);color:var(--teal);padding:9px 16px;border-radius:8px;font-size:13px;font-weight:700;z-index:200;opacity:0;transition:opacity .25s;pointer-events:none}
+.toast.show{opacity:1}
+
+/* QR MODAL */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,0.76);backdrop-filter:blur(6px);z-index:300;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .2s}
+.modal-bg.open{opacity:1;pointer-events:all}
+.modal-box{background:rgba(5,14,28,0.97);border:1px solid var(--bdr-h);border-radius:20px;padding:30px;text-align:center;max-width:300px;width:90%}
+.modal-ttl{font-size:15px;font-weight:900;margin-bottom:3px}
+.modal-net{font-size:11px;color:var(--muted);margin-bottom:18px}
+.modal-qr{background:#fff;padding:10px;border-radius:10px;display:inline-block;margin-bottom:14px}
+.modal-addr{font-family:monospace;font-size:10px;color:var(--teal);word-break:break-all;background:rgba(0,0,0,0.3);border:1px solid var(--bdr);border-radius:7px;padding:8px;margin-bottom:14px}
+.modal-close{background:rgba(255,255,255,0.06);border:1px solid var(--bdr);color:var(--sub);padding:8px 22px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer}
+.modal-close:hover{border-color:var(--bdr-h);color:var(--text)}
+
+/* RESPONSIVE */
+@media(max-width:1020px){.stats-bar{grid-template-columns:repeat(3,1fr)}.perf-grid{grid-template-columns:1fr 1fr}.footer-in{grid-template-columns:1fr 1fr}.exch-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:768px){.hero{padding:56px 0 36px}.hero-in{grid-template-columns:1fr;gap:30px}.hero-h1{font-size:36px}.hero-right{order:-1}.radar-wrap{width:290px;height:290px}.stats-bar{grid-template-columns:1fr 1fr}.don-grid{grid-template-columns:1fr}.tg-cta{padding:38px 22px}.tg-title{font-size:26px}.nav-links{display:none}}
+@media(max-width:480px){.stats-bar{grid-template-columns:1fr}.exch-grid{grid-template-columns:1fr}.hero-h1{font-size:30px}.footer-in{grid-template-columns:1fr}.perf-grid{grid-template-columns:1fr}.fbot{flex-direction:column;text-align:center}}
 </style>
 </head>
 <body>
 
-<header>
-<div class="hdr">
-<div class="logo">
-  <div class="mark">A</div>
-  <div class="brand">ALPHA RADAR <em>SIGNALS</em></div>
-</div>
-<div class="hnav">
-  <span class="live">● LIVE</span>
-  __TG_BTN__
-  __DC_BTN__
-  <a href="/admin" style="color:#627a99;font-size:11px;padding:5px 11px;border:1px solid #17314b;border-radius:6px">Admin</a>
-</div>
-</div>
-</header>
-
-<div class="hero-wrap">
-<div class="container">
-  <h1>ALPHA RADAR <em>SIGNALS</em></h1>
-  <p>Free AI-powered crypto futures signals. Multi-timeframe analysis. Real-time results. No subscription.</p>
-  <div class="hero-btns">__HERO_BTNS__</div>
-</div>
-</div>
-
-<div class="container">
-<div class="sbar">
-  <div class="scard"><div class="slabel">TOTAL SIGNALS</div><div id="s-total" class="sval">—</div></div>
-  <div class="scard"><div class="slabel">WIN RATE</div><div id="s-wr" class="sval g">—</div></div>
-  <div class="scard"><div class="slabel">PROFIT FACTOR</div><div id="s-pf" class="sval c">—</div></div>
-  <div class="scard"><div class="slabel">ACTIVE SIGNALS</div><div id="s-active" class="sval y">—</div></div>
-</div>
-
-<section>
-<div class="stitle"><b></b>Live Market Overview</div>
-<div class="card">
-  <div class="mkt-grid">
-    <div class="mkt-card"><div class="mkt-sym">BTC/USDT</div><div id="px-btc" class="mkt-px c">—</div></div>
-    <div class="mkt-card"><div class="mkt-sym">ETH/USDT</div><div id="px-eth" class="mkt-px c">—</div></div>
-    <div class="mkt-card"><div class="mkt-sym">SOL/USDT</div><div id="px-sol" class="mkt-px c">—</div></div>
+<nav>
+<div class="nav-in">
+  <div class="nav-logo">
+    <div class="logo-mark">A</div>
+    <div class="logo-txt">ALPHA RADAR <em>SIGNALS</em></div>
   </div>
-  <div class="bias-row">
-    <div class="bi"><div class="bl">MARKET BIAS</div><div id="b-ov" class="bv c">—</div></div>
-    <div class="bi"><div class="bl">BTC 5M</div><div id="b-btc" class="bv">—</div></div>
-    <div class="bi"><div class="bl">ETH 5M</div><div id="b-eth" class="bv">—</div></div>
-    <div class="bi"><div class="bl">SOL 5M</div><div id="b-sol" class="bv">—</div></div>
-    <div class="bi"><div class="bl">UPDATED</div><div id="b-upd" class="bv" style="color:#8fa8c7;font-size:11px">—</div></div>
+  <div class="nav-links">
+    <a href="#live-stats">Stats</a>
+    <a href="#signals-section">Signals</a>
+    <a href="#perf-section">Performance</a>
+    <a href="#exchanges-section">Exchanges</a>
+    <a href="/faq">FAQ</a>
+  </div>
+  <div class="nav-right">
+    <span class="live-pill">&#9679; LIVE</span>
+    __TG_BTN__
+    __DC_BTN__
+    <a href="/admin" class="nav-admin">Admin</a>
   </div>
 </div>
-</section>
+</nav>
 
-<section>
-<div class="stitle"><b></b>Latest Signals</div>
-<div class="card" style="overflow-x:auto">
-<table>
+<div class="hero">
+<div class="container">
+<div class="hero-in">
+  <div>
+    <div class="hero-eyebrow"><span class="eye-dot"></span>AI-Powered Binance Futures</div>
+    <h1 class="hero-h1"><span class="h1-l1">AI-POWERED</span><span class="h1-l2">FUTURES SIGNALS</span></h1>
+    <p class="hero-p">Professional-grade crypto futures signals powered by multi-timeframe AI analysis. Free. No subscription required.</p>
+    <div class="hero-feats">
+      <div class="feat"><div class="feat-chk">&#10003;</div>Multi-Timeframe Analysis &mdash; 1D / 4H / 1H / 15M</div>
+      <div class="feat"><div class="feat-chk">&#10003;</div>Risk Managed Entries &mdash; SL &amp; TP defined</div>
+      <div class="feat"><div class="feat-chk">&#10003;</div>24/7 Market Scanner &mdash; 200+ USDT pairs</div>
+      <div class="feat"><div class="feat-chk">&#10003;</div>Live Performance Tracking</div>
+    </div>
+    <div class="hero-btns">__HERO_BTNS__</div>
+  </div>
+  <div class="hero-right" style="display:flex;justify-content:center">
+    <div class="radar-wrap">
+      <div class="radar-bg"></div>
+      <div class="rring rr1"></div>
+      <div class="rring rr2"></div>
+      <div class="rring rr3"></div>
+      <div class="radar-sweep"></div>
+      <div class="radar-cx">A</div>
+      <div class="rdot rd1"></div>
+      <div class="rdot rd2"></div>
+      <div class="rdot rd3"></div>
+      <div class="rdot rd4"></div>
+      <div class="fchip fc-btc" id="chip-btc">&#8383; BTCUSDT</div>
+      <div class="fchip fc-eth" id="chip-eth">&#9841; ETHUSDT</div>
+      <div class="fchip fc-sol" id="chip-sol">&#9788; SOLUSDT</div>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+
+<div id="live-stats" class="container section-sm">
+<div class="stats-bar">
+  <div class="scard card"><div class="sc-lbl">Total Signals (30D)</div><div id="s-total" class="sc-val ct">&#8212;</div><div class="sc-hint">MTF pipeline</div></div>
+  <div class="scard card"><div class="sc-lbl">Win Rate (30D)</div><div id="s-wr" class="sc-val cg">&#8212;</div><div class="sc-hint">Closed trades</div></div>
+  <div class="scard card"><div class="sc-lbl">Avg Risk / Reward</div><div id="s-rr" class="sc-val cy">&#8212;</div><div class="sc-hint">1:X ratio</div></div>
+  <div class="scard card"><div class="sc-lbl">Markets Scanned</div><div id="s-mkts" class="sc-val cb">&#8212;</div><div class="sc-hint">USDT pairs</div></div>
+  <div class="scard card"><div class="sc-lbl">Open Positions</div><div id="s-active" class="sc-val ct">&#8212;</div><div class="sc-hint">Live now</div></div>
+</div>
+</div>
+
+<div id="signals-section" class="container section-sm">
+<div class="sh">
+  <div class="sh-lbl">&#9679; REAL-TIME</div>
+  <div class="sh-title">Live Signals</div>
+  <div class="sh-sub">Latest AI-generated trade setups from the multi-timeframe pipeline</div>
+</div>
+<div class="card" style="padding:4px">
+<div class="ovx">
+<table class="stbl">
 <thead><tr><th>TIME</th><th>SYMBOL</th><th>SIDE</th><th>TF</th><th>CONF</th><th>RR</th><th>STATUS</th><th>PNL</th></tr></thead>
-<tbody id="sig-tbl"><tr><td colspan="8" style="text-align:center;color:#627a99;padding:24px">Loading signals...</td></tr></tbody>
+<tbody id="sig-tbl"><tr><td colspan="8" style="text-align:center;color:var(--muted);padding:32px">Loading signals...</td></tr></tbody>
 </table>
 </div>
-</section>
-
-<section>
-<div class="stitle"><b></b>Performance</div>
-<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px">
-  <div class="card" style="text-align:center">
-    <div class="slabel">WIN RATE</div>
-    <div id="ps-wr" class="sval g" style="font-size:34px;margin:10px 0">—</div>
-    <div style="font-size:12px;color:#627a99"><span id="ps-w" class="g">—</span> wins &nbsp;/&nbsp; <span id="ps-l" class="r">—</span> losses</div>
-  </div>
-  <div class="card" style="text-align:center">
-    <div class="slabel">PROFIT FACTOR</div>
-    <div id="ps-pf" class="sval c" style="font-size:34px;margin:10px 0">—</div>
-    <div style="font-size:12px;color:#627a99">All closed trades</div>
-  </div>
-  <div class="card" style="text-align:center">
-    <div class="slabel">AVG PNL / TRADE</div>
-    <div id="ps-pnl" class="sval g" style="font-size:34px;margin:10px 0">—</div>
-    <div style="font-size:12px;color:#627a99">Closed trades only</div>
-  </div>
-  <div class="card" style="text-align:center">
-    <div class="slabel">OPEN NOW</div>
-    <div id="ps-open" class="sval c" style="font-size:34px;margin:10px 0">—</div>
-    <div style="font-size:12px;color:#627a99">Active signals</div>
-  </div>
 </div>
-</section>
+</div>
 
-<section>
-<div class="stitle"><b></b>Signal History</div>
-<div class="card">
+<div id="perf-section" class="container section-sm">
+<div class="sh">
+  <div class="sh-lbl">&#128200; PERFORMANCE</div>
+  <div class="sh-title">Track Record</div>
+  <div class="sh-sub">Live performance metrics from all closed trades</div>
+</div>
+<div class="perf-grid">
+  <div class="pcrd card"><div class="plbl">Win Rate</div><div id="ps-wr" class="pval cg">&#8212;</div><div class="phint"><span id="ps-w" class="cg">&#8212;</span> W &nbsp;/&nbsp; <span id="ps-l" class="cr">&#8212;</span> L</div></div>
+  <div class="pcrd card"><div class="plbl">Profit Factor</div><div id="ps-pf" class="pval ct">&#8212;</div><div class="phint">All closed trades</div></div>
+  <div class="pcrd card"><div class="plbl">Avg PnL / Trade</div><div id="ps-pnl" class="pval cg">&#8212;</div><div class="phint">Closed only</div></div>
+  <div class="pcrd card"><div class="plbl">Open Now</div><div id="ps-open" class="pval ct">&#8212;</div><div class="phint">Active positions</div></div>
+</div>
+<div class="card" style="padding:22px;margin-bottom:18px">
+  <div style="font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:14px">Equity Curve</div>
+  <canvas id="equity-chart" height="160"></canvas>
+  <div id="equity-empty" style="text-align:center;color:var(--muted);padding:36px;display:none">Not enough data yet</div>
+</div>
+<div class="card" style="padding:18px">
 <div class="tabs">
-  <button class="tbtn act" onclick="swTab('open',this)">Open (<span id="tc-open">—</span>)</button>
+  <button class="tbtn on" onclick="swTab('open',this)">Open (<span id="tc-open">&#8212;</span>)</button>
   <button class="tbtn" onclick="swTab('closed',this)">Closed</button>
 </div>
-<div id="tp-open" class="tpane act" style="overflow-x:auto">
-<table>
-<thead><tr><th>TIME</th><th>SYMBOL</th><th>SIDE</th><th>TF</th><th>ENTRY</th><th>TP1</th><th>SL</th><th>CONF</th><th>RR</th></tr></thead>
-<tbody id="open-tbl"><tr><td colspan="9" style="text-align:center;color:#627a99;padding:18px">No open signals</td></tr></tbody>
+<div id="tp-open" class="tpn on ovx">
+<table class="stbl"><thead><tr><th>TIME</th><th>SYMBOL</th><th>SIDE</th><th>TF</th><th>ENTRY</th><th>TP1</th><th>SL</th><th>CONF</th><th>RR</th></tr></thead>
+<tbody id="open-tbl"><tr><td colspan="9" style="text-align:center;color:var(--muted);padding:20px">No open signals</td></tr></tbody>
 </table>
 </div>
-<div id="tp-closed" class="tpane" style="overflow-x:auto">
-<table>
-<thead><tr><th>TIME</th><th>SYMBOL</th><th>SIDE</th><th>TF</th><th>CONF</th><th>RR</th><th>RESULT</th><th>PNL</th></tr></thead>
-<tbody id="closed-tbl"><tr><td colspan="8" style="text-align:center;color:#627a99;padding:18px">Loading...</td></tr></tbody>
+<div id="tp-closed" class="tpn ovx">
+<table class="stbl"><thead><tr><th>TIME</th><th>SYMBOL</th><th>SIDE</th><th>TF</th><th>CONF</th><th>RR</th><th>RESULT</th><th>PNL</th></tr></thead>
+<tbody id="closed-tbl"><tr><td colspan="8" style="text-align:center;color:var(--muted);padding:20px">Loading...</td></tr></tbody>
 </table>
 </div>
 </div>
-</section>
-
-<section>
-<div class="stitle"><b></b>Performance Leaderboard</div>
-<div class="card"><div id="lb-list"><p style="color:#8fa8c7;text-align:center;padding:24px">Loading...</p></div></div>
-</section>
+<div class="card" style="padding:18px;margin-top:16px">
+<div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:12px;letter-spacing:1px">PERFORMANCE LEADERBOARD</div>
+<div id="lb-list"><p style="color:var(--muted);text-align:center;padding:20px">Loading...</p></div>
+</div>
 </div>
 
-__COMMUNITY__
-__DONATE__
+<div id="exchanges-section" class="container section">
 __AFFILIATES__
-<div class="container">
-<section>
-<div class="stitle"><b></b>Frequently Asked Questions</div>
-<div class="faq-list">
-  <div class="faq-item">
-    <div class="faq-q">What is Alpha Radar?</div>
-    <div class="faq-a">Alpha Radar Signals is a free AI-powered crypto futures signal service. Our multi-timeframe engine scans 200+ USDT perpetual pairs on Binance 24/7, applying a strict 4-layer pipeline (1D Trend → 4H Structure → 1H Setup → 15M Entry) to deliver high-quality setups directly to Telegram.</div>
-  </div>
-  <div class="faq-item">
-    <div class="faq-q">Is this financial advice?</div>
-    <div class="faq-a">No. All signals, analysis, and content on Alpha Radar Signals are for educational and informational purposes only. Nothing on this platform constitutes financial, investment, trading, or legal advice. You are solely responsible for your trading decisions. Past performance does not guarantee future results.</div>
-  </div>
-  <div class="faq-item">
-    <div class="faq-q">Does the bot trade automatically?</div>
-    <div class="faq-a">No. Alpha Radar Signals does not place any real trades. All signals require manual execution by the user. The system only generates and broadcasts trade setups — it never connects to your exchange account or touches real funds.</div>
-  </div>
-  <div class="faq-item">
-    <div class="faq-q">How are signals generated?</div>
-    <div class="faq-a">Each signal must pass four hard gates in sequence: (1) 1D Trend Filter — EMA50/200 alignment confirms the dominant trend. (2) 4H Structure — Break of Structure, Order Blocks, and Fair Value Gaps confirm momentum. (3) 1H Setup — pullbacks, retests, VWAP alignment, and volume confirm the entry zone. (4) 15M Entry Trigger — a score-based entry system fires on BOS, FVG retest, OB retest, EMA pullback, or VWAP reclaim. All four gates must pass.</div>
-  </div>
-  <div class="faq-item">
-    <div class="faq-q">What timeframes are used?</div>
-    <div class="faq-a">The pipeline uses four timeframes: 1D (trend), 4H (structure), 1H (setup), and 15M (entry). All four must agree before a signal is emitted. Legacy 5-minute signals from older scanner versions are excluded from all reports and statistics.</div>
-  </div>
 </div>
-</section>
+
+<div class="container" style="margin-bottom:40px">
+<div class="tg-cta">
+  <div class="sh-lbl" style="justify-content:center;margin:0 auto 14px;display:inline-flex">&#128241; JOIN FREE</div>
+  <div class="tg-title">Join <span style="color:var(--teal)">Thousands</span> of Traders</div>
+  <div class="tg-sub">Real-time signals, market alerts, weekly performance reports &mdash; all free on Telegram.</div>
+  <div class="tg-bens">
+    <div class="tg-ben"><div class="ben-dot"></div>Real-time signal alerts</div>
+    <div class="tg-ben"><div class="ben-dot"></div>Market regime updates</div>
+    <div class="tg-ben"><div class="ben-dot"></div>Weekly performance reports</div>
+    <div class="tg-ben"><div class="ben-dot"></div>24/7 scanner coverage</div>
+    <div class="tg-ben"><div class="ben-dot"></div>100% free to join</div>
+  </div>
+  <a id="cta-tg-btn" href="__TG_URL__" target="_blank" rel="noopener" class="btn-tg">
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="white"><path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.96 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg>
+    JOIN TELEGRAM FREE
+  </a>
+</div>
+</div>
+
+<div class="container section-sm">
+__DONATE__
+</div>
+
+<div class="container section-sm">
+<div class="sh">
+  <div class="sh-lbl">&#10067; FAQ</div>
+  <div class="sh-title">Frequently Asked Questions</div>
+</div>
+<div id="faq-list">
+  <div class="faq-item card" onclick="toggleFaq(this)"><div class="faq-q">What is Alpha Radar Signals?<span class="faq-arr">&#9660;</span></div><div class="faq-a">A free AI-powered crypto futures signal service. Our multi-timeframe engine scans 200+ USDT perpetual pairs on Binance 24/7, applying a strict 4-layer pipeline (1D Trend &rarr; 4H Structure &rarr; 1H Setup &rarr; 15M Entry) to deliver high-quality setups directly to Telegram.</div></div>
+  <div class="faq-item card" onclick="toggleFaq(this)" style="margin-top:7px"><div class="faq-q">Is this financial advice?<span class="faq-arr">&#9660;</span></div><div class="faq-a">No. All signals are for educational and informational purposes only. Nothing on this platform constitutes financial, investment, trading, or legal advice. You are solely responsible for your trading decisions.</div></div>
+  <div class="faq-item card" onclick="toggleFaq(this)" style="margin-top:7px"><div class="faq-q">Does the bot trade automatically?<span class="faq-arr">&#9660;</span></div><div class="faq-a">No. Alpha Radar Signals does not place any real trades. All signals require manual execution by the user. The system only generates and broadcasts trade setups &mdash; it never connects to your exchange account or touches real funds.</div></div>
+  <div class="faq-item card" onclick="toggleFaq(this)" style="margin-top:7px"><div class="faq-q">How are signals generated?<span class="faq-arr">&#9660;</span></div><div class="faq-a">Each signal must pass four hard gates: (1) 1D Trend Filter &mdash; EMA alignment confirms the dominant trend. (2) 4H Structure &mdash; BOS, OB, FVG confirm momentum. (3) 1H Setup &mdash; pullback, VWAP, volume confirm entry zone. (4) 15M Entry trigger fires on BOS, FVG retest, OB, EMA pullback, or VWAP reclaim.</div></div>
+  <div class="faq-item card" onclick="toggleFaq(this)" style="margin-top:7px"><div class="faq-q">What exchanges are supported?<span class="faq-arr">&#9660;</span></div><div class="faq-a">Signals are calibrated for Binance USDT Perpetual Futures. The setups are also compatible with Bybit, OKX, and Bitget for the same pairs.</div></div>
+</div>
 </div>
 
 <div class="container">
 <div class="disc">
-<h3>⚠ Risk Disclaimer</h3>
-<p>Signals are for educational purposes only. Trading futures is high risk. Past performance is not indicative of future results. You may lose all your capital. Never trade with money you cannot afford to lose. Alpha Radar Signals does not provide financial, investment, or legal advice. Always do your own research. By using this service you acknowledge and accept all trading risks.</p>
+  <h4>&#9888; Risk Disclaimer</h4>
+  <p>Signals are for educational purposes only. Trading futures is high risk. Past performance does not indicate future results. Never trade with money you cannot afford to lose. Alpha Radar Signals does not provide financial, investment, or legal advice. <a href="/risk-disclaimer" style="color:rgba(255,110,130,0.8)">Full disclaimer &rarr;</a></p>
 </div>
 </div>
 
 <footer>
-<p style="font-size:15px;font-weight:700;color:#eaf2ff;margin-bottom:5px">ALPHA RADAR SIGNALS</p>
-<p>Free AI-powered crypto futures signals &nbsp;·&nbsp; For educational use only</p>
-<p style="margin-top:8px">
-  <a href="/signals" style="color:#627a99;font-size:11px">Signals</a> &nbsp;·&nbsp;
-  <a href="/performance" style="color:#627a99;font-size:11px">Performance</a> &nbsp;·&nbsp;
-  <a href="/stats" style="color:#627a99;font-size:11px">Stats</a> &nbsp;·&nbsp;
-  <a href="/about" style="color:#627a99;font-size:11px">About</a> &nbsp;·&nbsp;
-  <a href="/faq" style="color:#627a99;font-size:11px">FAQ</a>
-</p>
-<p style="margin-top:6px">
-  <a href="/terms" style="color:#627a99;font-size:11px">Terms</a> &nbsp;·&nbsp;
-  <a href="/privacy" style="color:#627a99;font-size:11px">Privacy</a> &nbsp;·&nbsp;
-  <a href="/risk-disclaimer" style="color:#627a99;font-size:11px">Risk Disclaimer</a> &nbsp;·&nbsp;
-  <a href="/admin" style="color:#627a99;font-size:11px">Admin</a>
-</p>
-<p style="margin-top:8px;font-size:11px">© 2026 ALPHA RADAR SIGNALS &nbsp;·&nbsp; Not financial advice.</p>
+<div class="container">
+<div class="footer-in">
+  <div>
+    <div class="fbrand">ALPHA RADAR <span style="color:var(--teal)">SIGNALS</span></div>
+    <div class="ftagline">AI-Powered Binance Futures Signals.<br/>Multi-Timeframe &middot; Risk Managed &middot; 24/7 Scanner.<br/>For educational use only.</div>
+  </div>
+  <div>
+    <div class="fcol-ttl">Platform</div>
+    <div class="flinks">
+      <a href="/signals">Signals</a>
+      <a href="/performance">Performance</a>
+      <a href="/stats">Stats</a>
+      <a href="/about">About</a>
+      <a href="/faq">FAQ</a>
+    </div>
+  </div>
+  <div>
+    <div class="fcol-ttl">Community</div>
+    <div class="flinks" id="footer-community">__FOOTER_COMM__</div>
+  </div>
+  <div>
+    <div class="fcol-ttl">Legal</div>
+    <div class="flinks">
+      <a href="/terms">Terms of Service</a>
+      <a href="/privacy">Privacy Policy</a>
+      <a href="/risk-disclaimer">Risk Disclaimer</a>
+      <a href="/admin">Admin</a>
+    </div>
+  </div>
+</div>
+<div class="fbot">
+  <div class="fcopy">&copy; 2026 ALPHA RADAR SIGNALS &middot; Not financial advice. For educational use only.</div>
+  <div class="fcopy"><a href="/signals" style="color:var(--muted)">Signals</a> &middot; <a href="/performance" style="color:var(--muted)">Performance</a> &middot; <a href="/stats" style="color:var(--muted)">Stats</a></div>
+</div>
+</div>
 </footer>
 
+<a id="float-tg" href="__TG_URL__" target="_blank" rel="noopener" class="ftg" title="Join Telegram">
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.96 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg>
+</a>
+
+<div id="qr-modal" class="modal-bg" onclick="closeQR(event)">
+  <div class="modal-box">
+    <div id="qr-ttl" class="modal-ttl">&#8212;</div>
+    <div id="qr-net" class="modal-net">&#8212;</div>
+    <div class="modal-qr"><div id="qr-canvas"></div></div>
+    <div id="qr-addr" class="modal-addr">&#8212;</div>
+    <button class="modal-close" onclick="closeQRBtn()">Close</button>
+  </div>
+</div>
+<div id="v4-toast" class="toast">Copied!</div>
+
 <script>
-function pct(v){return(v===null||v===undefined)?'—':(v>=0?'+':'')+v+'%';}
-function cls(v){return v>=0?'g':'r';}
+function pct(v){if(v===null||v===undefined)return'&#8212;';var n=parseFloat(v);return(n>=0?'+':'')+n.toFixed(2)+'%';}
+function cls(v){return parseFloat(v)>=0?'cg':'cr';}
 function sBadge(st){
-  if(st==='OPEN')return '<span class="bopen">OPEN</span>';
-  if(st==='SL')return '<span class="bsl">SL</span>';
-  if(st==='EXPIRED')return '<span class="bexp">EXP</span>';
-  return '<span class="btp">'+st+'</span>';
+  if(st==='OPEN')return'<span class="bopen">OPEN</span>';
+  if(st==='SL')return'<span class="bsl">SL</span>';
+  if(st==='EXPIRED')return'<span class="bexp">EXP</span>';
+  return'<span class="btp">'+st+'</span>';
 }
 function swTab(n,btn){
-  document.querySelectorAll('.tbtn').forEach(b=>b.classList.remove('act'));
-  btn.classList.add('act');
-  document.querySelectorAll('.tpane').forEach(p=>p.classList.remove('act'));
-  document.getElementById('tp-'+n).classList.add('act');
+  document.querySelectorAll('.tbtn').forEach(function(b){b.classList.remove('on');});
+  btn.classList.add('on');
+  document.querySelectorAll('.tpn').forEach(function(p){p.classList.remove('on');});
+  document.getElementById('tp-'+n).classList.add('on');
 }
-async function copyAddr(el,addr){
-  try{
-    await navigator.clipboard.writeText(addr);
-    el.style.borderColor='#20f0c0';
-    el.title='Copied!';
-    setTimeout(()=>{el.style.borderColor='';el.title='';},1600);
-  }catch(e){}
+function toggleFaq(el){el.classList.toggle('open');}
+function showToast(msg){
+  var t=document.getElementById('v4-toast');
+  t.textContent=msg||'Copied!';
+  t.classList.add('show');
+  setTimeout(function(){t.classList.remove('show');},2000);
 }
+function copyDonAddr(btn,addr){
+  if(navigator.clipboard){
+    navigator.clipboard.writeText(addr).then(function(){
+      showToast('Address copied!');
+      var orig=btn.textContent;btn.textContent='Copied!';
+      setTimeout(function(){btn.textContent=orig;},1800);
+    }).catch(function(){});
+  }
+}
+var _qrObj=null;
+function showQR(label,network,addr){
+  document.getElementById('qr-ttl').textContent=label;
+  document.getElementById('qr-net').textContent=network;
+  document.getElementById('qr-addr').textContent=addr;
+  var c=document.getElementById('qr-canvas');
+  c.innerHTML='';
+  if(window.QRCode){
+    try{_qrObj=new QRCode(c,{text:addr,width:170,height:170,colorDark:'#000000',colorLight:'#ffffff'});}
+    catch(e){c.textContent='QR unavailable';}
+  }else{c.textContent='QR library loading...';}
+  document.getElementById('qr-modal').classList.add('open');
+}
+function closeQR(e){if(e.target===document.getElementById('qr-modal'))closeQRBtn();}
+function closeQRBtn(){document.getElementById('qr-modal').classList.remove('open');}
+
+var _equityChart=null;
+function buildEquity(closed){
+  var canvas=document.getElementById('equity-chart');
+  var empty=document.getElementById('equity-empty');
+  if(!closed||closed.length<2){empty.style.display='block';canvas.style.display='none';return;}
+  empty.style.display='none';canvas.style.display='block';
+  var cum=0,labels=[],data=[];
+  closed.slice().reverse().forEach(function(s,i){
+    cum+=parseFloat(s.pnl||0);
+    labels.push(s.time||(''+(i+1)));
+    data.push(Math.round(cum*100)/100);
+  });
+  var ctx=canvas.getContext('2d');
+  if(_equityChart)_equityChart.destroy();
+  var grad=ctx.createLinearGradient(0,0,0,160);
+  grad.addColorStop(0,'rgba(0,245,212,0.22)');
+  grad.addColorStop(1,'rgba(0,245,212,0.01)');
+  _equityChart=new Chart(ctx,{
+    type:'line',
+    data:{labels:labels,datasets:[{data:data,borderColor:'#00f5d4',borderWidth:2,backgroundColor:grad,fill:true,tension:0.4,pointRadius:0,pointHoverRadius:4,pointHoverBackgroundColor:'#00f5d4'}]},
+    options:{responsive:true,plugins:{legend:{display:false},tooltip:{callbacks:{label:function(c){return(c.raw>=0?'+':'')+c.raw+'%';},title:function(c){return c[0].label;}}}},scales:{x:{display:false},y:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#4e6a87',font:{size:10},callback:function(v){return(v>=0?'+':'')+v+'%';}}},}},
+  });
+}
+
 async function loadStats(){
   try{
-    const r=await fetch('/api/public/stats');
+    var r=await fetch('/api/public/stats');
     if(!r.ok)return;
-    const d=await r.json();
+    var d=await r.json();
     if(d.error)return;
-    // Stat bar — s-total and s-pf set by loadPerf()
-    document.getElementById('s-wr').textContent=(d.winrate??'—')+'%';
-    document.getElementById('s-active').textContent=d.open_signals??'—';
-    // Performance section
-    document.getElementById('ps-wr').textContent=(d.winrate??'—')+'%';
-    document.getElementById('ps-open').textContent=d.open_signals??'—';
-    document.getElementById('tc-open').textContent=d.open_signals??'—';
-    // latest signals
-    const sRows=(d.recent||[]).slice(0,10).map(x=>
-      '<tr><td>'+x.time+'</td>'+
-      '<td><b><a href="/signal/'+x.id+'" style="color:#20e6c3">'+x.symbol+'</a></b></td>'+
-      '<td><span class="'+(x.side==='LONG'?'bl2':'bs2')+'">'+x.side+'</span></td>'+
-      '<td>'+x.tf+'</td><td>'+x.conf+'%</td><td>1:'+x.rr+'</td>'+
-      '<td>'+sBadge(x.status)+'</td>'+
-      '<td class="'+cls(x.pnl)+'">'+pct(x.pnl)+'</td></tr>'
-    ).join('');
-    document.getElementById('sig-tbl').innerHTML=sRows||
-      '<tr><td colspan="8" style="text-align:center;color:#627a99;padding:20px">No signals yet</td></tr>';
-    // open history
-    const oRows=(d.open||[]).map(x=>
-      '<tr><td>'+x.time+'</td><td><b>'+x.symbol+'</b></td>'+
-      '<td><span class="'+(x.side==='LONG'?'bl2':'bs2')+'">'+x.side+'</span></td>'+
-      '<td>'+x.tf+'</td><td>'+x.entry_low+'</td><td>'+x.tp1+'</td><td>'+x.sl+'</td>'+
-      '<td>'+x.conf+'%</td><td>1:'+x.rr+'</td></tr>'
-    ).join('');
-    document.getElementById('open-tbl').innerHTML=oRows||
-      '<tr><td colspan="9" style="text-align:center;color:#627a99;padding:18px">No open signals</td></tr>';
-    // closed history
-    const cRows=(d.closed_recent||[]).map(x=>
-      '<tr><td>'+x.time+'</td><td><b>'+x.symbol+'</b></td>'+
-      '<td><span class="'+(x.side==='LONG'?'bl2':'bs2')+'">'+x.side+'</span></td>'+
-      '<td>'+x.tf+'</td><td>'+x.conf+'%</td><td>1:'+x.rr+'</td>'+
-      '<td>'+sBadge(x.status)+'</td>'+
-      '<td class="'+cls(x.pnl)+'">'+pct(x.pnl)+'</td></tr>'
-    ).join('');
-    document.getElementById('closed-tbl').innerHTML=cRows||
-      '<tr><td colspan="8" style="text-align:center;color:#627a99;padding:18px">No closed signals</td></tr>';
-    // leaderboard
-    const lbHtml=(d.leaderboard||[]).map((x,i)=>{
-      const clr=i===0?'#ffd84d':i===1?'#c0c0c0':i===2?'#cd7f32':'#8fa8c7';
-      return '<div class="lb-row">'+
-        '<div class="lb-rank" style="color:'+clr+'">#'+(i+1)+'</div>'+
-        '<div class="lb-sym">'+x.symbol+'</div>'+
-        '<div style="text-align:right">'+
-          '<div class="lb-avg '+cls(x.avg)+'">'+pct(x.avg)+'</div>'+
-          '<div class="lb-cnt">'+x.count+' signals</div>'+
-        '</div></div>';
+    var wrEl=document.getElementById('s-wr');
+    wrEl.textContent=(d.winrate!=null?d.winrate:'&#8212;')+'%';
+    wrEl.className='sc-val '+(d.winrate>=50?'cg':'cr');
+    document.getElementById('s-active').textContent=d.open_signals!=null?d.open_signals:'&#8212;';
+    document.getElementById('s-mkts').textContent=d.universe!=null?d.universe:'&#8212;';
+    var pwEl=document.getElementById('ps-wr');
+    pwEl.textContent=(d.winrate!=null?d.winrate:'&#8212;')+'%';
+    pwEl.className='pval '+(d.winrate>=50?'cg':'cr');
+    document.getElementById('ps-open').textContent=d.open_signals!=null?d.open_signals:'&#8212;';
+    document.getElementById('tc-open').textContent=d.open_signals!=null?d.open_signals:'&#8212;';
+    document.getElementById('ps-w').textContent=d.wins!=null?d.wins:'&#8212;';
+    document.getElementById('ps-l').textContent=d.losses!=null?d.losses:'&#8212;';
+    var sRows=(d.recent||[]).slice(0,10).map(function(x){
+      return'<tr><td style="color:var(--muted);font-size:12px">'+x.time+'</td>'+
+        '<td><b><a href="/signal/'+x.id+'" style="color:var(--teal)">'+x.symbol+'</a></b></td>'+
+        '<td><span class="'+(x.side==='LONG'?'bl':'bs')+'">'+x.side+'</span></td>'+
+        '<td style="color:var(--sub)">'+x.tf+'</td>'+
+        '<td style="color:var(--yellow)">'+x.conf+'%</td>'+
+        '<td style="color:var(--sub)">1:'+x.rr+'</td>'+
+        '<td>'+sBadge(x.status)+'</td>'+
+        '<td class="'+cls(x.pnl)+'">'+pct(x.pnl)+'</td></tr>';
     }).join('');
-    document.getElementById('lb-list').innerHTML=lbHtml||
-      '<p style="color:#8fa8c7;text-align:center;padding:20px">No data yet</p>';
+    document.getElementById('sig-tbl').innerHTML=sRows||'<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:28px">No signals yet</td></tr>';
+    var oRows=(d.open||[]).map(function(x){
+      return'<tr><td style="font-size:12px;color:var(--muted)">'+x.time+'</td>'+
+        '<td><b>'+x.symbol+'</b></td>'+
+        '<td><span class="'+(x.side==='LONG'?'bl':'bs')+'">'+x.side+'</span></td>'+
+        '<td style="color:var(--sub)">'+x.tf+'</td>'+
+        '<td style="color:var(--teal)">'+x.entry_low+'</td>'+
+        '<td style="color:var(--green)">'+x.tp1+'</td>'+
+        '<td style="color:var(--red)">'+x.sl+'</td>'+
+        '<td style="color:var(--yellow)">'+x.conf+'%</td>'+
+        '<td style="color:var(--sub)">1:'+x.rr+'</td></tr>';
+    }).join('');
+    document.getElementById('open-tbl').innerHTML=oRows||'<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:20px">No open signals</td></tr>';
+    var cRows=(d.closed_recent||[]).map(function(x){
+      return'<tr><td style="font-size:12px;color:var(--muted)">'+x.time+'</td>'+
+        '<td><b>'+x.symbol+'</b></td>'+
+        '<td><span class="'+(x.side==='LONG'?'bl':'bs')+'">'+x.side+'</span></td>'+
+        '<td style="color:var(--sub)">'+x.tf+'</td>'+
+        '<td style="color:var(--yellow)">'+x.conf+'%</td>'+
+        '<td style="color:var(--sub)">1:'+x.rr+'</td>'+
+        '<td>'+sBadge(x.status)+'</td>'+
+        '<td class="'+cls(x.pnl)+'">'+pct(x.pnl)+'</td></tr>';
+    }).join('');
+    document.getElementById('closed-tbl').innerHTML=cRows||'<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:20px">No closed signals</td></tr>';
+    var lbHtml=(d.leaderboard||[]).map(function(x,i){
+      var clr=i===0?'#ffd84d':i===1?'#b0b8c0':i===2?'#cd7f32':'var(--muted)';
+      return'<div class="lbrow"><div class="lbrank" style="color:'+clr+'">#'+(i+1)+'</div>'+
+        '<div class="lbsym">'+x.symbol+'</div>'+
+        '<div class="lbr"><div class="lbpnl '+cls(x.avg)+'">'+pct(x.avg)+'</div>'+
+        '<div class="lbcnt">'+x.count+' signals</div></div></div>';
+    }).join('');
+    document.getElementById('lb-list').innerHTML=lbHtml||'<p style="color:var(--muted);text-align:center;padding:20px">No data yet</p>';
+    if(window.Chart)buildEquity(d.closed_recent||[]);
   }catch(e){console.error(e);}
 }
+
 async function loadPrices(){
   try{
-    const r=await fetch('/api/public/prices');
+    var r=await fetch('/api/public/prices');
     if(!r.ok)return;
-    const d=await r.json();
+    var d=await r.json();
     if(d.prices){
-      document.getElementById('px-btc').textContent=d.prices.BTCUSDT??'—';
-      document.getElementById('px-eth').textContent=d.prices.ETHUSDT??'—';
-      document.getElementById('px-sol').textContent=d.prices.SOLUSDT??'—';
+      var b=document.getElementById('chip-btc');
+      var e=document.getElementById('chip-eth');
+      var s=document.getElementById('chip-sol');
+      if(b&&d.prices.BTCUSDT)b.textContent='&#8383; $'+Number(d.prices.BTCUSDT).toLocaleString();
+      if(e&&d.prices.ETHUSDT)e.textContent='&#9841; $'+Number(d.prices.ETHUSDT).toLocaleString();
+      if(s&&d.prices.SOLUSDT)s.textContent='&#9788; $'+Number(d.prices.SOLUSDT).toLocaleString();
     }
-    if(d.market_bias){
-      const mb=d.market_bias;
-      const bEl=document.getElementById('b-ov');
-      bEl.textContent=mb.bias??'—';
-      bEl.className='bv '+(mb.bias==='RISK_ON'?'g':mb.bias==='RISK_OFF'?'r':'c');
-      document.getElementById('b-btc').textContent=(mb.btc_5m_change_pct??'—')+'%';
-      document.getElementById('b-eth').textContent=(mb.eth_5m_change_pct??'—')+'%';
-      document.getElementById('b-sol').textContent=(mb.sol_5m_change_pct??'—')+'%';
-    }
-    document.getElementById('b-upd').textContent=new Date().toLocaleTimeString();
-  }catch(e){console.error(e);}
+  }catch(e){}
 }
+
 async function loadPerf(){
   try{
-    const r=await fetch('/api/public/performance');
+    var r=await fetch('/api/public/performance');
     if(!r.ok)return;
-    const d=await r.json();
+    var d=await r.json();
     if(d.error)return;
-    // Stat bar
-    document.getElementById('s-total').textContent=d.total_signals??d.total_closed??'—';
-    const wrEl=document.getElementById('s-wr');
-    wrEl.textContent=(d.win_rate??'—')+'%';
-    wrEl.className='sval '+(d.win_rate>=50?'g':'r');
-    const pfEl=document.getElementById('s-pf');
-    pfEl.textContent=d.profit_factor!=null?d.profit_factor:'∞';
-    // Performance section
-    document.getElementById('ps-wr').textContent=(d.win_rate??'—')+'%';
-    document.getElementById('ps-w').textContent=d.wins??'—';
-    document.getElementById('ps-l').textContent=d.losses??'—';
-    const pfEl2=document.getElementById('ps-pf');
-    pfEl2.textContent=d.profit_factor!=null?d.profit_factor:'∞';
-    const pnlEl=document.getElementById('ps-pnl');
-    pnlEl.textContent=pct(d.avg_pnl);
-    pnlEl.className='sval '+(d.avg_pnl>=0?'g':'r');
-  }catch(e){console.error(e);}
+    document.getElementById('s-total').textContent=d.total_signals!=null?d.total_signals:(d.total_closed!=null?d.total_closed:'&#8212;');
+    document.getElementById('s-rr').textContent=d.avg_rr!=null?('1:'+d.avg_rr):'&#8212;';
+    document.getElementById('ps-pf').textContent=d.profit_factor!=null?d.profit_factor:'&#8734;';
+    var pEl=document.getElementById('ps-pnl');
+    if(d.avg_pnl!=null){pEl.textContent=pct(d.avg_pnl);pEl.className='pval '+(d.avg_pnl>=0?'cg':'cr');}
+  }catch(e){}
 }
-loadStats();loadPrices();loadPerf();
+
+loadStats();loadPerf();loadPrices();
 setInterval(loadStats,6000);
-setInterval(loadPrices,3000);
 setInterval(loadPerf,30000);
+setInterval(loadPrices,4000);
 </script>
 </body>
 </html>
