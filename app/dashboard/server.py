@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, Request, Form
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, PlainTextResponse
-from sqlalchemy import select, desc
+from sqlalchemy import func as _sqlfunc, select, desc
 
 from app.config import settings
 from app.database.session import SessionLocal
@@ -228,96 +228,173 @@ async def api_public_signals(limit: int = 50):
 
 @app.get("/api/public/performance")
 async def api_public_performance():
+    """
+    Full MTF-only performance metrics.
+    Filters: strategy=MTF_SMC_STRICT, timeframe IN (15m/1h/4h/1d).
+    Legacy 5m signals, archived signals, and other strategies are excluded.
+    """
+    from collections import defaultdict as _dd
+
     try:
-        stats = await _get_stats()
-        now = datetime.now(timezone.utc)
+        # ── fetch all closed MTF signals (no row cap) ─────────────────
         async with SessionLocal() as session:
-            res = await session.execute(
+            closed_res = await session.execute(
                 select(Signal)
                 .where(
                     Signal.status.in_(["TP1", "TP2", "TP3", "SL"]),
                     Signal.strategy == _MTF_STRATEGY,
                     Signal.timeframe.in_(_MTF_TIMEFRAMES),
                 )
-                .order_by(desc(Signal.created_at)).limit(1000)
+                .order_by(Signal.created_at)
             )
-            closed = res.scalars().all()
+            closed = list(closed_res.scalars().all())
 
-        wins = [s for s in closed if s.status in ("TP1", "TP2", "TP3")]
-        losses = [s for s in closed if s.status == "SL"]
+            open_cnt_res = await session.execute(
+                select(_sqlfunc.count(Signal.id))
+                .where(
+                    Signal.status == "OPEN",
+                    Signal.strategy == _MTF_STRATEGY,
+                    Signal.timeframe.in_(_MTF_TIMEFRAMES),
+                )
+            )
+            open_count = int(open_cnt_res.scalar() or 0)
+
+        # ── helpers ────────────────────────────────────────────────────
+        WIN_ST = ("TP1", "TP2", "TP3")
+
+        def _pf(pnls: list) -> float | None:
+            gw = sum(p for p in pnls if p > 0)
+            gl = abs(sum(p for p in pnls if p < 0))
+            return round(gw / gl, 2) if gl > 0 else None
+
+        def _side_stat(sigs: list) -> dict:
+            sw = [s for s in sigs if s.status in WIN_ST]
+            sl = [s for s in sigs if s.status == "SL"]
+            sp = [float(s.pnl_pct or 0) for s in sigs]
+            sr = [float(s.risk_reward or 0) for s in sigs]
+            n  = max(1, len(sigs))
+            return {
+                "total":    len(sigs),
+                "wins":     len(sw),
+                "losses":   len(sl),
+                "win_rate": round(len(sw) / n * 100, 1),
+                "avg_pnl":  round(sum(sp) / n, 2),
+                "avg_rr":   round(sum(sr) / n, 2),
+            }
+
+        # ── overall metrics ────────────────────────────────────────────
         total_closed = len(closed)
-        win_rate = len(wins) / max(1, total_closed) * 100
-        avg_rr = sum(float(s.risk_reward or 0) for s in closed) / max(1, total_closed)
+        wins   = [s for s in closed if s.status in WIN_ST]
+        losses = [s for s in closed if s.status == "SL"]
+        pnls   = [float(s.pnl_pct or 0)    for s in closed]
+        rrs    = [float(s.risk_reward or 0) for s in closed]
+        n      = max(1, total_closed)
 
-        # Profit factor: gross wins / gross losses (by pnl_pct)
-        gross_win = sum(float(s.pnl_pct or 0) for s in wins)
-        gross_loss = abs(sum(float(s.pnl_pct or 0) for s in losses))
-        profit_factor = round(gross_win / max(0.01, gross_loss), 2)
+        win_rate  = round(len(wins)   / n * 100, 1)
+        loss_rate = round(len(losses) / n * 100, 1)
+        avg_pnl   = round(sum(pnls) / n, 2)
+        total_pnl = round(sum(pnls),     2)
+        avg_rr    = round(sum(rrs)  / n, 2)
+        profit_factor = _pf(pnls)
 
-        # LONG vs SHORT breakdown
-        long_signals = [s for s in closed if s.side == "LONG"]
-        short_signals = [s for s in closed if s.side == "SHORT"]
-        long_wins = [s for s in long_signals if s.status in ("TP1", "TP2", "TP3")]
-        short_wins = [s for s in short_signals if s.status in ("TP1", "TP2", "TP3")]
+        # hold time — skip signals without closed_at
+        hold_times = [
+            (s.closed_at - s.created_at).total_seconds() / 60
+            for s in closed if s.created_at and s.closed_at
+        ]
+        avg_hold_min = round(sum(hold_times) / len(hold_times), 0) if hold_times else None
 
-        # Monthly breakdown (last 6 months)
-        monthly: dict = {}
+        # ── LONG / SHORT ───────────────────────────────────────────────
+        long_sigs  = [s for s in closed if s.side == "LONG"]
+        short_sigs = [s for s in closed if s.side == "SHORT"]
+
+        # ── symbol leaderboard ─────────────────────────────────────────
+        sym_map: dict = _dd(list)
+        for s in closed:
+            sym_map[s.symbol].append(s)
+
+        leaderboard_rows = []
+        for sym, sigs in sym_map.items():
+            sw = [s for s in sigs if s.status in WIN_ST]
+            sl = [s for s in sigs if s.status == "SL"]
+            sp = [float(s.pnl_pct or 0)    for s in sigs]
+            sr = [float(s.risk_reward or 0) for s in sigs]
+            nn = max(1, len(sigs))
+            ls = [s for s in sigs if s.side == "LONG"]
+            ss = [s for s in sigs if s.side == "SHORT"]
+            lw = [s for s in ls if s.status in WIN_ST]
+            shw = [s for s in ss if s.status in WIN_ST]
+            leaderboard_rows.append({
+                "symbol":    sym,
+                "total":     len(sigs),
+                "wins":      len(sw),
+                "losses":    len(sl),
+                "win_rate":  round(len(sw) / nn * 100, 1),
+                "avg_pnl":   round(sum(sp) / nn, 2),
+                "total_pnl": round(sum(sp), 2),
+                "avg_rr":    round(sum(sr) / nn, 2),
+                "long": {
+                    "total":   len(ls),
+                    "wins":    len(lw),
+                    "avg_pnl": round(sum(float(s.pnl_pct or 0) for s in ls) / max(1, len(ls)), 2),
+                },
+                "short": {
+                    "total":   len(ss),
+                    "wins":    len(shw),
+                    "avg_pnl": round(sum(float(s.pnl_pct or 0) for s in ss) / max(1, len(ss)), 2),
+                },
+            })
+
+        leaderboard_rows.sort(key=lambda x: x["total_pnl"], reverse=True)
+        best5  = sorted(leaderboard_rows, key=lambda x: x["avg_pnl"], reverse=True)[:5]
+        worst5 = sorted(leaderboard_rows, key=lambda x: x["avg_pnl"])[:5]
+
+        # ── monthly breakdown ──────────────────────────────────────────
+        mo_map: dict = _dd(list)
         for s in closed:
             if s.created_at:
-                key = s.created_at.strftime("%Y-%m")
-                monthly.setdefault(key, {"wins": 0, "losses": 0, "pnl": 0.0})
-                if s.status in ("TP1", "TP2", "TP3"):
-                    monthly[key]["wins"] += 1
-                else:
-                    monthly[key]["losses"] += 1
-                monthly[key]["pnl"] = round(monthly[key]["pnl"] + float(s.pnl_pct or 0), 2)
-        monthly_list = sorted(
-            [{"month": k, **v} for k, v in monthly.items()],
-            key=lambda x: x["month"]
-        )[-6:]
+                mo_map[s.created_at.strftime("%Y-%m")].append(s)
 
-        # Average hold time (minutes) for closed signals
-        hold_times = []
-        for s in closed:
-            if s.created_at and s.closed_at:
-                delta = (s.closed_at - s.created_at).total_seconds() / 60
-                hold_times.append(delta)
-        avg_hold_min = round(sum(hold_times) / max(1, len(hold_times)), 0) if hold_times else None
-
-        # Best / worst symbols
-        sym_pnl: dict = {}
-        for s in closed:
-            sym_pnl.setdefault(s.symbol, []).append(float(s.pnl_pct or 0))
-        sym_avgs = [
-            {"symbol": k, "avg": round(sum(v) / len(v), 2), "count": len(v)}
-            for k, v in sym_pnl.items()
-        ]
-        best_symbols = sorted(sym_avgs, key=lambda x: x["avg"], reverse=True)[:5]
-        worst_symbols = sorted(sym_avgs, key=lambda x: x["avg"])[:5]
+        monthly_rows = []
+        for month, msigs in sorted(mo_map.items()):
+            mw  = [s for s in msigs if s.status in WIN_ST]
+            ml  = [s for s in msigs if s.status == "SL"]
+            mp  = [float(s.pnl_pct or 0) for s in msigs]
+            mn  = max(1, len(msigs))
+            monthly_rows.append({
+                "month":         month,
+                "signals":       len(msigs),
+                "wins":          len(mw),
+                "losses":        len(ml),
+                "win_rate":      round(len(mw) / mn * 100, 1),
+                "total_pnl":     round(sum(mp), 2),
+                "profit_factor": _pf(mp),
+            })
 
         return JSONResponse({
-            "total_closed": total_closed,
-            "wins": len(wins),
-            "losses": len(losses),
-            "win_rate": round(win_rate, 1),
-            "avg_pnl": round(sum(float(s.pnl_pct or 0) for s in closed) / max(1, total_closed), 2),
-            "avg_rr": round(avg_rr, 2),
-            "profit_factor": profit_factor,
-            "avg_hold_min": avg_hold_min,
-            "long": {
-                "total": len(long_signals),
-                "wins": len(long_wins),
-                "win_rate": round(len(long_wins) / max(1, len(long_signals)) * 100, 1),
-            },
-            "short": {
-                "total": len(short_signals),
-                "wins": len(short_wins),
-                "win_rate": round(len(short_wins) / max(1, len(short_signals)) * 100, 1),
-            },
-            "monthly": monthly_list,
-            "leaderboard": stats.get("leaderboard", []),
-            "best_symbols": best_symbols,
-            "worst_symbols": worst_symbols,
+            # ── primary schema (Sprint 4) ──────────────────────────────
+            "total_signals":        total_closed + open_count,
+            "closed_signals":       total_closed,
+            "open_signals":         open_count,
+            "win_rate":             win_rate,
+            "loss_rate":            loss_rate,
+            "avg_pnl":              avg_pnl,
+            "total_pnl":            total_pnl,
+            "avg_rr":               avg_rr,
+            "profit_factor":        profit_factor,   # null when no losses
+            "avg_hold_time_minutes":avg_hold_min,
+            "long":                 _side_stat(long_sigs),
+            "short":                _side_stat(short_sigs),
+            "best_symbols":         [{"symbol": x["symbol"], "avg": x["avg_pnl"], "count": x["total"]} for x in best5],
+            "worst_symbols":        [{"symbol": x["symbol"], "avg": x["avg_pnl"], "count": x["total"]} for x in worst5],
+            "symbol_leaderboard":   leaderboard_rows,
+            "monthly":              monthly_rows,
+            # ── backward-compat aliases ────────────────────────────────
+            "total_closed":         total_closed,
+            "wins":                 len(wins),
+            "losses":               len(losses),
+            "avg_hold_min":         avg_hold_min,
+            "leaderboard": [{"symbol": x["symbol"], "avg": x["avg_pnl"], "count": x["total"]} for x in leaderboard_rows[:10]],
         })
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=500)
@@ -1230,70 +1307,261 @@ document.head.appendChild(style);
 
 
 def _performance_page_html() -> str:
-    body = """
-<div class="page-title">Performance Statistics</div>
-<div class="sbar" id="perf-bar">
-  <div class="scard"><div class="slabel">WIN RATE</div><div id="p-wr" class="sval g">—</div></div>
-  <div class="scard"><div class="slabel">PROFIT FACTOR</div><div id="p-pf" class="sval c">—</div></div>
-  <div class="scard"><div class="slabel">AVG RR</div><div id="p-rr" class="sval y">—</div></div>
-  <div class="scard"><div class="slabel">TOTAL CLOSED</div><div id="p-tot" class="sval">—</div></div>
-</div>
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-  <div class="card">
-    <div style="font-size:14px;font-weight:700;margin-bottom:14px;color:#eaf2ff">LONG Performance</div>
-    <p>Total: <span id="l-tot" class="c">—</span></p>
-    <p style="margin-top:8px">Wins: <span id="l-wins" class="g">—</span></p>
-    <p style="margin-top:8px">Win Rate: <span id="l-wr" class="g">—</span></p>
-  </div>
-  <div class="card">
-    <div style="font-size:14px;font-weight:700;margin-bottom:14px;color:#eaf2ff">SHORT Performance</div>
-    <p>Total: <span id="s-tot" class="c">—</span></p>
-    <p style="margin-top:8px">Wins: <span id="s-wins" class="g">—</span></p>
-    <p style="margin-top:8px">Win Rate: <span id="s-wr" class="g">—</span></p>
-  </div>
-</div>
-<div class="card" style="margin-top:16px">
-  <div style="font-size:14px;font-weight:700;margin-bottom:14px;color:#eaf2ff">Monthly Performance</div>
-  <table>
-  <thead><tr><th>MONTH</th><th>WINS</th><th>LOSSES</th><th>NET PNL</th></tr></thead>
-  <tbody id="monthly-tbl"><tr><td colspan="4" style="text-align:center;color:#627a99;padding:18px">Loading...</td></tr></tbody>
-  </table>
-</div>
-<div class="card">
-  <div style="font-size:14px;font-weight:700;margin-bottom:14px;color:#eaf2ff">Symbol Leaderboard</div>
-  <table>
-  <thead><tr><th>SYMBOL</th><th>AVG PNL</th><th>SIGNALS</th></tr></thead>
-  <tbody id="lb-tbl"><tr><td colspan="3" style="text-align:center;color:#627a99;padding:18px">Loading...</td></tr></tbody>
-  </table>
-</div>"""
-    js = """
-async function load(){
-  const r=await fetch('/api/public/performance');
-  if(!r.ok)return;
-  const d=await r.json();
-  document.getElementById('p-wr').textContent=d.win_rate+'%';
-  document.getElementById('p-pf').textContent=d.profit_factor;
-  document.getElementById('p-rr').textContent='1:'+d.avg_rr;
-  document.getElementById('p-tot').textContent=d.total_closed;
-  document.getElementById('l-tot').textContent=d.long.total;
-  document.getElementById('l-wins').textContent=d.long.wins;
-  document.getElementById('l-wr').textContent=d.long.win_rate+'%';
-  document.getElementById('s-tot').textContent=d.short.total;
-  document.getElementById('s-wins').textContent=d.short.wins;
-  document.getElementById('s-wr').textContent=d.short.win_rate+'%';
-  document.getElementById('monthly-tbl').innerHTML=(d.monthly||[]).reverse().map(m=>
-    '<tr><td>'+m.month+'</td><td class="g">'+m.wins+'</td><td class="r">'+m.losses+'</td>'+
-    '<td class="'+(m.pnl>=0?'g':'r')+'">'+(m.pnl>=0?'+':'')+m.pnl+'%</td></tr>'
-  ).join('')||'<tr><td colspan="4" style="text-align:center;color:#627a99;padding:18px">No data yet</td></tr>';
-  document.getElementById('lb-tbl').innerHTML=(d.leaderboard||[]).map((x,i)=>
-    '<tr><td><b>#'+(i+1)+' '+x.symbol+'</b></td>'+
-    '<td class="'+(x.avg>=0?'g':'r')+'">'+(x.avg>=0?'+':'')+x.avg+'%</td>'+
-    '<td>'+x.count+'</td></tr>'
-  ).join('')||'<tr><td colspan="3" style="text-align:center;color:#627a99;padding:18px">No data yet</td></tr>';
-}
-document.addEventListener('DOMContentLoaded',load);
+    css = """
+/* ── performance center ───────────────────────────────────── */
+.pc-header{margin-bottom:20px}
+.pc-title{font-size:26px;font-weight:900;letter-spacing:1px;color:#eaf2ff}
+.pc-subtitle{font-size:12px;color:#7fa0c8;margin-top:4px;letter-spacing:1px}
+.pc-warn{background:#1a140833;border:1px solid #ffd84d55;border-radius:9px;
+  padding:10px 16px;margin-bottom:20px;font-size:12px;color:#ffd84d;
+  display:flex;align-items:center;gap:8px}
+.pc-kpi{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:20px}
+.pc-kcard{background:linear-gradient(180deg,#101827,#0b1320);border:1px solid #17314b;
+  border-radius:12px;padding:16px;text-align:center}
+.pc-klbl{font-size:9px;color:#7fa0c8;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px}
+.pc-kval{font-size:26px;font-weight:900}
+.pc-sides{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px}
+.pc-side-card{background:linear-gradient(180deg,#101827,#0b1320);
+  border:1px solid #17314b;border-radius:12px;padding:18px}
+.pc-side-title{font-size:13px;font-weight:700;margin-bottom:12px;
+  padding-bottom:8px;border-bottom:1px solid #17314b}
+.pc-srow{display:flex;justify-content:space-between;align-items:center;
+  padding:7px 0;border-bottom:1px solid #0e1e2e;font-size:13px}
+.pc-srow:last-child{border-bottom:none}
+.pc-slbl{color:#7fa0c8;font-size:12px}
+.pc-sval{font-weight:700;color:#eaf2ff}
+.pc-filter{display:flex;gap:6px;margin-bottom:12px}
+.pc-fbtn{padding:6px 14px;border-radius:7px;border:1px solid #17314b;
+  background:transparent;color:#8fa8c7;cursor:pointer;font-size:12px;transition:all .15s}
+.pc-fbtn.act{background:#08a98f22;border-color:#20f0c0;color:#20f0c0}
+.pc-empty{background:#0b1320;border:1px solid #17314b;border-radius:12px;
+  padding:40px;text-align:center;color:#627a99;font-size:14px;margin-bottom:20px}
+@media(max-width:900px){.pc-kpi{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:560px){.pc-kpi{grid-template-columns:repeat(2,1fr)}.pc-sides{grid-template-columns:1fr}}
 """
-    return _page_shell("Performance", body, extra_js=js)
+    body = """
+<div class="pc-header">
+  <div class="pc-title">ALPHA RADAR PERFORMANCE CENTER</div>
+  <div class="pc-subtitle">MTF ENGINE ONLY &nbsp;·&nbsp; strategy = MTF_SMC_STRICT &nbsp;·&nbsp; 15m / 1H / 4H / 1D</div>
+</div>
+
+<div class="pc-warn">
+  ⚠&nbsp; Legacy 5m signals are excluded from this report. Only MTF_SMC_STRICT / 15m–1D signals are included.
+</div>
+
+<div class="pc-kpi">
+  <div class="pc-kcard">
+    <div class="pc-klbl">Total Signals</div>
+    <div id="pc-total" class="pc-kval" style="color:#eaf2ff">—</div>
+    <div id="pc-open-sub" style="font-size:10px;color:#627a99;margin-top:3px"></div>
+  </div>
+  <div class="pc-kcard">
+    <div class="pc-klbl">Win Rate</div>
+    <div id="pc-wr" class="pc-kval g">—</div>
+    <div id="pc-lr-sub" style="font-size:10px;color:#627a99;margin-top:3px"></div>
+  </div>
+  <div class="pc-kcard">
+    <div class="pc-klbl">Profit Factor</div>
+    <div id="pc-pf" class="pc-kval c">—</div>
+  </div>
+  <div class="pc-kcard">
+    <div class="pc-klbl">Avg PnL / Trade</div>
+    <div id="pc-avgpnl" class="pc-kval g">—</div>
+  </div>
+  <div class="pc-kcard">
+    <div class="pc-klbl">Avg RR</div>
+    <div id="pc-rr" class="pc-kval y">—</div>
+  </div>
+  <div class="pc-kcard">
+    <div class="pc-klbl">Avg Hold Time</div>
+    <div id="pc-hold" class="pc-kval" style="color:#eaf2ff">—</div>
+  </div>
+</div>
+
+<div id="pc-no-data" class="pc-empty" style="display:none">
+  Not enough closed trades yet — check back after the first signals close.
+</div>
+
+<div id="pc-content">
+  <div class="pc-sides">
+    <div class="pc-side-card" id="pc-long-card">
+      <div class="pc-side-title" style="color:#20ff80">LONG</div>
+      <div id="pc-long-rows"></div>
+    </div>
+    <div class="pc-side-card" id="pc-short-card">
+      <div class="pc-side-title" style="color:#ff4f61">SHORT</div>
+      <div id="pc-short-rows"></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:18px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <div style="font-size:13px;font-weight:700;color:#eaf2ff">Symbol Leaderboard</div>
+      <div class="pc-filter">
+        <button class="pc-fbtn act" onclick="lbFilter('all',this)">All</button>
+        <button class="pc-fbtn" onclick="lbFilter('long',this)">LONG</button>
+        <button class="pc-fbtn" onclick="lbFilter('short',this)">SHORT</button>
+      </div>
+    </div>
+    <div style="overflow-x:auto">
+    <table>
+    <thead><tr>
+      <th>SYMBOL</th><th>TOTAL</th><th>WINS</th><th>LOSSES</th>
+      <th>WIN RATE</th><th>AVG PNL</th><th>TOTAL PNL</th><th>AVG RR</th>
+    </tr></thead>
+    <tbody id="lb-tbl">
+      <tr><td colspan="8" style="text-align:center;color:#627a99;padding:18px">Loading...</td></tr>
+    </tbody>
+    </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="font-size:13px;font-weight:700;color:#eaf2ff;margin-bottom:12px">Monthly Performance</div>
+    <div style="overflow-x:auto">
+    <table>
+    <thead><tr>
+      <th>MONTH</th><th>SIGNALS</th><th>WINS</th><th>LOSSES</th>
+      <th>WIN RATE</th><th>TOTAL PNL</th><th>PROFIT FACTOR</th>
+    </tr></thead>
+    <tbody id="monthly-tbl">
+      <tr><td colspan="7" style="text-align:center;color:#627a99;padding:18px">Loading...</td></tr>
+    </tbody>
+    </table>
+    </div>
+  </div>
+</div>
+"""
+    js = """
+let _lbData = [];
+let _lbMode = 'all';
+
+function _p(v){ return v===null||v===undefined?'—':(v>=0?'+':'')+v+'%'; }
+function _cls(v){ return v>=0?'g':'r'; }
+function _pf(v){ return v===null||v===undefined?'∞':v; }
+function _fmtHold(m){
+  if(m===null||m===undefined)return'—';
+  const h=Math.floor(m/60), mn=Math.round(m%60);
+  return h>0?h+'h '+mn+'m':mn+'m';
+}
+
+function _sideRows(st){
+  const rows=[
+    ['Total',    `<b>${st.total}</b>`],
+    ['Wins',     `<span class="g">${st.wins}</span>`],
+    ['Losses',   `<span class="r">${st.losses}</span>`],
+    ['Win Rate', `<b class="${_cls(st.win_rate-50)}">${st.win_rate}%</b>`],
+    ['Avg PnL',  `<span class="${_cls(st.avg_pnl)}">${_p(st.avg_pnl)}</span>`],
+    ['Avg RR',   `<span class="y">1:${st.avg_rr}</span>`],
+  ];
+  return rows.map(([l,v])=>
+    `<div class="pc-srow"><span class="pc-slbl">${l}</span><span class="pc-sval">${v}</span></div>`
+  ).join('');
+}
+
+function lbFilter(mode, btn){
+  _lbMode = mode;
+  document.querySelectorAll('.pc-fbtn').forEach(b=>b.classList.remove('act'));
+  btn.classList.add('act');
+  _renderLb();
+}
+
+function _renderLb(){
+  const rows = _lbData;
+  const empty = '<tr><td colspan="8" style="text-align:center;color:#627a99;padding:18px">No data yet</td></tr>';
+  if(!rows.length){ document.getElementById('lb-tbl').innerHTML=empty; return; }
+
+  document.getElementById('lb-tbl').innerHTML = rows.map((x,i)=>{
+    let total, wins, losses, avgPnl, totalPnl;
+    if(_lbMode==='long'){
+      const l=x.long||{};
+      total=l.total||0; wins=l.wins||0; losses=total-wins;
+      avgPnl=l.avg_pnl; totalPnl=null;
+    }else if(_lbMode==='short'){
+      const s=x.short||{};
+      total=s.total||0; wins=s.wins||0; losses=total-wins;
+      avgPnl=s.avg_pnl; totalPnl=null;
+    }else{
+      total=x.total; wins=x.wins; losses=x.losses;
+      avgPnl=x.avg_pnl; totalPnl=x.total_pnl;
+    }
+    if(total===0)return'';
+    const wr = total>0?Math.round(wins/total*100):0;
+    return `<tr>
+      <td><b>${x.symbol}</b></td>
+      <td>${total}</td>
+      <td class="g">${wins}</td>
+      <td class="r">${losses}</td>
+      <td class="${wr>=50?'g':'r'}">${wr}%</td>
+      <td class="${_cls(avgPnl)}">${_p(avgPnl)}</td>
+      <td class="${totalPnl!==null?_cls(totalPnl):''}">
+        ${totalPnl!==null?_p(totalPnl):'—'}
+      </td>
+      <td class="y">${_lbMode==='all'?'1:'+x.avg_rr:'—'}</td>
+    </tr>`;
+  }).filter(Boolean).join('')||empty;
+}
+
+async function load(){
+  const r = await fetch('/api/public/performance');
+  if(!r.ok) return;
+  const d = await r.json();
+  if(d.error) return;
+
+  const noData = (d.closed_signals||d.total_closed||0) === 0;
+  document.getElementById('pc-no-data').style.display = noData ? '' : 'none';
+  document.getElementById('pc-content').style.display  = noData ? 'none' : '';
+
+  // KPI cards
+  const tot = d.total_signals ?? (d.total_closed+d.open_signals||0);
+  document.getElementById('pc-total').textContent = tot || '—';
+  document.getElementById('pc-open-sub').textContent =
+    d.open_signals != null ? d.open_signals + ' open' : '';
+
+  const wrEl = document.getElementById('pc-wr');
+  wrEl.textContent = (d.win_rate??'—') + (d.win_rate!=null?'%':'');
+  wrEl.className = 'pc-kval ' + (d.win_rate>=50?'g':'r');
+  document.getElementById('pc-lr-sub').textContent =
+    d.loss_rate != null ? d.loss_rate + '% loss rate' : '';
+
+  document.getElementById('pc-pf').textContent = _pf(d.profit_factor);
+  const pnlEl = document.getElementById('pc-avgpnl');
+  pnlEl.textContent = _p(d.avg_pnl);
+  pnlEl.className = 'pc-kval ' + _cls(d.avg_pnl);
+  document.getElementById('pc-rr').textContent = d.avg_rr!=null?'1:'+d.avg_rr:'—';
+  document.getElementById('pc-hold').textContent = _fmtHold(d.avg_hold_time_minutes??d.avg_hold_min);
+
+  // LONG / SHORT side cards
+  if(d.long)  document.getElementById('pc-long-rows').innerHTML  = _sideRows(d.long);
+  if(d.short) document.getElementById('pc-short-rows').innerHTML = _sideRows(d.short);
+
+  // Symbol leaderboard
+  _lbData = d.symbol_leaderboard || d.leaderboard?.map(x=>({
+    symbol:x.symbol,total:x.count,wins:0,losses:0,
+    win_rate:0,avg_pnl:x.avg,total_pnl:0,avg_rr:0,
+    long:{total:0,wins:0,avg_pnl:0},short:{total:0,wins:0,avg_pnl:0}
+  })) || [];
+  _renderLb();
+
+  // Monthly table
+  const mo = (d.monthly||[]).slice().reverse();
+  const mEmpty = '<tr><td colspan="7" style="text-align:center;color:#627a99;padding:18px">No monthly data yet</td></tr>';
+  document.getElementById('monthly-tbl').innerHTML = mo.length
+    ? mo.map(m=>`<tr>
+        <td>${m.month}</td>
+        <td>${m.signals}</td>
+        <td class="g">${m.wins}</td>
+        <td class="r">${m.losses}</td>
+        <td class="${m.win_rate>=50?'g':'r'}">${m.win_rate}%</td>
+        <td class="${_cls(m.total_pnl)}">${_p(m.total_pnl)}</td>
+        <td class="c">${_pf(m.profit_factor)}</td>
+      </tr>`).join('')
+    : mEmpty;
+}
+
+document.addEventListener('DOMContentLoaded', load);
+"""
+    return _page_shell("Performance Center", body, extra_css=css, extra_js=js)
 
 
 def _stats_page_html() -> str:
