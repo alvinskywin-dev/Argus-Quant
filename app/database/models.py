@@ -214,6 +214,26 @@ class PaperPosition(Base):
     closed_at:   Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class OpenInterestSnapshot(Base):
+    __tablename__ = "open_interest_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    open_interest: Mapped[float] = mapped_column(Float)
+    oi_change_5m: Mapped[float] = mapped_column(Float, default=0.0)
+    oi_change_15m: Mapped[float] = mapped_column(Float, default=0.0)
+    oi_change_1h: Mapped[float] = mapped_column(Float, default=0.0)
+    price_change_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    oi_score: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+    __table_args__ = (
+        Index("ix_oi_snapshots_symbol_created", "symbol", "created_at"),
+    )
+
+
 class SignalMessage(Base):
     __tablename__ = "signal_messages"
 

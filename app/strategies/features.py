@@ -69,6 +69,9 @@ class FeatureSnapshot:
     recent_high: float
     recent_low: float
 
+    # 1-bar % price change (last close vs previous close)
+    price_change_pct: float = field(default=0.0)
+
     df_len: int = field(default=0)
 
 
@@ -144,6 +147,9 @@ def build_snapshot(symbol: str, timeframe: str, df: pd.DataFrame) -> Optional[Fe
     recent_high = float(df["high"].tail(40).max())
     recent_low = float(df["low"].tail(40).min())
 
+    prev_close = float(close.iloc[-2]) if len(close) >= 2 else last_close
+    price_change_pct = (last_close - prev_close) / prev_close * 100.0 if prev_close > 0 else 0.0
+
     return FeatureSnapshot(
         symbol=symbol,
         timeframe=timeframe,
@@ -178,5 +184,6 @@ def build_snapshot(symbol: str, timeframe: str, df: pd.DataFrame) -> Optional[Fe
         overextended_short=overextended_short,
         recent_high=recent_high,
         recent_low=recent_low,
+        price_change_pct=round(price_change_pct, 4),
         df_len=len(df),
     )

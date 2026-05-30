@@ -20,8 +20,11 @@ from typing import Awaitable, Callable, Dict, List, Optional
 
 from app.ai_scoring import MTFDecision, MTFRejection, evaluate_pipeline
 from app.config import settings
+from app.database.models import OpenInterestSnapshot
 from app.database.repo import has_active_signal, in_post_close_cooldown
+from app.database.session import SessionLocal
 from app.market_data import fetch_klines, universe
+from app.market_data.open_interest import fetch_oi_snapshot
 from app.risk import build_levels, cooldown, passes_market_filters, rate_limiter
 from app.strategies import FeatureSnapshot, build_snapshot
 from app.utils.helpers import utcnow
@@ -234,9 +237,44 @@ class MarketScanner:
 
             await cooldown.mark_emitted(symbol, decision.side)
 
+            # ── Open Interest scoring ────────────────────────────────────
+            oi_snap = await fetch_oi_snapshot(
+                symbol,
+                primary_snap.price_change_pct,
+                decision.side,
+            )
+            oi_score = oi_snap.oi_score if oi_snap else 0
+            oi_diag = ""
+            if oi_snap:
+                oi_diag = (
+                    f"OI: price_change={oi_snap.price_change_pct:+.2f}% "
+                    f"oi_change={oi_snap.oi_change_15m:+.2f}% "
+                    f"score={oi_score:+d}"
+                )
+                logger.info(f"📊 {symbol} {decision.side} | {oi_diag}")
+                try:
+                    async with SessionLocal() as db:
+                        db.add(OpenInterestSnapshot(
+                            symbol=symbol,
+                            open_interest=oi_snap.open_interest,
+                            oi_change_5m=oi_snap.oi_change_5m,
+                            oi_change_15m=oi_snap.oi_change_15m,
+                            oi_change_1h=oi_snap.oi_change_1h,
+                            price_change_pct=oi_snap.price_change_pct,
+                            oi_score=oi_score,
+                        ))
+                        await db.commit()
+                except Exception as exc:
+                    logger.debug(f"OI DB save failed for {symbol}: {exc}")
+
+            adjusted_confidence = round(
+                max(0.0, min(100.0, decision.confidence + oi_score)), 1
+            )
+
             logger.info(
                 f"✅ SIGNAL  {symbol} {decision.side}  "
-                f"tier={decision.tier}  conf={decision.confidence:.1f}%  "
+                f"tier={decision.tier}  conf={adjusted_confidence:.1f}%  "
+                f"(base={decision.confidence:.1f} oi={oi_score:+d})  "
                 f"rr=1:{levels.risk_reward}  tfs={decision.contributing_tfs}"
             )
 
@@ -244,10 +282,12 @@ class MarketScanner:
                 "symbol":         symbol,
                 "side":           decision.side,
                 "timeframe":      "15m",
-                "confidence":     decision.confidence,
+                "confidence":     adjusted_confidence,
                 "risk_level":     decision.risk_level,
                 "strategy":       "MTF_SMC_STRICT",
-                "reasons":        " | ".join(decision.reasons[:8]),
+                "reasons":        " | ".join(
+                    ([*decision.reasons[:8], oi_diag] if oi_diag else decision.reasons[:8])
+                ),
                 "entry_low":      levels.entry_low,
                 "entry_high":     levels.entry_high,
                 "tp1":            levels.tp1,

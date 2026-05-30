@@ -17,7 +17,7 @@ from sqlalchemy import func as _sqlfunc, select, desc
 
 from app.config import settings
 from app.database.session import SessionLocal
-from app.database.models import Signal, AffiliateClick, PaperPosition
+from app.database.models import Signal, AffiliateClick, OpenInterestSnapshot, PaperPosition
 from app.database.repo import get_active_signals_summary, ACTIVE_STATUSES
 from app.market_data import universe
 from app.market_data.ws_engine import ws_health
@@ -1032,6 +1032,71 @@ async def status_route():
             "timeframes": settings.timeframes,
         },
     }
+
+
+@app.get("/api/oi/status")
+async def api_oi_status():
+    """
+    Sprint 11A — Open Interest dashboard cards.
+
+    Returns counts of Bullish / Bearish / Neutral OI symbols based on the
+    most recent OI snapshot per symbol recorded in the last 2 hours.
+    Also returns the 20 most recent individual snapshots for detail display.
+    """
+    try:
+        from datetime import timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
+
+        async with SessionLocal() as session:
+            # Most recent snapshot per symbol within the last 2h
+            subq = (
+                select(
+                    OpenInterestSnapshot.symbol,
+                    _sqlfunc.max(OpenInterestSnapshot.created_at).label("latest"),
+                )
+                .where(OpenInterestSnapshot.created_at >= cutoff)
+                .group_by(OpenInterestSnapshot.symbol)
+                .subquery()
+            )
+            res = await session.execute(
+                select(OpenInterestSnapshot)
+                .join(
+                    subq,
+                    (OpenInterestSnapshot.symbol == subq.c.symbol) &
+                    (OpenInterestSnapshot.created_at == subq.c.latest),
+                )
+            )
+            snapshots = res.scalars().all()
+
+        bullish = sum(1 for s in snapshots if s.oi_score > 0)
+        bearish = sum(1 for s in snapshots if s.oi_score < 0)
+        neutral = sum(1 for s in snapshots if s.oi_score == 0)
+        total   = len(snapshots)
+
+        recent = sorted(snapshots, key=lambda s: s.created_at, reverse=True)[:20]
+
+        return JSONResponse({
+            "open_interest_status": "active" if total > 0 else "no_data",
+            "total_symbols":  total,
+            "bullish_oi":     bullish,
+            "bearish_oi":     bearish,
+            "neutral_oi":     neutral,
+            "snapshots": [
+                {
+                    "symbol":        s.symbol,
+                    "open_interest": s.open_interest,
+                    "oi_change_5m":  s.oi_change_5m,
+                    "oi_change_15m": s.oi_change_15m,
+                    "oi_change_1h":  s.oi_change_1h,
+                    "price_change":  s.price_change_pct,
+                    "oi_score":      s.oi_score,
+                    "time":          s.created_at.strftime("%m-%d %H:%M") if s.created_at else "-",
+                }
+                for s in recent
+            ],
+        })
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
 
 
 @app.get("/metrics")
