@@ -53,6 +53,12 @@ class Signal(Base):
 
     telegram_message_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
 
+    # MTF layer scores — nullable, only populated for V3.1+ signals
+    trend_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    structure_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    setup_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    entry_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )
@@ -116,6 +122,59 @@ class AffiliateClick(Base):
         DateTime(timezone=True), server_default=func.now(), index=True
     )
     referrer: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+
+
+class ArchivedSignal(Base):
+    """Legacy signals moved out of production by the archive migration."""
+    __tablename__ = "archive_signals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    original_id: Mapped[int] = mapped_column(Integer, index=True)
+    archive_reason: Mapped[str] = mapped_column(String(64), default="")
+    archived_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    symbol: Mapped[str] = mapped_column(String(32))
+    side: Mapped[str] = mapped_column(String(8))
+    timeframe: Mapped[str] = mapped_column(String(8))
+    confidence: Mapped[float] = mapped_column(Float)
+    risk_level: Mapped[str] = mapped_column(String(16))
+    strategy: Mapped[str] = mapped_column(String(64))
+    reasons: Mapped[str] = mapped_column(Text, default="")
+
+    entry_low: Mapped[float] = mapped_column(Float)
+    entry_high: Mapped[float] = mapped_column(Float)
+    tp1: Mapped[float] = mapped_column(Float)
+    tp2: Mapped[float] = mapped_column(Float)
+    tp3: Mapped[float] = mapped_column(Float)
+    stop_loss: Mapped[float] = mapped_column(Float)
+    risk_reward: Mapped[float] = mapped_column(Float)
+
+    status: Mapped[str] = mapped_column(String(16), default="OPEN")
+    pnl_pct: Mapped[float] = mapped_column(Float, default=0.0)
+
+    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PaperPosition(Base):
+    """Virtual paper-trading positions tracked against incoming signals."""
+    __tablename__ = "paper_positions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    signal_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("signals.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    side: Mapped[str] = mapped_column(String(8))
+    entry_price: Mapped[float] = mapped_column(Float)
+    stop_loss: Mapped[float] = mapped_column(Float)
+    tp1: Mapped[float] = mapped_column(Float)
+    size_usdt: Mapped[float] = mapped_column(Float, default=100.0)
+    status: Mapped[str] = mapped_column(String(16), default="OPEN")
+    pnl_usdt: Mapped[float] = mapped_column(Float, default=0.0)
+    pnl_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class SignalMessage(Base):

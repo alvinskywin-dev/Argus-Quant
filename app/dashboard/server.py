@@ -15,7 +15,7 @@ from sqlalchemy import select, desc
 
 from app.config import settings
 from app.database.session import SessionLocal
-from app.database.models import Signal, AffiliateClick
+from app.database.models import Signal, AffiliateClick, PaperPosition
 from app.market_data import universe
 from app.market_data.ws_engine import ws_health
 
@@ -250,6 +250,25 @@ async def api_public_performance():
             key=lambda x: x["month"]
         )[-6:]
 
+        # Average hold time (minutes) for closed signals
+        hold_times = []
+        for s in closed:
+            if s.created_at and s.closed_at:
+                delta = (s.closed_at - s.created_at).total_seconds() / 60
+                hold_times.append(delta)
+        avg_hold_min = round(sum(hold_times) / max(1, len(hold_times)), 0) if hold_times else None
+
+        # Best / worst symbols
+        sym_pnl: dict = {}
+        for s in closed:
+            sym_pnl.setdefault(s.symbol, []).append(float(s.pnl_pct or 0))
+        sym_avgs = [
+            {"symbol": k, "avg": round(sum(v) / len(v), 2), "count": len(v)}
+            for k, v in sym_pnl.items()
+        ]
+        best_symbols = sorted(sym_avgs, key=lambda x: x["avg"], reverse=True)[:5]
+        worst_symbols = sorted(sym_avgs, key=lambda x: x["avg"])[:5]
+
         return JSONResponse({
             "total_closed": total_closed,
             "wins": len(wins),
@@ -258,6 +277,7 @@ async def api_public_performance():
             "avg_pnl": round(sum(float(s.pnl_pct or 0) for s in closed) / max(1, total_closed), 2),
             "avg_rr": round(avg_rr, 2),
             "profit_factor": profit_factor,
+            "avg_hold_min": avg_hold_min,
             "long": {
                 "total": len(long_signals),
                 "wins": len(long_wins),
@@ -270,6 +290,8 @@ async def api_public_performance():
             },
             "monthly": monthly_list,
             "leaderboard": stats.get("leaderboard", []),
+            "best_symbols": best_symbols,
+            "worst_symbols": worst_symbols,
         })
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=500)
@@ -278,6 +300,208 @@ async def api_public_performance():
 @app.get("/api/public/prices")
 async def api_public_prices():
     return JSONResponse(ws_health())
+
+
+@app.get("/api/public/signal/{signal_id}")
+async def api_public_signal(signal_id: int):
+    try:
+        async with SessionLocal() as session:
+            sig = await session.get(Signal, signal_id)
+        if sig is None:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        reasons_list = [r.strip() for r in (sig.reasons or "").split("|") if r.strip()]
+        return JSONResponse({
+            "id": sig.id,
+            "symbol": sig.symbol,
+            "side": sig.side,
+            "timeframe": sig.timeframe,
+            "confidence": round(float(sig.confidence or 0), 1),
+            "risk_reward": round(float(sig.risk_reward or 0), 2),
+            "risk_level": sig.risk_level or "",
+            "strategy": sig.strategy or "",
+            "status": sig.status,
+            "pnl_pct": round(float(sig.pnl_pct or 0), 2),
+            "entry_low": round(float(sig.entry_low or 0), 6),
+            "entry_high": round(float(sig.entry_high or 0), 6),
+            "tp1": round(float(sig.tp1 or 0), 6),
+            "tp2": round(float(sig.tp2 or 0), 6),
+            "tp3": round(float(sig.tp3 or 0), 6),
+            "stop_loss": round(float(sig.stop_loss or 0), 6),
+            "trend_score": sig.trend_score,
+            "structure_score": sig.structure_score,
+            "setup_score": sig.setup_score,
+            "entry_score": sig.entry_score,
+            "reasons": reasons_list,
+            "created_at": sig.created_at.isoformat() if sig.created_at else None,
+            "closed_at": sig.closed_at.isoformat() if sig.closed_at else None,
+        })
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+@app.get("/api/public/paper")
+async def api_public_paper():
+    """Paper trading portfolio derived from all MTF signals (virtual 10 000 USDT)."""
+    INITIAL_BALANCE = 10_000.0
+    RISK_PCT = 0.01  # 1% per trade
+
+    try:
+        async with SessionLocal() as session:
+            res = await session.execute(
+                select(Signal)
+                .where(Signal.strategy == "MTF_SMC_STRICT")
+                .order_by(Signal.created_at)
+                .limit(500)
+            )
+            signals = res.scalars().all()
+
+        open_pos = [s for s in signals if s.status == "OPEN"]
+        closed_pos = [s for s in signals if s.status in ("TP1", "TP2", "TP3", "SL")]
+
+        running_balance = INITIAL_BALANCE
+        closed_rows = []
+        for s in closed_pos:
+            size = running_balance * RISK_PCT
+            pnl_usdt = round(size * float(s.pnl_pct or 0) / 100, 2)
+            running_balance += pnl_usdt
+            closed_rows.append({
+                "id": s.id,
+                "symbol": s.symbol,
+                "side": s.side,
+                "entry": round(float(s.entry_low or 0), 6),
+                "sl": round(float(s.stop_loss or 0), 6),
+                "tp1": round(float(s.tp1 or 0), 6),
+                "status": s.status,
+                "pnl_pct": round(float(s.pnl_pct or 0), 2),
+                "pnl_usdt": pnl_usdt,
+                "opened": s.created_at.strftime("%m-%d %H:%M") if s.created_at else "-",
+            })
+
+        open_rows = [{
+            "id": s.id,
+            "symbol": s.symbol,
+            "side": s.side,
+            "entry": round(float(s.entry_low or 0), 6),
+            "sl": round(float(s.stop_loss or 0), 6),
+            "tp1": round(float(s.tp1 or 0), 6),
+            "conf": round(float(s.confidence or 0), 1),
+            "rr": round(float(s.risk_reward or 0), 2),
+            "opened": s.created_at.strftime("%m-%d %H:%M") if s.created_at else "-",
+        } for s in open_pos]
+
+        wins = [r for r in closed_rows if r["status"] in ("TP1", "TP2", "TP3")]
+        total_pnl_usdt = round(sum(r["pnl_usdt"] for r in closed_rows), 2)
+        win_rate = round(len(wins) / max(1, len(closed_rows)) * 100, 1)
+
+        return JSONResponse({
+            "initial_balance": INITIAL_BALANCE,
+            "current_balance": round(running_balance, 2),
+            "total_pnl_usdt": total_pnl_usdt,
+            "total_pnl_pct": round((running_balance - INITIAL_BALANCE) / INITIAL_BALANCE * 100, 2),
+            "win_rate": win_rate,
+            "total_trades": len(closed_rows),
+            "open_count": len(open_rows),
+            "open": open_rows,
+            "closed": list(reversed(closed_rows))[:50],
+        })
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+@app.get("/api/public/backtest")
+async def api_public_backtest():
+    """Backtest metrics computed from all closed MTF signals in the database."""
+    import math as _math
+
+    try:
+        async with SessionLocal() as session:
+            res = await session.execute(
+                select(Signal)
+                .where(
+                    Signal.strategy == "MTF_SMC_STRICT",
+                    Signal.status.in_(["TP1", "TP2", "TP3", "SL"]),
+                )
+                .order_by(Signal.created_at)
+            )
+            signals = list(res.scalars().all())
+
+        if not signals:
+            return JSONResponse({
+                "total": 0, "wins": 0, "losses": 0,
+                "win_rate": 0, "profit_factor": 0,
+                "sharpe_ratio": 0, "max_drawdown_pct": 0,
+                "avg_rr": 0, "rr_distribution": [],
+            })
+
+        wins = [s for s in signals if s.status in ("TP1", "TP2", "TP3")]
+        losses = [s for s in signals if s.status == "SL"]
+        pnls = [float(s.pnl_pct or 0) for s in signals]
+        rrs = [float(s.risk_reward or 0) for s in signals]
+
+        gross_win = sum(p for p in pnls if p > 0)
+        gross_loss = abs(sum(p for p in pnls if p < 0))
+        profit_factor = round(gross_win / max(0.001, gross_loss), 2)
+
+        mean_pnl = sum(pnls) / max(1, len(pnls))
+        if len(pnls) > 1:
+            variance = sum((p - mean_pnl) ** 2 for p in pnls) / len(pnls)
+            sharpe = round(mean_pnl / max(0.001, _math.sqrt(variance)), 2)
+        else:
+            sharpe = 0.0
+
+        cum = peak = max_dd = 0.0
+        equity_curve = []
+        for p in pnls:
+            cum += p
+            equity_curve.append(round(cum, 2))
+            if cum > peak:
+                peak = cum
+            dd = peak - cum
+            if dd > max_dd:
+                max_dd = dd
+
+        # RR distribution: bucket into ranges
+        rr_buckets: dict = {}
+        for rr in rrs:
+            bucket = f"{_math.floor(rr * 2) / 2:.1f}"
+            rr_buckets[bucket] = rr_buckets.get(bucket, 0) + 1
+        rr_dist = sorted(
+            [{"rr": k, "count": v} for k, v in rr_buckets.items()],
+            key=lambda x: float(x["rr"])
+        )
+
+        # Monthly breakdown
+        monthly: dict = {}
+        for s in signals:
+            if s.created_at:
+                mo = s.created_at.strftime("%Y-%m")
+                monthly.setdefault(mo, {"wins": 0, "losses": 0, "pnl": 0.0})
+                if s.status in ("TP1", "TP2", "TP3"):
+                    monthly[mo]["wins"] += 1
+                else:
+                    monthly[mo]["losses"] += 1
+                monthly[mo]["pnl"] = round(monthly[mo]["pnl"] + float(s.pnl_pct or 0), 2)
+        monthly_list = sorted(
+            [{"month": k, **v} for k, v in monthly.items()],
+            key=lambda x: x["month"]
+        )
+
+        return JSONResponse({
+            "total": len(signals),
+            "wins": len(wins),
+            "losses": len(losses),
+            "win_rate": round(len(wins) / max(1, len(signals)) * 100, 1),
+            "profit_factor": profit_factor,
+            "sharpe_ratio": sharpe,
+            "max_drawdown_pct": round(max_dd, 2),
+            "avg_rr": round(sum(rrs) / max(1, len(rrs)), 2),
+            "avg_pnl": round(mean_pnl, 2),
+            "rr_distribution": rr_dist,
+            "monthly": monthly_list,
+            "equity_curve": equity_curve[-60:],
+        })
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
 
 
 @app.get("/aff/{exchange}")
@@ -330,9 +554,9 @@ async def affiliate_stats(request: Request):
 
 # ── monitoring (no auth) ──────────────────────────────────────────
 
-@app.get("/health")
+@app.get("/health", response_class=HTMLResponse)
 async def health():
-    return {"status": "ok", "uptime_sec": round(time.time() - _boot_time)}
+    return HTMLResponse(_health_page_html())
 
 
 @app.get("/api/health")
@@ -611,6 +835,21 @@ async def index():
     return HTMLResponse(html)
 
 
+@app.get("/signal/{signal_id}", response_class=HTMLResponse)
+async def signal_detail_page(signal_id: int):
+    return HTMLResponse(_signal_detail_page_html(signal_id))
+
+
+@app.get("/paper", response_class=HTMLResponse)
+async def paper_page():
+    return HTMLResponse(_paper_page_html())
+
+
+@app.get("/backtest", response_class=HTMLResponse)
+async def backtest_page():
+    return HTMLResponse(_backtest_page_html())
+
+
 @app.get("/signals", response_class=HTMLResponse)
 async def signals_page():
     return HTMLResponse(_signals_page_html())
@@ -802,8 +1041,9 @@ footer{{border-top:1px solid #13263a;padding:26px 24px;text-align:center;color:#
   <div class="hnav">
     <a href="/signals">Signals</a>
     <a href="/performance">Performance</a>
-    <a href="/stats">Stats</a>
-    <a href="/about">About</a>
+    <a href="/paper">Paper</a>
+    <a href="/backtest">Backtest</a>
+    <a href="/health">Health</a>
     <a href="/faq">FAQ</a>
   </div>
 </div>
@@ -1091,6 +1331,341 @@ header{{background:#08111c;border-bottom:1px solid #13263a;padding:13px 24px}}
 </html>"""
 
 
+def _signal_detail_page_html(signal_id: int) -> str:
+    body = f"""
+<div class="page-title">Signal Detail <span style="color:#8fa8c7;font-size:18px">#{signal_id}</span></div>
+<div id="detail-content" style="color:#8fa8c7;padding:24px;text-align:center">Loading...</div>"""
+    js = f"""
+const SID={signal_id};
+async function load(){{
+  const r=await fetch('/api/public/signal/'+SID);
+  if(!r.ok){{document.getElementById('detail-content').textContent='Signal not found.';return;}}
+  const d=await r.json();
+  if(d.error){{document.getElementById('detail-content').textContent=d.error;return;}}
+  const side=d.side==='LONG'
+    ?'<span class="bl2">LONG</span>':'<span class="bs2">SHORT</span>';
+  const st=d.status;
+  const stBadge=st==='OPEN'?'<span class="bopen">OPEN</span>':
+    st==='SL'?'<span class="bsl">SL</span>':
+    '<span class="btp">'+st+'</span>';
+  const pct=v=>(v>=0?'+':'')+v+'%';
+  const cls=v=>v>=0?'g':'r';
+  const sc=(v,max,lbl)=>{{
+    if(v===null||v===undefined)return'<div style="color:#627a99">'+lbl+': N/A</div>';
+    const pct2=Math.round(v/max*100);
+    return '<div style="margin-bottom:10px">'+
+      '<div style="display:flex;justify-content:space-between;margin-bottom:4px">'+
+        '<span style="font-size:12px;color:#8fa8c7">'+lbl+'</span>'+
+        '<span style="font-size:13px;font-weight:700;color:#20e6c3">'+v+'</span>'+
+      '</div>'+
+      '<div style="background:#0b1320;border-radius:4px;height:6px;overflow:hidden">'+
+        '<div style="background:linear-gradient(90deg,#08a98f,#20f0c0);width:'+pct2+'%;height:100%;border-radius:4px"></div>'+
+      '</div></div>';
+  }};
+  const reasons=(d.reasons||[]).map(r=>'<li style="color:#c9d8e8;margin-bottom:4px">'+r+'</li>').join('');
+  document.getElementById('detail-content').innerHTML=`
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+    <div class="card">
+      <div style="font-size:14px;font-weight:700;margin-bottom:14px;color:#eaf2ff">Signal Info</div>
+      <table style="font-size:13px"><tbody>
+        <tr><td style="color:#8fa8c7;padding:6px 12px 6px 0">Symbol</td><td><b>${{d.symbol}}</b></td></tr>
+        <tr><td style="color:#8fa8c7;padding:6px 12px 6px 0">Side</td><td>${{side}}</td></tr>
+        <tr><td style="color:#8fa8c7;padding:6px 12px 6px 0">Timeframe</td><td>${{d.timeframe}}</td></tr>
+        <tr><td style="color:#8fa8c7;padding:6px 12px 6px 0">Confidence</td><td class="c"><b>${{d.confidence}}%</b></td></tr>
+        <tr><td style="color:#8fa8c7;padding:6px 12px 6px 0">Risk/Reward</td><td class="y">1:${{d.risk_reward}}</td></tr>
+        <tr><td style="color:#8fa8c7;padding:6px 12px 6px 0">Risk Level</td><td>${{d.risk_level}}</td></tr>
+        <tr><td style="color:#8fa8c7;padding:6px 12px 6px 0">Status</td><td>${{stBadge}}</td></tr>
+        <tr><td style="color:#8fa8c7;padding:6px 12px 6px 0">PnL</td><td class="${{cls(d.pnl_pct)}}">${{pct(d.pnl_pct)}}</td></tr>
+        <tr><td style="color:#8fa8c7;padding:6px 12px 6px 0">Opened</td><td style="color:#8fa8c7">${{(d.created_at||'').slice(0,16).replace('T',' ')}}</td></tr>
+      </tbody></table>
+    </div>
+    <div class="card">
+      <div style="font-size:14px;font-weight:700;margin-bottom:14px;color:#eaf2ff">Levels</div>
+      <table style="font-size:13px"><tbody>
+        <tr><td style="color:#8fa8c7;padding:6px 12px 6px 0">Entry Low</td><td class="c">${{d.entry_low}}</td></tr>
+        <tr><td style="color:#8fa8c7;padding:6px 12px 6px 0">Entry High</td><td class="c">${{d.entry_high}}</td></tr>
+        <tr><td style="color:#8fa8c7;padding:6px 12px 6px 0">TP1</td><td class="g">${{d.tp1}}</td></tr>
+        <tr><td style="color:#8fa8c7;padding:6px 12px 6px 0">TP2</td><td class="g">${{d.tp2}}</td></tr>
+        <tr><td style="color:#8fa8c7;padding:6px 12px 6px 0">TP3</td><td class="g">${{d.tp3}}</td></tr>
+        <tr><td style="color:#8fa8c7;padding:6px 12px 6px 0">Stop Loss</td><td class="r">${{d.stop_loss}}</td></tr>
+      </tbody></table>
+    </div>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <div style="font-size:14px;font-weight:700;margin-bottom:16px;color:#eaf2ff">MTF Layer Scores</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div>
+        ${{sc(d.trend_score,20,'1D Trend Score (max 20)')}}
+        ${{sc(d.structure_score,5,'4H Structure Hits (max 5)')}}
+      </div>
+      <div>
+        ${{sc(d.setup_score,5,'1H Setup Hits (max 5)')}}
+        ${{sc(d.entry_score,10,'15M Entry Score (max 10)')}}
+      </div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <div style="font-size:14px;font-weight:700;margin-bottom:12px;color:#eaf2ff">Reasoning</div>
+    ${{reasons?'<ul style="padding-left:18px">'+reasons+'</ul>':'<p style="color:#627a99">No reasoning recorded</p>'}}
+  </div>
+  <div style="margin-top:12px"><a href="/signals" style="color:#20e6c3;font-size:13px">← Back to Signals</a></div>
+  `;
+}}
+document.addEventListener('DOMContentLoaded',load);
+"""
+    return _page_shell(f"Signal #{signal_id}", body, extra_js=js)
+
+
+def _health_page_html() -> str:
+    body = """
+<div class="page-title">System Health</div>
+<div id="hc-bar" class="sbar">
+  <div class="scard"><div class="slabel">OVERALL</div><div id="hc-overall" class="sval c">—</div></div>
+  <div class="scard"><div class="slabel">UPTIME</div><div id="hc-uptime" class="sval y">—</div></div>
+  <div class="scard"><div class="slabel">LAST SIGNAL</div><div id="hc-lastsig" class="sval">—</div></div>
+  <div class="scard"><div class="slabel">UNIVERSE</div><div id="hc-uni" class="sval c">—</div></div>
+</div>
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:4px">
+  <div class="card" id="hc-dashboard"><div class="slabel">DASHBOARD</div><div class="hc-status">—</div></div>
+  <div class="card" id="hc-database"><div class="slabel">DATABASE</div><div class="hc-status">—</div></div>
+  <div class="card" id="hc-redis"><div class="slabel">REDIS</div><div class="hc-status">—</div></div>
+  <div class="card" id="hc-binance"><div class="slabel">BINANCE</div><div class="hc-status">—</div></div>
+  <div class="card" id="hc-telegram"><div class="slabel">TELEGRAM</div><div class="hc-status">—</div></div>
+  <div class="card" id="hc-scanner"><div class="slabel">SCANNER</div><div class="hc-status">—</div></div>
+</div>
+<div class="card" style="margin-top:16px">
+  <div style="font-size:14px;font-weight:700;margin-bottom:12px;color:#eaf2ff">Configuration</div>
+  <table id="hc-cfg-tbl" style="font-size:13px"><tbody>
+    <tr><td colspan="2" style="color:#627a99;padding:14px;text-align:center">Loading...</td></tr>
+  </tbody></table>
+</div>"""
+    css = """
+.hc-status{font-size:20px;font-weight:900;margin-top:8px}
+.online{color:#20ff80}.offline{color:#ff4f61}.degraded{color:#ffd84d}
+"""
+    js = """
+function fmtUp(sec){
+  const h=Math.floor(sec/3600),m=Math.floor((sec%3600)/60),s=sec%60;
+  return h?h+'h '+m+'m':m+'m '+s+'s';
+}
+async function load(){
+  try{
+    const r=await fetch('/api/health');
+    if(!r.ok)return;
+    const d=await r.json();
+    const c=d.components||{};
+    const ok=d.ok;
+    document.getElementById('hc-overall').textContent=ok?'ONLINE':'DEGRADED';
+    document.getElementById('hc-overall').className='sval '+(ok?'g':'r');
+    document.getElementById('hc-uptime').textContent=fmtUp(d.uptime_sec||0);
+    document.getElementById('hc-uni').textContent=d.components?.dashboard?.detail||'—';
+
+    function setComp(id,isOk,detail){
+      const el=document.getElementById(id);
+      const s=el.querySelector('.hc-status');
+      s.textContent=isOk?'ONLINE':'OFFLINE';
+      s.className='hc-status '+(isOk?'online':'offline');
+      if(detail){
+        let sub=el.querySelector('.hc-detail');
+        if(!sub){sub=document.createElement('div');sub.className='hc-detail';sub.style.cssText='font-size:10px;color:#8fa8c7;margin-top:4px';el.appendChild(sub);}
+        sub.textContent=detail;
+      }
+    }
+    setComp('hc-dashboard',true,'port '+d.config?.scan_interval_sec||8010);
+    setComp('hc-database',c.database?.ok,c.database?.latency_ms>=0?c.database.latency_ms+'ms latency':null);
+    setComp('hc-redis',c.redis?.ok,c.redis?.latency_ms>=0?c.redis.latency_ms+'ms latency':null);
+    setComp('hc-binance',c.websocket?.ok,'price feed');
+    const tg=typeof d.config?.scan_interval_sec!=='undefined';
+    setComp('hc-telegram',tg,'configured');
+    setComp('hc-scanner',true,'running every '+d.config?.scan_interval_sec+'s');
+
+    if(d.config){
+      document.getElementById('hc-cfg-tbl').innerHTML=`
+        <tr><td style="color:#8fa8c7;padding:6px 14px 6px 0;width:50%">Min Confidence</td><td>${d.config.min_confidence}%</td></tr>
+        <tr><td style="color:#8fa8c7;padding:6px 14px 6px 0">Min RR</td><td>1:${d.config.min_rr}</td></tr>
+        <tr><td style="color:#8fa8c7;padding:6px 14px 6px 0">Scan Interval</td><td>${d.config.scan_interval_sec}s</td></tr>
+        <tr><td style="color:#8fa8c7;padding:6px 14px 6px 0">Max Signals/hr</td><td>${d.config.max_signals_per_hour}</td></tr>
+        <tr><td style="color:#8fa8c7;padding:6px 14px 6px 0">Paper Trading</td><td>${d.config.paper_trading?'<span class="y">ON</span>':'OFF'}</td></tr>
+        <tr><td style="color:#8fa8c7;padding:6px 14px 6px 0">Auto Trading</td><td>${d.config.auto_trading_enabled?'<span class="y">ON</span>':'OFF'}</td></tr>
+      `;
+    }
+  }catch(e){console.error(e);}
+}
+async function loadLastSig(){
+  try{
+    const r=await fetch('/api/public/signals?limit=1');
+    if(!r.ok)return;
+    const d=await r.json();
+    if(d&&d[0]&&d[0].created_at){
+      const t=new Date(d[0].created_at);
+      document.getElementById('hc-lastsig').textContent=t.toLocaleTimeString();
+    }else{
+      document.getElementById('hc-lastsig').textContent='None';
+    }
+  }catch(e){}
+}
+document.addEventListener('DOMContentLoaded',()=>{load();loadLastSig();setInterval(load,15000);setInterval(loadLastSig,30000);});
+"""
+    return _page_shell("Health Center", body, extra_css=css, extra_js=js)
+
+
+def _paper_page_html() -> str:
+    body = """
+<div class="page-title">Paper Trading</div>
+<div class="sbar">
+  <div class="scard"><div class="slabel">BALANCE</div><div id="pt-bal" class="sval c">—</div></div>
+  <div class="scard"><div class="slabel">TOTAL PNL</div><div id="pt-pnl" class="sval g">—</div></div>
+  <div class="scard"><div class="slabel">WIN RATE</div><div id="pt-wr" class="sval g">—</div></div>
+  <div class="scard"><div class="slabel">OPEN POSITIONS</div><div id="pt-open" class="sval y">—</div></div>
+</div>
+<div style="background:#0b2a0a;border:1px solid #1a5a18;border-radius:10px;padding:13px 16px;margin-bottom:16px;font-size:12px;color:#8fa8c7">
+  <b style="color:#20ff80">Virtual Portfolio</b> — 10 000 USDT starting balance · 1% risk per trade · No real funds
+</div>
+<div class="card" style="margin-bottom:16px">
+  <div style="font-size:14px;font-weight:700;margin-bottom:12px;color:#eaf2ff">Open Positions (<span id="pt-open-cnt">—</span>)</div>
+  <div style="overflow-x:auto">
+  <table>
+  <thead><tr><th>OPENED</th><th>SYMBOL</th><th>SIDE</th><th>ENTRY</th><th>SL</th><th>TP1</th><th>CONF</th><th>RR</th></tr></thead>
+  <tbody id="pt-open-tbl"><tr><td colspan="8" style="text-align:center;color:#627a99;padding:18px">Loading...</td></tr></tbody>
+  </table>
+  </div>
+</div>
+<div class="card">
+  <div style="font-size:14px;font-weight:700;margin-bottom:12px;color:#eaf2ff">Closed Trades</div>
+  <div style="overflow-x:auto">
+  <table>
+  <thead><tr><th>OPENED</th><th>SYMBOL</th><th>SIDE</th><th>ENTRY</th><th>STATUS</th><th>PNL%</th><th>PNL USDT</th></tr></thead>
+  <tbody id="pt-closed-tbl"><tr><td colspan="7" style="text-align:center;color:#627a99;padding:18px">Loading...</td></tr></tbody>
+  </table>
+  </div>
+</div>"""
+    js = """
+function pct(v){return(v>=0?'+':'')+v+'%';}
+function cls(v){return v>=0?'g':'r';}
+function sBadge(st){
+  if(st==='OPEN')return '<span class="bopen">OPEN</span>';
+  if(st==='SL')return '<span class="bsl">SL</span>';
+  if(st==='EXPIRED')return '<span class="bexp">EXP</span>';
+  return '<span class="btp">'+st+'</span>';
+}
+async function load(){
+  const r=await fetch('/api/public/paper');
+  if(!r.ok)return;
+  const d=await r.json();
+  if(d.error)return;
+  document.getElementById('pt-bal').textContent='$'+d.current_balance.toFixed(2);
+  const pEl=document.getElementById('pt-pnl');
+  pEl.textContent=(d.total_pnl_usdt>=0?'+$':'−$')+Math.abs(d.total_pnl_usdt).toFixed(2);
+  pEl.className='sval '+(d.total_pnl_usdt>=0?'g':'r');
+  document.getElementById('pt-wr').textContent=d.win_rate+'%';
+  document.getElementById('pt-open').textContent=d.open_count;
+  document.getElementById('pt-open-cnt').textContent=d.open_count;
+  document.getElementById('pt-open-tbl').innerHTML=(d.open||[]).map(x=>
+    '<tr><td>'+x.opened+'</td><td><b><a href="/signal/'+x.id+'" style="color:#20e6c3">'+x.symbol+'</a></b></td>'+
+    '<td><span class="'+(x.side==='LONG'?'bl2':'bs2')+'">'+x.side+'</span></td>'+
+    '<td>'+x.entry+'</td><td class="r">'+x.sl+'</td><td class="g">'+x.tp1+'</td>'+
+    '<td>'+x.conf+'%</td><td>1:'+x.rr+'</td></tr>'
+  ).join('')||'<tr><td colspan="8" style="text-align:center;color:#627a99;padding:14px">No open positions</td></tr>';
+  document.getElementById('pt-closed-tbl').innerHTML=(d.closed||[]).map(x=>
+    '<tr><td>'+x.opened+'</td><td><b><a href="/signal/'+x.id+'" style="color:#20e6c3">'+x.symbol+'</a></b></td>'+
+    '<td><span class="'+(x.side==='LONG'?'bl2':'bs2')+'">'+x.side+'</span></td>'+
+    '<td>'+x.entry+'</td><td>'+sBadge(x.status)+'</td>'+
+    '<td class="'+cls(x.pnl_pct)+'">'+pct(x.pnl_pct)+'</td>'+
+    '<td class="'+cls(x.pnl_usdt)+'">'+(x.pnl_usdt>=0?'+$':'−$')+Math.abs(x.pnl_usdt).toFixed(2)+'</td></tr>'
+  ).join('')||'<tr><td colspan="7" style="text-align:center;color:#627a99;padding:14px">No closed trades yet</td></tr>';
+}
+document.addEventListener('DOMContentLoaded',()=>{load();setInterval(load,15000);});
+"""
+    return _page_shell("Paper Trading", body, extra_js=js)
+
+
+def _backtest_page_html() -> str:
+    body = """
+<div class="page-title">Backtest Engine</div>
+<div class="sbar">
+  <div class="scard"><div class="slabel">WIN RATE</div><div id="bt-wr" class="sval g">—</div></div>
+  <div class="scard"><div class="slabel">PROFIT FACTOR</div><div id="bt-pf" class="sval c">—</div></div>
+  <div class="scard"><div class="slabel">MAX DRAWDOWN</div><div id="bt-dd" class="sval r">—</div></div>
+  <div class="scard"><div class="slabel">SHARPE RATIO</div><div id="bt-sh" class="sval y">—</div></div>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:4px">
+  <div class="card">
+    <div style="font-size:14px;font-weight:700;margin-bottom:12px;color:#eaf2ff">Summary</div>
+    <table style="font-size:13px"><tbody id="bt-summary">
+      <tr><td colspan="2" style="color:#627a99;padding:14px;text-align:center">Loading...</td></tr>
+    </tbody></table>
+  </div>
+  <div class="card">
+    <div style="font-size:14px;font-weight:700;margin-bottom:12px;color:#eaf2ff">RR Distribution</div>
+    <div id="bt-rr-dist" style="color:#627a99;padding:14px;text-align:center">Loading...</div>
+  </div>
+</div>
+<div class="card" style="margin-top:16px">
+  <div style="font-size:14px;font-weight:700;margin-bottom:12px;color:#eaf2ff">Monthly Breakdown</div>
+  <div style="overflow-x:auto">
+  <table>
+  <thead><tr><th>MONTH</th><th>WINS</th><th>LOSSES</th><th>NET PNL</th></tr></thead>
+  <tbody id="bt-monthly"><tr><td colspan="4" style="text-align:center;color:#627a99;padding:18px">Loading...</td></tr></tbody>
+  </table>
+  </div>
+</div>
+<div class="card" style="margin-top:16px">
+  <div style="font-size:14px;font-weight:700;margin-bottom:12px;color:#eaf2ff">Cumulative PnL Curve</div>
+  <div id="bt-curve" style="height:80px;display:flex;align-items:flex-end;gap:2px;overflow:hidden"></div>
+</div>"""
+    js = """
+function pct(v){return(v>=0?'+':'')+v+'%';}
+function cls(v){return v>=0?'g':'r';}
+async function load(){
+  const r=await fetch('/api/public/backtest');
+  if(!r.ok)return;
+  const d=await r.json();
+  if(d.error)return;
+  document.getElementById('bt-wr').textContent=d.win_rate+'%';
+  document.getElementById('bt-pf').textContent=d.profit_factor;
+  document.getElementById('bt-dd').textContent=pct(d.max_drawdown_pct);
+  document.getElementById('bt-sh').textContent=d.sharpe_ratio;
+  document.getElementById('bt-summary').innerHTML=`
+    <tr><td style="color:#8fa8c7;padding:6px 14px 6px 0">Total Signals</td><td>${d.total}</td></tr>
+    <tr><td style="color:#8fa8c7;padding:6px 14px 6px 0">Wins</td><td class="g">${d.wins}</td></tr>
+    <tr><td style="color:#8fa8c7;padding:6px 14px 6px 0">Losses</td><td class="r">${d.losses}</td></tr>
+    <tr><td style="color:#8fa8c7;padding:6px 14px 6px 0">Avg PnL/Trade</td><td class="${cls(d.avg_pnl)}">${pct(d.avg_pnl)}</td></tr>
+    <tr><td style="color:#8fa8c7;padding:6px 14px 6px 0">Avg RR</td><td>1:${d.avg_rr}</td></tr>
+  `;
+  // RR dist bars
+  const rrd=d.rr_distribution||[];
+  const maxC=Math.max(1,...rrd.map(x=>x.count));
+  document.getElementById('bt-rr-dist').innerHTML=rrd.map(x=>`
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:12px">
+      <div style="width:40px;color:#8fa8c7;text-align:right">1:${x.rr}</div>
+      <div style="flex:1;background:#0b1320;border-radius:3px;height:14px;overflow:hidden">
+        <div style="background:linear-gradient(90deg,#08a98f,#20f0c0);width:${Math.round(x.count/maxC*100)}%;height:100%"></div>
+      </div>
+      <div style="width:24px;color:#eaf2ff">${x.count}</div>
+    </div>`).join('')||'<p style="color:#627a99">No data</p>';
+  // Monthly table
+  document.getElementById('bt-monthly').innerHTML=(d.monthly||[]).reverse().map(m=>
+    '<tr><td>'+m.month+'</td><td class="g">'+m.wins+'</td><td class="r">'+m.losses+'</td>'+
+    '<td class="'+cls(m.pnl)+'">'+(m.pnl>=0?'+':'')+m.pnl+'%</td></tr>'
+  ).join('')||'<tr><td colspan="4" style="text-align:center;color:#627a99;padding:14px">No data</td></tr>';
+  // Equity curve
+  const curve=d.equity_curve||[];
+  if(curve.length>1){
+    const mn=Math.min(...curve),mx=Math.max(...curve),range=mx-mn||1;
+    const cols=curve.map(v=>{
+      const h=Math.max(4,Math.round((v-mn)/range*76));
+      return`<div style="flex:1;min-width:2px;height:${h}px;background:${v>=0?'#20ff80':'#ff4f61'};border-radius:1px 1px 0 0;opacity:0.8"></div>`;
+    }).join('');
+    document.getElementById('bt-curve').innerHTML=cols;
+  }else{
+    document.getElementById('bt-curve').innerHTML='<p style="color:#627a99;padding:14px">Not enough data</p>';
+  }
+}
+document.addEventListener('DOMContentLoaded',load);
+"""
+    return _page_shell("Backtest Engine", body, extra_js=js)
+
+
 def create_app():
     return app
 
@@ -1214,6 +1789,10 @@ tr:last-child td{border-bottom:none}
 .disc{background:#1a0c0c;border:1px solid #5a1a1a;border-radius:13px;padding:20px;margin-bottom:40px}
 .disc h3{color:#ff7b8a;margin-bottom:9px;font-size:14px;display:flex;align-items:center;gap:6px}
 .disc p{color:#c57a7a;font-size:13px;line-height:1.7}
+.faq-list{display:flex;flex-direction:column;gap:10px}
+.faq-item{background:#0b1320;border:1px solid #17314b;border-radius:10px;padding:16px 18px}
+.faq-q{font-size:14px;font-weight:700;color:#eaf2ff;margin-bottom:6px}
+.faq-a{font-size:13px;color:#8fa8c7;line-height:1.6}
 footer{border-top:1px solid #13263a;padding:26px 24px;text-align:center;color:#627a99;font-size:12px}
 @media(max-width:860px){.sbar{grid-template-columns:1fr 1fr}.mkt-grid{grid-template-columns:1fr}.comm-grid{grid-template-columns:1fr}.aff-grid{grid-template-columns:1fr 1fr}.stats3{grid-template-columns:1fr}.hero-wrap h1{font-size:30px}}
 @media(max-width:480px){.sbar{grid-template-columns:1fr}.aff-grid{grid-template-columns:1fr}.don-grid{grid-template-columns:1fr}}
@@ -1332,6 +1911,21 @@ footer{border-top:1px solid #13263a;padding:26px 24px;text-align:center;color:#6
 __COMMUNITY__
 __DONATE__
 __AFFILIATES__
+<div class="container">
+<section>
+<div class="stitle"><b></b>Frequently Asked Questions</div>
+<div class="faq-list">
+  <div class="faq-item"><div class="faq-q">Are the signals free?</div><div class="faq-a">Yes, 100% free. No subscription required. All signals are delivered directly to Telegram at no cost.</div></div>
+  <div class="faq-item"><div class="faq-q">How do I receive signals?</div><div class="faq-a">Join our Telegram channel. Signals are posted automatically the moment the AI engine detects a valid setup.</div></div>
+  <div class="faq-item"><div class="faq-q">What markets are covered?</div><div class="faq-a">We scan USDT perpetual futures on Binance — all liquid pairs with over $5M daily volume.</div></div>
+  <div class="faq-item"><div class="faq-q">What does confidence % mean?</div><div class="faq-a">Confidence is the AI engine's 4-layer quality score (75–100%). Higher = more timeframe confluences aligned. It is not a win probability.</div></div>
+  <div class="faq-item"><div class="faq-q">What is the 4-layer MTF pipeline?</div><div class="faq-a">Each signal passes four hard gates: 1D Trend → 4H Structure → 1H Setup → 15M Entry. All four must confirm before a signal is emitted.</div></div>
+  <div class="faq-item"><div class="faq-q">What is Risk/Reward (RR)?</div><div class="faq-a">RR is the ratio of potential profit to potential loss. We require a minimum of 1:2.0 — you can gain at least $2 for every $1 risked.</div></div>
+  <div class="faq-item"><div class="faq-q">Should I use all my capital on one signal?</div><div class="faq-a">Never. Risk at most 1–2% of your trading capital per trade. Proper position sizing is essential for long-term survival.</div></div>
+  <div class="faq-item"><div class="faq-q">Who runs this project?</div><div class="faq-a">ALPHA RADAR SIGNALS is an independent trading tools project. We are not a registered financial institution. All signals are for educational use only.</div></div>
+</div>
+</section>
+</div>
 
 <div class="container">
 <div class="disc">

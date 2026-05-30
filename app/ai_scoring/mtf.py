@@ -44,6 +44,11 @@ class MTFDecision:
     contributing_tfs: List[str]
     reasons: List[str]
     fake_breakout_prob: float
+    # Per-layer scores (0-based raw counts/points for the detail page)
+    trend_score: float = 0.0
+    structure_score: float = 0.0
+    setup_score: float = 0.0
+    entry_score_pts: float = 0.0
 
 
 @dataclass
@@ -274,6 +279,10 @@ def evaluate_pipeline(
         contributing_tfs=list(PIPELINE_TFS),
         reasons=all_reasons,
         fake_breakout_prob=_fake_breakout_prob(m15, side),
+        trend_score=round(trend_score, 1),
+        structure_score=round(float(struct_hits), 1),
+        setup_score=round(float(setup_hits), 1),
+        entry_score_pts=round(float(entry_score), 1),
     ), None
 
 
