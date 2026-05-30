@@ -85,6 +85,11 @@ async def _lifespan(app: FastAPI):
 app = FastAPI(title="ALPHA RADAR SIGNALS", lifespan=_lifespan)
 _boot_time = time.time()
 
+# Production filter: only V3 MTF signals appear on all public-facing queries.
+# Legacy 5m / old-engine signals live in archive_signals after migration.
+_MTF_TIMEFRAMES = ["15m", "1h", "4h", "1d"]
+_MTF_STRATEGY   = "MTF_SMC_STRICT"
+
 
 class _SecurityHeaders(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
@@ -115,12 +120,22 @@ async def _get_stats() -> dict:
 
     async with SessionLocal() as session:
         week_res = await session.execute(
-            select(Signal).where(Signal.created_at >= start7)
+            select(Signal)
+            .where(
+                Signal.created_at >= start7,
+                Signal.strategy == _MTF_STRATEGY,
+                Signal.timeframe.in_(_MTF_TIMEFRAMES),
+            )
             .order_by(desc(Signal.created_at)).limit(500)
         )
         week = week_res.scalars().all()
         recent_res = await session.execute(
-            select(Signal).order_by(desc(Signal.created_at)).limit(20)
+            select(Signal)
+            .where(
+                Signal.strategy == _MTF_STRATEGY,
+                Signal.timeframe.in_(_MTF_TIMEFRAMES),
+            )
+            .order_by(desc(Signal.created_at)).limit(20)
         )
         recent = recent_res.scalars().all()
 
@@ -184,7 +199,12 @@ async def api_public_signals(limit: int = 50):
     try:
         async with SessionLocal() as session:
             res = await session.execute(
-                select(Signal).order_by(desc(Signal.created_at)).limit(limit)
+                select(Signal)
+                .where(
+                    Signal.strategy == _MTF_STRATEGY,
+                    Signal.timeframe.in_(_MTF_TIMEFRAMES),
+                )
+                .order_by(desc(Signal.created_at)).limit(limit)
             )
             rows = res.scalars().all()
         return JSONResponse([{
@@ -212,7 +232,12 @@ async def api_public_performance():
         now = datetime.now(timezone.utc)
         async with SessionLocal() as session:
             res = await session.execute(
-                select(Signal).where(Signal.status.in_(["TP1", "TP2", "TP3", "SL"]))
+                select(Signal)
+                .where(
+                    Signal.status.in_(["TP1", "TP2", "TP3", "SL"]),
+                    Signal.strategy == _MTF_STRATEGY,
+                    Signal.timeframe.in_(_MTF_TIMEFRAMES),
+                )
                 .order_by(desc(Signal.created_at)).limit(1000)
             )
             closed = res.scalars().all()
@@ -349,7 +374,10 @@ async def api_public_paper():
         async with SessionLocal() as session:
             res = await session.execute(
                 select(Signal)
-                .where(Signal.strategy == "MTF_SMC_STRICT")
+                .where(
+                    Signal.strategy == _MTF_STRATEGY,
+                    Signal.timeframe.in_(_MTF_TIMEFRAMES),
+                )
                 .order_by(Signal.created_at)
                 .limit(500)
             )
@@ -418,7 +446,8 @@ async def api_public_backtest():
             res = await session.execute(
                 select(Signal)
                 .where(
-                    Signal.strategy == "MTF_SMC_STRICT",
+                    Signal.strategy == _MTF_STRATEGY,
+                    Signal.timeframe.in_(_MTF_TIMEFRAMES),
                     Signal.status.in_(["TP1", "TP2", "TP3", "SL"]),
                 )
                 .order_by(Signal.created_at)

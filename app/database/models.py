@@ -112,6 +112,19 @@ class DailyStat(Base):
     worst_pnl: Mapped[float] = mapped_column(Float, default=0.0)
 
 
+class WeeklyStat(Base):
+    __tablename__ = "weekly_stats"
+
+    week: Mapped[str] = mapped_column(String(10), primary_key=True)  # YYYY-WNN e.g. "2026-W22"
+    signals_total: Mapped[int] = mapped_column(Integer, default=0)
+    wins: Mapped[int] = mapped_column(Integer, default=0)
+    losses: Mapped[int] = mapped_column(Integer, default=0)
+    win_rate: Mapped[float] = mapped_column(Float, default=0.0)
+    avg_pnl: Mapped[float] = mapped_column(Float, default=0.0)
+    best_pnl: Mapped[float] = mapped_column(Float, default=0.0)
+    worst_pnl: Mapped[float] = mapped_column(Float, default=0.0)
+
+
 class AffiliateClick(Base):
     """Tracks affiliate link clicks for monetization reporting."""
     __tablename__ = "affiliate_clicks"
@@ -125,14 +138,21 @@ class AffiliateClick(Base):
 
 
 class ArchivedSignal(Base):
-    """Legacy signals moved out of production by the archive migration."""
+    """
+    Legacy signals moved out of production by archive_legacy_signals.py.
+
+    Preserves every column from the signals table verbatim, plus two
+    archive-specific columns: archive_reason and archived_at.
+    """
     __tablename__ = "archive_signals"
 
+    # ── archive metadata ──────────────────────────────────────────
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     original_id: Mapped[int] = mapped_column(Integer, index=True)
     archive_reason: Mapped[str] = mapped_column(String(64), default="")
     archived_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+    # ── original signals columns (mirrors Signal exactly) ─────────
     symbol: Mapped[str] = mapped_column(String(32))
     side: Mapped[str] = mapped_column(String(8))
     timeframe: Mapped[str] = mapped_column(String(8))
@@ -151,6 +171,16 @@ class ArchivedSignal(Base):
 
     status: Mapped[str] = mapped_column(String(16), default="OPEN")
     pnl_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    max_favorable_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    max_adverse_pct: Mapped[float] = mapped_column(Float, default=0.0)
+
+    telegram_message_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+
+    # MTF layer scores (nullable — only present on V3.1+ signals)
+    trend_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    structure_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    setup_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    entry_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

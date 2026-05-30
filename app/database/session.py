@@ -6,6 +6,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -15,6 +16,16 @@ from sqlalchemy.ext.asyncio import (
 from app.config import settings
 from app.database.models import Base
 from app.utils.logger import logger
+
+# Idempotent ALTER TABLE statements applied on every startup.
+# Using IF NOT EXISTS so they are safe to run against both new and existing databases.
+_SCHEMA_UPGRADES: list[str] = [
+    # V3.1 — MTF layer score columns on signals
+    "ALTER TABLE signals ADD COLUMN IF NOT EXISTS trend_score     FLOAT",
+    "ALTER TABLE signals ADD COLUMN IF NOT EXISTS structure_score FLOAT",
+    "ALTER TABLE signals ADD COLUMN IF NOT EXISTS setup_score     FLOAT",
+    "ALTER TABLE signals ADD COLUMN IF NOT EXISTS entry_score     FLOAT",
+]
 
 engine = create_async_engine(
     settings.postgres_dsn,
@@ -31,9 +42,11 @@ SessionLocal: async_sessionmaker[AsyncSession] = async_sessionmaker(
 
 
 async def init_db() -> None:
-    """Create tables if they don't exist."""
+    """Create tables and apply incremental schema upgrades."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        for stmt in _SCHEMA_UPGRADES:
+            await conn.execute(text(stmt))
     logger.info("database initialized")
 
 
