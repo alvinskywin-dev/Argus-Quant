@@ -99,12 +99,45 @@ class BinanceClient:
         return await self._get("/fapi/v1/ticker/24hr")
 
     async def klines(
-        self, symbol: str, interval: str, limit: int = 200
+        self,
+        symbol: str,
+        interval: str,
+        limit: int = 200,
+        start_time: Optional[int] = None,
+        end_time: Optional[int] = None,
     ) -> List[List[Any]]:
-        return await self._get(
-            "/fapi/v1/klines",
-            params={"symbol": symbol, "interval": interval, "limit": limit},
-        )
+        params: Dict[str, Any] = {"symbol": symbol, "interval": interval, "limit": limit}
+        if start_time is not None:
+            params["startTime"] = start_time
+        if end_time is not None:
+            params["endTime"] = end_time
+        return await self._get("/fapi/v1/klines", params=params)
+
+    async def klines_range(
+        self,
+        symbol: str,
+        interval: str,
+        start_ms: int,
+        end_ms: int,
+        batch_size: int = 1500,
+    ) -> List[List[Any]]:
+        """Fetch all klines for a ms-timestamp range, batching at batch_size per request."""
+        all_rows: List[List[Any]] = []
+        cur = start_ms
+        while cur < end_ms:
+            rows = await self.klines(
+                symbol, interval, limit=batch_size,
+                start_time=cur, end_time=end_ms,
+            )
+            if not rows:
+                break
+            all_rows.extend(rows)
+            # rows[-1][6] is close_time of the last candle in milliseconds
+            if rows[-1][6] >= end_ms or len(rows) < batch_size:
+                break
+            cur = rows[-1][0] + 1   # open_time of next batch
+            await asyncio.sleep(0.05)   # gentle rate-limit courtesy pause
+        return all_rows
 
     async def premium_index(self, symbol: str | None = None) -> Any:
         params = {"symbol": symbol} if symbol else None

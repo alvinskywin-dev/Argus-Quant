@@ -41,6 +41,27 @@ def _to_df(rows: list[list]) -> pd.DataFrame:
     return df
 
 
+async def fetch_klines_historical(
+    symbol: str,
+    interval: str,
+    start_ms: int,
+    end_ms: int,
+) -> pd.DataFrame:
+    """
+    Fetch all historical klines for a ms-timestamp range via batched REST calls.
+    No caching — intended for backtest data ingestion only.
+    """
+    client = await get_client()
+    try:
+        rows = await client.klines_range(symbol, interval, start_ms, end_ms)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(f"klines_range failed {symbol} {interval}: {exc}")
+        return pd.DataFrame()
+    if not rows:
+        return pd.DataFrame()
+    return _to_df(rows)
+
+
 async def fetch_klines(symbol: str, interval: str, limit: int = 200) -> pd.DataFrame:
     key = f"kl:{symbol}:{interval}:{limit}"
     cached = await cache_get(key)

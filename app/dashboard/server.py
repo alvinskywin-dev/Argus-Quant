@@ -656,6 +656,55 @@ def _compute_backtest(signals: list) -> dict:
     }
 
 
+@app.get("/api/backtest/run")
+async def api_backtest_run(
+    symbol:   str = "BTCUSDT",
+    start:    str = "",
+    end:      str = "",
+    strategy: str = "V3.2",
+):
+    """
+    Real historical candle-replay backtest.
+
+    Query params:
+        symbol   — Binance USDT-M pair (e.g. BTCUSDT)
+        start    — ISO date YYYY-MM-DD (UTC, inclusive)
+        end      — ISO date YYYY-MM-DD (UTC, inclusive)
+        strategy — strategy label (currently V3.2 only)
+    """
+    from app.backtesting.historical import HistoricalBacktestEngine
+
+    # ── input sanitisation ────────────────────────────────────────
+    import re
+    symbol = re.sub(r"[^A-Za-z0-9]", "", symbol).upper()[:20]
+    if not symbol:
+        return JSONResponse({"error": "symbol is required"}, status_code=400)
+
+    # Default date range: last 90 days
+    from datetime import datetime, timedelta, timezone as _tz
+    _today = datetime.now(_tz.utc).date()
+    if not end:
+        end = str(_today - timedelta(days=1))
+    if not start:
+        start = str(_today - timedelta(days=91))
+
+    # Validate dates
+    _date_re = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+    if not _date_re.match(start) or not _date_re.match(end):
+        return JSONResponse({"error": "dates must be YYYY-MM-DD"}, status_code=400)
+
+    try:
+        engine = HistoricalBacktestEngine()
+        result = await engine.run(symbol, start, end, strategy)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+    if result.error:
+        return JSONResponse({"error": result.error}, status_code=400)
+
+    return JSONResponse(result.to_dict())
+
+
 @app.get("/api/backtest")
 async def api_backtest():
     """
@@ -2545,10 +2594,8 @@ document.addEventListener('DOMContentLoaded',()=>{load();setInterval(load,15000)
 
 def _backtest_page_html() -> str:
     css = """
-/* ── backtest engine ──────────────────────────────────────── */
+/* ── historical backtest ──────────────────────────────────── */
 .bk-header{margin-bottom:20px}
-.bk-title{font-size:26px;font-weight:900;letter-spacing:1px;color:#eaf2ff}
-.bk-subtitle{font-size:12px;color:#7fa0c8;margin-top:4px;letter-spacing:1px}
 .bk-kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
 .bk-kcard{background:linear-gradient(180deg,#101827,#0b1320);border:1px solid #17314b;
   border-radius:12px;padding:15px;text-align:center}
@@ -2564,183 +2611,339 @@ def _backtest_page_html() -> str:
 .bk-rval{font-weight:700;color:#eaf2ff}
 .bk-curve{display:flex;align-items:flex-end;gap:2px;height:90px;overflow:hidden;margin-top:4px}
 .bk-no-data{color:#627a99;font-size:13px;padding:24px;text-align:center}
-@media(max-width:720px){.bk-kpi{grid-template-columns:repeat(2,1fr)}.bk-2col{grid-template-columns:1fr}}
+/* form */
+.bt-form{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;align-items:end;margin-bottom:6px}
+.bt-field label{display:block;font-size:9px;color:#7fa0c8;letter-spacing:2px;text-transform:uppercase;margin-bottom:5px}
+.bt-field input,.bt-field select{width:100%;background:#07101a;border:1px solid #17314b;border-radius:8px;
+  color:#eaf2ff;padding:9px 11px;font-size:13px;outline:none}
+.bt-field input:focus,.bt-field select:focus{border-color:#20f0c0}
+.bt-run{background:linear-gradient(90deg,#08a98f,#20f0c0);color:#001b18;border:none;
+  border-radius:8px;font-weight:900;font-size:13px;padding:10px 22px;cursor:pointer;
+  width:100%;letter-spacing:1px}
+.bt-run:disabled{opacity:0.45;cursor:not-allowed}
+.bt-loading{background:#0a1f14;border:1px solid #20f0c044;border-radius:10px;
+  padding:18px;text-align:center;color:#20f0c0;font-size:13px;display:none;margin-bottom:16px}
+.bt-spinner{display:inline-block;width:14px;height:14px;border:2px solid #20f0c033;
+  border-top-color:#20f0c0;border-radius:50%;animation:spin 0.8s linear infinite;margin-right:8px}
+@keyframes spin{to{transform:rotate(360deg)}}
+/* legacy section */
+.bk-legacy-title{font-size:10px;font-weight:700;color:#475d78;letter-spacing:2px;text-transform:uppercase;
+  margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #0e1e2e}
+@media(max-width:720px){.bk-kpi{grid-template-columns:repeat(2,1fr)}.bk-2col{grid-template-columns:1fr}.bt-form{grid-template-columns:1fr}}
 """
     body = """
-<div class="bk-header">
-  <div class="bk-title">BACKTEST ENGINE</div>
-  <div class="bk-subtitle">MTF STRATEGY ONLY &nbsp;·&nbsp; strategy = MTF_SMC_STRICT &nbsp;·&nbsp; Closed signals</div>
-</div>
+<div class="page-title">Historical Backtest</div>
 
-<div class="bk-kpi">
-  <div class="bk-kcard">
-    <div class="bk-klbl">Total Trades</div>
-    <div id="bk-total" class="bk-kval w">—</div>
-    <div id="bk-wl-sub" style="font-size:10px;color:#627a99;margin-top:3px"></div>
-  </div>
-  <div class="bk-kcard">
-    <div class="bk-klbl">Win Rate</div>
-    <div id="bk-wr" class="bk-kval g">—</div>
-  </div>
-  <div class="bk-kcard">
-    <div class="bk-klbl">Profit Factor</div>
-    <div id="bk-pf" class="bk-kval c">—</div>
-  </div>
-  <div class="bk-kcard">
-    <div class="bk-klbl">Max Drawdown</div>
-    <div id="bk-dd" class="bk-kval r">—</div>
-  </div>
-  <div class="bk-kcard">
-    <div class="bk-klbl">Sharpe Ratio</div>
-    <div id="bk-sh" class="bk-kval y">—</div>
-  </div>
-  <div class="bk-kcard">
-    <div class="bk-klbl">Avg RR</div>
-    <div id="bk-rr" class="bk-kval y">—</div>
-  </div>
-  <div class="bk-kcard">
-    <div class="bk-klbl">Avg PnL / Trade</div>
-    <div id="bk-pnl" class="bk-kval g">—</div>
-  </div>
-  <div class="bk-kcard">
-    <div class="bk-klbl">Total PnL</div>
-    <div id="bk-tpnl" class="bk-kval g">—</div>
-  </div>
-</div>
-
+<!-- ── Control panel ────────────────────────────────────────── -->
 <div class="card" style="margin-bottom:16px">
-  <div class="bk-sec-title">Equity Curve <span style="font-size:9px;color:#627a99">(Cumulative PnL %)</span></div>
-  <div id="bk-curve" class="bk-curve">
-    <div class="bk-no-data">Loading...</div>
+  <div class="bk-sec-title">Simulation Parameters</div>
+  <div class="bt-form">
+    <div class="bt-field">
+      <label>Symbol</label>
+      <input id="bt-sym" value="BTCUSDT" placeholder="e.g. BTCUSDT" maxlength="20">
+    </div>
+    <div class="bt-field">
+      <label>Start Date</label>
+      <input id="bt-start" type="date">
+    </div>
+    <div class="bt-field">
+      <label>End Date</label>
+      <input id="bt-end" type="date">
+    </div>
+    <div class="bt-field">
+      <label>Strategy</label>
+      <select id="bt-strat">
+        <option value="V3.2">V3.2 — MTF_SMC_STRICT</option>
+      </select>
+    </div>
+    <div class="bt-field">
+      <label>&nbsp;</label>
+      <button id="bt-btn" class="bt-run" onclick="runBacktest()">▶ RUN BACKTEST</button>
+    </div>
   </div>
-  <div id="bk-curve-lbl" style="display:flex;justify-content:space-between;font-size:10px;color:#627a99;margin-top:6px">
-    <span>Trade 1</span><span id="bk-curve-end"></span>
+  <div style="font-size:10px;color:#475d78;margin-top:4px">
+    Replays Binance klines candle-by-candle · max 366 days · may take 20–60 s
   </div>
 </div>
 
-<div class="bk-2col">
-  <div class="card">
-    <div class="bk-sec-title">Summary Statistics</div>
-    <div id="bk-summary"><div class="bk-no-data">Loading...</div></div>
+<!-- ── Loading indicator ─────────────────────────────────────── -->
+<div id="bt-loading" class="bt-loading">
+  <span class="bt-spinner"></span>Running historical simulation — please wait…
+</div>
+
+<!-- ── Results (hidden until a run completes) ────────────────── -->
+<div id="bt-results" style="display:none">
+  <div id="bt-meta" style="font-size:11px;color:#7fa0c8;margin-bottom:12px"></div>
+
+  <div class="bk-kpi">
+    <div class="bk-kcard">
+      <div class="bk-klbl">Trades</div>
+      <div id="r-total" class="bk-kval">—</div>
+      <div id="r-wl" style="font-size:10px;color:#627a99;margin-top:3px"></div>
+    </div>
+    <div class="bk-kcard">
+      <div class="bk-klbl">Win Rate</div>
+      <div id="r-wr" class="bk-kval g">—</div>
+    </div>
+    <div class="bk-kcard">
+      <div class="bk-klbl">Profit Factor</div>
+      <div id="r-pf" class="bk-kval c">—</div>
+    </div>
+    <div class="bk-kcard">
+      <div class="bk-klbl">Max Drawdown</div>
+      <div id="r-dd" class="bk-kval r">—</div>
+    </div>
+    <div class="bk-kcard">
+      <div class="bk-klbl">Sharpe Ratio</div>
+      <div id="r-sh" class="bk-kval y">—</div>
+    </div>
+    <div class="bk-kcard">
+      <div class="bk-klbl">Avg RR</div>
+      <div id="r-rr" class="bk-kval y">—</div>
+    </div>
+    <div class="bk-kcard">
+      <div class="bk-klbl">Avg PnL / Trade</div>
+      <div id="r-pnl" class="bk-kval g">—</div>
+    </div>
+    <div class="bk-kcard">
+      <div class="bk-klbl">Total PnL</div>
+      <div id="r-tpnl" class="bk-kval g">—</div>
+    </div>
   </div>
+
+  <!-- Equity curve -->
+  <div class="card" style="margin-bottom:16px">
+    <div class="bk-sec-title">Equity Curve <span style="font-size:9px;color:#627a99">(Cumulative PnL %)</span></div>
+    <div id="r-curve" class="bk-curve"><div class="bk-no-data">—</div></div>
+    <div style="display:flex;justify-content:space-between;font-size:10px;color:#627a99;margin-top:6px">
+      <span>Trade 1</span><span id="r-curve-end"></span>
+    </div>
+  </div>
+
+  <div class="bk-2col">
+    <!-- Summary stats -->
+    <div class="card">
+      <div class="bk-sec-title">Summary Statistics</div>
+      <div id="r-summary"></div>
+    </div>
+    <!-- RR distribution -->
+    <div class="card">
+      <div class="bk-sec-title">RR Distribution</div>
+      <div id="r-rrdist"></div>
+    </div>
+  </div>
+
+  <!-- Monthly table -->
+  <div class="card" style="margin-bottom:16px">
+    <div class="bk-sec-title">Monthly Returns</div>
+    <div style="overflow-x:auto">
+    <table>
+    <thead><tr>
+      <th>MONTH</th><th>TRADES</th><th>WINS</th><th>LOSSES</th>
+      <th>WIN RATE</th><th>TOTAL PNL</th><th>PROFIT FACTOR</th>
+    </tr></thead>
+    <tbody id="r-monthly">
+      <tr><td colspan="7" style="text-align:center;color:#627a99;padding:14px">—</td></tr>
+    </tbody>
+    </table>
+    </div>
+  </div>
+
+  <!-- Trade list -->
   <div class="card">
-    <div class="bk-sec-title">RR Distribution</div>
-    <div id="bk-rr-dist"><div class="bk-no-data">Loading...</div></div>
+    <div class="bk-sec-title">Trade Log <span id="r-trade-count" style="font-size:9px;color:#627a99"></span></div>
+    <div style="overflow-x:auto">
+    <table>
+    <thead><tr>
+      <th>ENTRY TIME</th><th>SIDE</th><th>ENTRY</th><th>EXIT</th>
+      <th>STATUS</th><th>PNL</th><th>CONF</th><th>RR</th><th>HOLD</th>
+    </tr></thead>
+    <tbody id="r-trades">
+      <tr><td colspan="9" style="text-align:center;color:#627a99;padding:14px">—</td></tr>
+    </tbody>
+    </table>
+    </div>
   </div>
 </div>
 
-<div class="card">
-  <div class="bk-sec-title">Monthly Results</div>
-  <div style="overflow-x:auto">
-  <table>
-  <thead><tr>
-    <th>MONTH</th><th>SIGNALS</th><th>WINS</th><th>LOSSES</th>
-    <th>WIN RATE</th><th>TOTAL PNL</th><th>PROFIT FACTOR</th>
-  </tr></thead>
-  <tbody id="bk-monthly">
-    <tr><td colspan="7" style="text-align:center;color:#627a99;padding:18px">Loading...</td></tr>
-  </tbody>
-  </table>
-  </div>
+<!-- ── Legacy: DB signal metrics ────────────────────────────── -->
+<div class="card" style="margin-top:28px;opacity:0.7">
+  <div class="bk-legacy-title">Signal DB — All-time Closed Trades (V3 MTF_SMC_STRICT)</div>
+  <div id="leg-inner"><div class="bk-no-data">Loading…</div></div>
 </div>
 """
     js = """
-function _p(v){ return v===null||v===undefined?'—':(v>=0?'+':'')+v+'%'; }
-function _cls(v){ return v>=0?'g':'r'; }
-function _pf(v){ return v===null||v===undefined?'∞':v; }
-
-async function load(){
-  try{
-    const r = await fetch('/api/backtest');
-    if(!r.ok) return;
-    const d = await r.json();
-    if(d.error) return;
-
-    const noData = (d.total||0) === 0;
-
-    // KPI
-    document.getElementById('bk-total').textContent = d.total||0;
-    document.getElementById('bk-wl-sub').textContent = (d.wins||0)+'W / '+(d.losses||0)+'L';
-    const wrEl = document.getElementById('bk-wr');
-    wrEl.textContent = (d.win_rate||0)+'%';
-    wrEl.className = 'bk-kval ' + (d.win_rate>=50?'g':'r');
-    document.getElementById('bk-pf').textContent = _pf(d.profit_factor);
-    document.getElementById('bk-dd').textContent = _p(-(d.max_drawdown||0));
-    document.getElementById('bk-sh').textContent = d.sharpe_ratio||0;
-    document.getElementById('bk-rr').textContent = d.avg_rr?'1:'+d.avg_rr:'—';
-    const pnlEl = document.getElementById('bk-pnl');
-    pnlEl.textContent = _p(d.avg_pnl);
-    pnlEl.className = 'bk-kval ' + _cls(d.avg_pnl||0);
-    const tEl = document.getElementById('bk-tpnl');
-    tEl.textContent = _p(d.total_pnl);
-    tEl.className = 'bk-kval ' + _cls(d.total_pnl||0);
-
-    // Equity curve
-    const curve = d.equity_curve||[];
-    if(curve.length > 1){
-      const mn = Math.min(...curve), mx = Math.max(...curve), range = mx-mn||1;
-      document.getElementById('bk-curve').innerHTML = curve.map(v=>{
-        const h = Math.max(3, Math.round((v-mn)/range*86));
-        const col = v >= 0 ? '#20ff80' : '#ff4f61';
-        return `<div style="flex:1;min-width:2px;height:${h}px;background:${col};
-          border-radius:1px 1px 0 0;opacity:0.85"></div>`;
-      }).join('');
-      document.getElementById('bk-curve-end').textContent = 'Trade '+( curve.length-1);
-    } else {
-      document.getElementById('bk-curve').innerHTML =
-        '<div class="bk-no-data">Not enough data</div>';
-    }
-
-    // Summary
-    document.getElementById('bk-summary').innerHTML = noData
-      ? '<div class="bk-no-data">No closed trades yet</div>'
-      : `<div class="bk-row"><span class="bk-rlbl">Total Trades</span><span class="bk-rval">${d.total}</span></div>
-         <div class="bk-row"><span class="bk-rlbl">Wins</span><span class="bk-rval g">${d.wins}</span></div>
-         <div class="bk-row"><span class="bk-rlbl">Losses</span><span class="bk-rval r">${d.losses}</span></div>
-         <div class="bk-row"><span class="bk-rlbl">Win Rate</span><span class="bk-rval ${_cls(d.win_rate-50)}">${d.win_rate}%</span></div>
-         <div class="bk-row"><span class="bk-rlbl">Profit Factor</span><span class="bk-rval c">${_pf(d.profit_factor)}</span></div>
-         <div class="bk-row"><span class="bk-rlbl">Sharpe Ratio</span><span class="bk-rval y">${d.sharpe_ratio}</span></div>
-         <div class="bk-row"><span class="bk-rlbl">Max Drawdown</span><span class="bk-rval r">${_p(-d.max_drawdown)}</span></div>
-         <div class="bk-row"><span class="bk-rlbl">Avg RR</span><span class="bk-rval y">1:${d.avg_rr}</span></div>
-         <div class="bk-row"><span class="bk-rlbl">Avg PnL / Trade</span><span class="bk-rval ${_cls(d.avg_pnl)}">${_p(d.avg_pnl)}</span></div>
-         <div class="bk-row"><span class="bk-rlbl">Total PnL</span><span class="bk-rval ${_cls(d.total_pnl)}">${_p(d.total_pnl)}</span></div>`;
-
-    // RR distribution
-    const rrd = d.rr_distribution||[];
-    const maxC = Math.max(1, ...rrd.map(x=>x.count));
-    document.getElementById('bk-rr-dist').innerHTML = rrd.length
-      ? rrd.map(x=>`
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:12px">
-            <div style="width:36px;color:#8fa8c7;text-align:right;font-weight:700">1:${x.rr}</div>
-            <div style="flex:1;background:#0b1320;border-radius:4px;height:14px;overflow:hidden">
-              <div style="background:linear-gradient(90deg,#08a98f,#20f0c0);
-                width:${Math.round(x.count/maxC*100)}%;height:100%;border-radius:4px"></div>
-            </div>
-            <div style="width:28px;color:#eaf2ff;font-weight:700;text-align:right">${x.count}</div>
-          </div>`).join('')
-      : '<div class="bk-no-data">No data</div>';
-
-    // Monthly table
-    const mo = (d.monthly||[]).slice().reverse();
-    const moEmpty = '<tr><td colspan="7" style="text-align:center;color:#627a99;padding:14px">No monthly data</td></tr>';
-    document.getElementById('bk-monthly').innerHTML = mo.length
-      ? mo.map(m=>`<tr>
-          <td>${m.month}</td>
-          <td>${m.signals}</td>
-          <td class="g">${m.wins}</td>
-          <td class="r">${m.losses}</td>
-          <td class="${m.win_rate>=50?'g':'r'}">${m.win_rate}%</td>
-          <td class="${_cls(m.total_pnl)}">${_p(m.total_pnl)}</td>
-          <td class="c">${_pf(m.profit_factor)}</td>
-        </tr>`).join('')
-      : moEmpty;
-
-  }catch(e){ console.error('backtest load error', e); }
+// ── helpers ────────────────────────────────────────────────────
+function _p(v){ return v===null||v===undefined?'—':(v>=0?'+':'')+parseFloat(v).toFixed(2)+'%'; }
+function _cls(v){ return parseFloat(v||0)>=0?'g':'r'; }
+function _pf(v){ return v===null||v===undefined?'∞':parseFloat(v).toFixed(2); }
+function _fmt(iso){
+  if(!iso) return '—';
+  const d=new Date(iso);
+  return d.toISOString().slice(0,16).replace('T',' ');
 }
 
-document.addEventListener('DOMContentLoaded', load);
+// ── Set default dates ──────────────────────────────────────────
+(function(){
+  const t=new Date();
+  const end=new Date(t); end.setDate(end.getDate()-1);
+  const start=new Date(t); start.setDate(start.getDate()-91);
+  const fmt=d=>d.toISOString().slice(0,10);
+  document.getElementById('bt-end').value=fmt(end);
+  document.getElementById('bt-start').value=fmt(start);
+})();
+
+// ── Run historical backtest ────────────────────────────────────
+async function runBacktest(){
+  const sym   = (document.getElementById('bt-sym').value||'').trim().toUpperCase();
+  const start = document.getElementById('bt-start').value;
+  const end   = document.getElementById('bt-end').value;
+  const strat = document.getElementById('bt-strat').value;
+  if(!sym||!start||!end){ alert('Fill in all fields'); return; }
+
+  const btn=document.getElementById('bt-btn');
+  btn.disabled=true;
+  document.getElementById('bt-loading').style.display='block';
+  document.getElementById('bt-results').style.display='none';
+
+  try{
+    const url=`/api/backtest/run?symbol=${encodeURIComponent(sym)}&start=${start}&end=${end}&strategy=${strat}`;
+    const r=await fetch(url);
+    const d=await r.json();
+    if(!r.ok||d.error){
+      alert('Error: '+(d.error||r.statusText));
+      return;
+    }
+    renderResults(d);
+  }catch(e){
+    alert('Request failed: '+e.message);
+  }finally{
+    btn.disabled=false;
+    document.getElementById('bt-loading').style.display='none';
+  }
+}
+
+// ── Render results ─────────────────────────────────────────────
+function renderResults(d){
+  // Meta line
+  document.getElementById('bt-meta').textContent =
+    `${d.symbol} · ${d.start_date} → ${d.end_date} · ${d.strategy_version} · `+
+    `${d.candles_scanned||0} candles scanned · ${d.signals_generated||0} signals generated`;
+
+  // KPIs
+  document.getElementById('r-total').textContent = d.total_trades||0;
+  document.getElementById('r-wl').textContent = (d.wins||0)+'W / '+(d.losses||0)+'L / '+(d.expired||0)+'EXP';
+  const wrEl=document.getElementById('r-wr');
+  wrEl.textContent=(d.win_rate||0)+'%';
+  wrEl.className='bk-kval '+((d.win_rate||0)>=50?'g':'r');
+  document.getElementById('r-pf').textContent=_pf(d.profit_factor);
+  document.getElementById('r-dd').textContent=_p(-(d.max_drawdown_pct||0));
+  document.getElementById('r-sh').textContent=parseFloat(d.sharpe_ratio||0).toFixed(2);
+  document.getElementById('r-rr').textContent=d.avg_rr?'1:'+parseFloat(d.avg_rr).toFixed(2):'—';
+  const pEl=document.getElementById('r-pnl');
+  pEl.textContent=_p(d.avg_pnl); pEl.className='bk-kval '+_cls(d.avg_pnl);
+  const tEl=document.getElementById('r-tpnl');
+  tEl.textContent=_p(d.total_pnl); tEl.className='bk-kval '+_cls(d.total_pnl);
+
+  // Equity curve
+  const curve=d.equity_curve||[];
+  const curveEl=document.getElementById('r-curve');
+  if(curve.length>1){
+    const mn=Math.min(...curve),mx=Math.max(...curve),rng=mx-mn||1;
+    curveEl.innerHTML=curve.map(v=>{
+      const h=Math.max(3,Math.round((v-mn)/rng*86));
+      return `<div style="flex:1;min-width:2px;height:${h}px;background:${v>=0?'#20ff80':'#ff4f61'};border-radius:1px 1px 0 0;opacity:0.85"></div>`;
+    }).join('');
+    document.getElementById('r-curve-end').textContent='Trade '+(curve.length-1);
+  } else {
+    curveEl.innerHTML='<div class="bk-no-data">Not enough trades</div>';
+  }
+
+  // Summary stats
+  const n=d.total_trades||0;
+  document.getElementById('r-summary').innerHTML = n===0
+    ? '<div class="bk-no-data">No closed trades in this period</div>'
+    : `<div class="bk-row"><span class="bk-rlbl">Total Trades</span><span class="bk-rval">${n}</span></div>
+       <div class="bk-row"><span class="bk-rlbl">Wins</span><span class="bk-rval g">${d.wins}</span></div>
+       <div class="bk-row"><span class="bk-rlbl">Losses</span><span class="bk-rval r">${d.losses}</span></div>
+       <div class="bk-row"><span class="bk-rlbl">Expired</span><span class="bk-rval y">${d.expired}</span></div>
+       <div class="bk-row"><span class="bk-rlbl">Win Rate</span><span class="bk-rval ${_cls(d.win_rate-50)}">${d.win_rate}%</span></div>
+       <div class="bk-row"><span class="bk-rlbl">Profit Factor</span><span class="bk-rval c">${_pf(d.profit_factor)}</span></div>
+       <div class="bk-row"><span class="bk-rlbl">Sharpe Ratio</span><span class="bk-rval y">${parseFloat(d.sharpe_ratio||0).toFixed(2)}</span></div>
+       <div class="bk-row"><span class="bk-rlbl">Max Drawdown</span><span class="bk-rval r">${_p(-(d.max_drawdown_pct||0))}</span></div>
+       <div class="bk-row"><span class="bk-rlbl">Avg RR</span><span class="bk-rval y">1:${parseFloat(d.avg_rr||0).toFixed(2)}</span></div>
+       <div class="bk-row"><span class="bk-rlbl">Avg PnL/Trade</span><span class="bk-rval ${_cls(d.avg_pnl)}">${_p(d.avg_pnl)}</span></div>
+       <div class="bk-row"><span class="bk-rlbl">Total PnL</span><span class="bk-rval ${_cls(d.total_pnl)}">${_p(d.total_pnl)}</span></div>`;
+
+  // RR distribution
+  const rrd=d.rr_distribution||[];
+  const maxC=Math.max(1,...rrd.map(x=>x.count));
+  document.getElementById('r-rrdist').innerHTML=rrd.length
+    ? rrd.map(x=>`
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:12px">
+          <div style="width:36px;color:#8fa8c7;text-align:right;font-weight:700">1:${x.rr}</div>
+          <div style="flex:1;background:#0b1320;border-radius:4px;height:14px;overflow:hidden">
+            <div style="background:linear-gradient(90deg,#08a98f,#20f0c0);width:${Math.round(x.count/maxC*100)}%;height:100%;border-radius:4px"></div>
+          </div>
+          <div style="width:28px;color:#eaf2ff;font-weight:700;text-align:right">${x.count}</div>
+        </div>`).join('')
+    : '<div class="bk-no-data">No data</div>';
+
+  // Monthly table
+  const mo=(d.monthly||[]).slice().reverse();
+  document.getElementById('r-monthly').innerHTML=mo.length
+    ? mo.map(m=>`<tr>
+        <td>${m.month}</td><td>${m.signals}</td>
+        <td class="g">${m.wins}</td><td class="r">${m.losses}</td>
+        <td class="${m.win_rate>=50?'g':'r'}">${m.win_rate}%</td>
+        <td class="${_cls(m.total_pnl)}">${_p(m.total_pnl)}</td>
+        <td class="c">${_pf(m.profit_factor)}</td>
+      </tr>`).join('')
+    : '<tr><td colspan="7" style="text-align:center;color:#627a99;padding:14px">No data</td></tr>';
+
+  // Trade log
+  const trades=d.trades||[];
+  document.getElementById('r-trade-count').textContent='('+trades.length+' shown)';
+  const statusCls=s=>({'TP1':'g','TP2':'g','TP3':'g','SL':'r','EXPIRED':'y'}[s]||'');
+  document.getElementById('r-trades').innerHTML=trades.length
+    ? trades.map(t=>`<tr>
+        <td style="font-size:11px;color:#7fa0c8">${_fmt(t.entry_time)}</td>
+        <td class="${t.side==='LONG'?'g':'r'}">${t.side}</td>
+        <td style="font-size:11px">${parseFloat(t.entry_price).toPrecision(6)}</td>
+        <td style="font-size:11px">${parseFloat(t.exit_price).toPrecision(6)}</td>
+        <td class="${statusCls(t.status)}" style="font-weight:700">${t.status}</td>
+        <td class="${_cls(t.pnl_pct)}" style="font-weight:700">${_p(t.pnl_pct)}</td>
+        <td style="font-size:11px;color:#7fa0c8">${parseFloat(t.confidence||0).toFixed(0)}%</td>
+        <td style="font-size:11px;color:#7fa0c8">1:${parseFloat(t.risk_reward||0).toFixed(2)}</td>
+        <td style="font-size:11px;color:#7fa0c8">${t.hold_candles}×15m</td>
+      </tr>`).join('')
+    : '<tr><td colspan="9" style="text-align:center;color:#627a99;padding:14px">No trades</td></tr>';
+
+  document.getElementById('bt-results').style.display='block';
+}
+
+// ── Legacy DB backtest (all-time closed) ───────────────────────
+async function loadLegacy(){
+  try{
+    const r=await fetch('/api/backtest');
+    if(!r.ok) return;
+    const d=await r.json();
+    if(d.error||!d.total){ document.getElementById('leg-inner').innerHTML='<div class="bk-no-data">No closed signals in DB yet</div>'; return; }
+    document.getElementById('leg-inner').innerHTML=
+      `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px">
+        ${[['Trades',d.total],['Win Rate',d.win_rate+'%'],['Profit Factor',_pf(d.profit_factor)],
+           ['Sharpe',d.sharpe_ratio],['Max DD',_p(-d.max_drawdown)],['Avg PnL',_p(d.avg_pnl)]].map(([l,v])=>
+          `<div style="background:#0a111a;border:1px solid #0e1e2e;border-radius:8px;padding:12px;text-align:center">
+             <div style="font-size:9px;color:#475d78;letter-spacing:2px;text-transform:uppercase;margin-bottom:5px">${l}</div>
+             <div style="font-size:18px;font-weight:900;color:#7fa0c8">${v}</div>
+           </div>`).join('')}
+      </div>`;
+  }catch(e){}
+}
+
+document.addEventListener('DOMContentLoaded', loadLegacy);
 """
-    return _page_shell("Backtest Engine", body, extra_css=css, extra_js=js)
+    return _page_shell("Historical Backtest", body, extra_css=css, extra_js=js)
 
 
 def create_app():
