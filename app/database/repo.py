@@ -120,7 +120,9 @@ async def update_signal(signal_id: int, fields: dict[str, Any]) -> None:
 
 async def get_open_signals() -> List[Signal]:
     async with get_session() as s:
-        rows = await s.execute(select(Signal).where(Signal.status == "OPEN"))
+        rows = await s.execute(
+            select(Signal).where(Signal.status.in_(["OPEN", "TP1", "TP2"]))
+        )
         return list(rows.scalars().all())
 
 
