@@ -55,6 +55,7 @@ class Settings(BaseSettings):
     anti_duplicate_signal: bool = True
     max_signals_per_hour: int = 12
     min_rr: float = 2.0
+    entry_pass_score: int = 2   # minimum 15M entry factors needed (0-5)
 
     # --- Duplicate signal prevention ---
     # Block any new signal for a symbol while it still has an OPEN position

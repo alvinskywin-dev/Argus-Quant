@@ -5,9 +5,18 @@ Workflow:
     1D  →  Trend Filter      (EMA50/200, market structure)
     4H  →  Structure          (BOS, CHoCH, OB, FVG, Sweep)
     1H  →  Setup Detection    (Pullback, Retest, VWAP, EMA align, Volume)
-    15M →  Entry Trigger      (BOS trigger + momentum/volume)
+    15M →  Entry Trigger V2   (5 factors × 1 point each, configurable threshold)
 
 Each layer is a hard gate — if it fails the pipeline stops and reports why.
+
+Entry Engine V2:
+    Factors (each worth 1 point, max score = 5):
+        1. BOS          — break of structure on 15M
+        2. FVG retest   — fair value gap in play on 15M
+        3. OB retest    — price inside order block on 15M
+        4. EMA pullback — 15M EMA9/21 aligned + close above/below slow EMA
+        5. VWAP reclaim — 15M price on correct side of VWAP
+    Threshold: ENTRY_PASS_SCORE (default 2, set via env ENTRY_PASS_SCORE)
 
 Confidence scoring (0-100):
     Base 75 for passing all four layers at minimum conditions.
@@ -24,6 +33,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
+from app.config import settings
 from app.strategies.features import FeatureSnapshot
 
 # The four required timeframes in pipeline order (trend → entry)
@@ -49,6 +59,8 @@ class MTFDecision:
     structure_score: float = 0.0
     setup_score: float = 0.0
     entry_score_pts: float = 0.0
+    # Entry factor breakdown for diagnostics
+    entry_factors: Dict[str, bool] = field(default_factory=dict)
 
 
 @dataclass
@@ -57,6 +69,12 @@ class MTFRejection:
     side: str
     stage: str       # trend | structure | setup | entry | confidence | rr | cooldown
     detail: str
+    # Partial scores computed before rejection (zero if stage not yet reached)
+    trend_score: float = 0.0
+    structure_score: float = 0.0
+    setup_score: float = 0.0
+    entry_score_pts: float = 0.0
+    entry_factors: Dict[str, bool] = field(default_factory=dict)
 
 
 # ─── helpers ────────────────────────────────────────────────────────────────
@@ -136,6 +154,7 @@ def evaluate_pipeline(
                 f"EMA50={d1.ema_50:.4f} EMA200={d1.ema_200:.4f} "
                 f"close={d1.last_close:.4f}"
             ),
+            trend_score=0.0,
         )
 
     d1s = d1.structure
@@ -170,6 +189,7 @@ def evaluate_pipeline(
         return None, MTFRejection(
             side=side, stage="structure",
             detail=f"4H structure weak ({struct_hits}/5): {hit_list}",
+            trend_score=trend_score,
         )
 
     # Structure bonus: 0 for hitting minimum, +2 per extra signal, max +6
@@ -196,6 +216,8 @@ def evaluate_pipeline(
         return None, MTFRejection(
             side=side, stage="setup",
             detail=f"1H setup weak ({setup_hits}/5): {hit_list}",
+            trend_score=trend_score,
+            structure_score=float(struct_hits),
         )
 
     # Setup bonus: 0 at 3 signals, +2 each extra, max +4
@@ -203,59 +225,50 @@ def evaluate_pipeline(
 
     setup_reasons = [f"1H {k.replace('_', ' ')}" for k, v in setup_map.items() if v]
 
-    # ── Layer 4: 15M Entry Trigger (score-based) ───────────────────────
+    # ── Layer 4: 15M Entry Trigger V2 (5 factors × 1 point each) ──────
     #
-    # The old hard-BOS-only gate was killing too many valid signals.
-    # We now accept any combination of:
-    #   BOS        +2  (classic break-of-structure trigger)
-    #   FVG retest +2  (price returning into fair value gap)
-    #   OB retest  +2  (price returning into order block)
-    #   EMA pull   +1  (price bouncing off EMA in trend direction)
-    #   VWAP reclaim+1 (price reclaiming VWAP)
-    #   Momentum   +1  (RSI/MACD momentum aligned)
-    #   Vol spike  +1  (above-average volume on trigger candle)
+    # Five equal-weight factors — any combination of ≥ ENTRY_PASS_SCORE passes.
+    # Score 0-5; threshold configurable via env ENTRY_PASS_SCORE (default 2).
     #
-    # Minimum entry score to pass: 2 (configurable via ENTRY_MIN_SCORE).
-    # Score is also used to set the entry bonus toward final confidence.
+    #   1. BOS          — price broke the 20-bar swing high/low on 15M
+    #   2. FVG retest   — a 15M fair value gap is open and price is inside it
+    #   3. OB retest    — price is retesting a 15M order block
+    #   4. EMA pullback — 15M EMA9 > EMA21 and close on correct side of EMA21
+    #   5. VWAP reclaim — price is on the entry-direction side of 15M VWAP
 
-    ENTRY_MIN_SCORE = 2
+    ENTRY_MIN_SCORE: int = settings.entry_pass_score  # default 2
 
     s15 = m15.structure
-    entry_map = {
-        "BOS":         ((side == "LONG" and s15.bos_bull)   or (side == "SHORT" and s15.bos_bear),  2),
-        "FVG retest":  ((side == "LONG" and s15.fvg_bull)   or (side == "SHORT" and s15.fvg_bear),  2),
-        "OB retest":   ((side == "LONG" and s15.ob_bull)    or (side == "SHORT" and s15.ob_bear),   2),
-        "EMA pullback":((
+    entry_factors: Dict[str, bool] = {
+        "BOS":         (side == "LONG" and s15.bos_bull)   or (side == "SHORT" and s15.bos_bear),
+        "FVG retest":  (side == "LONG" and s15.fvg_bull)   or (side == "SHORT" and s15.fvg_bear),
+        "OB retest":   (side == "LONG" and s15.ob_bull)    or (side == "SHORT" and s15.ob_bear),
+        "EMA pullback":(
             (side == "LONG"  and m15.ema_fast > m15.ema_slow and m15.last_close > m15.ema_slow) or
             (side == "SHORT" and m15.ema_fast < m15.ema_slow and m15.last_close < m15.ema_slow)
-        ), 1),
-        "VWAP reclaim":((side == "LONG" and m15.above_vwap) or (side == "SHORT" and not m15.above_vwap), 1),
-        "Momentum":    ((
-            (side == "LONG"  and m15.momentum_bull and m15.macd_hist > 0) or
-            (side == "SHORT" and m15.momentum_bear and m15.macd_hist < 0)
-        ), 1),
-        "Vol spike":   (m15.vol_spike_pct > 50.0, 1),
+        ),
+        "VWAP reclaim":(side == "LONG" and m15.above_vwap) or (side == "SHORT" and not m15.above_vwap),
     }
 
-    entry_score = sum(weight for ok, weight in entry_map.values() if ok)
-    entry_reasons: List[str] = [
-        f"15M {trigger}" for trigger, (ok, _) in entry_map.items() if ok
-    ]
+    entry_score = sum(1 for v in entry_factors.values() if v)
+    entry_reasons: List[str] = [f"15M {k}" for k, v in entry_factors.items() if v]
 
     if entry_score < ENTRY_MIN_SCORE:
-        hit_list = ", ".join(
-            f"{k}={'✓' if ok else '✗'}" for k, (ok, _) in entry_map.items()
-        )
+        hit_list = ", ".join(f"{k}={'✓' if v else '✗'}" for k, v in entry_factors.items())
         return None, MTFRejection(
             side=side, stage="entry",
             detail=(
-                f"15M entry score too low ({entry_score}/{ENTRY_MIN_SCORE} required) — "
-                f"{hit_list}"
+                f"15M entry score {entry_score}/{ENTRY_MIN_SCORE} — {hit_list}"
             ),
+            trend_score=trend_score,
+            structure_score=float(struct_hits),
+            setup_score=float(setup_hits),
+            entry_score_pts=float(entry_score),
+            entry_factors=entry_factors,
         )
 
-    # Map entry score (2-10) → entry bonus (3-10)
-    entry_bonus = min(10.0, max(3.0, float(entry_score) * 1.2))
+    # Map entry score (0-5) → confidence bonus (0-10): each factor adds 2 pts
+    entry_bonus = min(10.0, float(entry_score) * 2.0)
 
     # ── Final confidence ────────────────────────────────────────────────
     # Base 75 for passing all 4 layers + bonuses (max 25) = 75-100
@@ -283,6 +296,7 @@ def evaluate_pipeline(
         structure_score=round(float(struct_hits), 1),
         setup_score=round(float(setup_hits), 1),
         entry_score_pts=round(float(entry_score), 1),
+        entry_factors=entry_factors,
     ), None
 
 

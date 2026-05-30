@@ -33,6 +33,29 @@ SignalCallback = Callable[[dict], Awaitable[None]]
 MTF_TIMEFRAMES = ("1d", "4h", "1h", "15m")
 
 
+def _fmt_entry_diag(
+    symbol: str,
+    side: str,
+    trend_score: float,
+    struct_score: float,
+    setup_score: float,
+    entry_score: float,
+    factors: dict,
+    outcome: str,
+) -> str:
+    """Format a one-line setup diagnostic for any signal that reached entry evaluation."""
+    factor_str = " ".join(
+        f"{k.split()[0][0:3].upper()}={'✓' if v else '✗'}"
+        for k, v in factors.items()
+    )
+    return (
+        f"🔍 DIAG {symbol:>12} {side:<5} | "
+        f"trend={trend_score:>4.1f} struct={struct_score:.0f}/5 "
+        f"setup={setup_score:.0f}/5 entry={entry_score:.0f}/5 "
+        f"[{factor_str}] → {outcome}"
+    )
+
+
 class MarketScanner:
     def __init__(self, on_signal: SignalCallback, concurrency: int = 12) -> None:
         self.on_signal = on_signal
@@ -79,7 +102,20 @@ class MarketScanner:
                     "entry":     "Entry failed",
                 }.get(stage, f"{stage.capitalize()} failed")
 
-                if settings.log_rejection_detail:
+                # Entry-stage diagnostics: always log factor breakdown for visibility
+                if stage == "entry" and rejection.entry_factors:
+                    logger.info(
+                        _fmt_entry_diag(
+                            symbol, side,
+                            rejection.trend_score,
+                            rejection.structure_score,
+                            rejection.setup_score,
+                            rejection.entry_score_pts,
+                            rejection.entry_factors,
+                            f"REJECTED@entry ({rejection.entry_score_pts:.0f}<{settings.entry_pass_score})",
+                        )
+                    )
+                elif settings.log_rejection_detail:
                     logger.info(
                         f"⛔ {symbol} {side} — {stage_label}: {rejection.detail}"
                     )
@@ -87,6 +123,19 @@ class MarketScanner:
 
             # ── Market quality filters (confidence adjustments + hard rejects) ─
             primary_snap = snaps["15m"]
+
+            # Log entry diagnostic for every setup that passed the pipeline
+            logger.info(
+                _fmt_entry_diag(
+                    symbol, decision.side,
+                    decision.trend_score,
+                    decision.structure_score,
+                    decision.setup_score,
+                    decision.entry_score_pts,
+                    decision.entry_factors,
+                    f"entry_ok ({decision.entry_score_pts:.0f}/{settings.entry_pass_score})",
+                )
+            )
 
             ok, reason = passes_market_filters(primary_snap, decision)
             if not ok:
