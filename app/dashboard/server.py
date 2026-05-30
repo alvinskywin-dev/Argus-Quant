@@ -581,6 +581,23 @@ async def affiliate_stats(request: Request):
         return JSONResponse({"error": str(exc)}, status_code=500)
 
 
+@app.get("/api/performance/rebuild")
+async def api_performance_rebuild(request: Request):
+    """
+    Trigger a full performance rebuild from the admin dashboard.
+    Requires admin login. Recomputes all 5 metrics and rebuilds
+    daily_stats + weekly_stats using only MTF_SMC_STRICT signals.
+    """
+    if not _is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        from app.performance.rebuild import rebuild as _rebuild
+        result = await _rebuild()
+        return JSONResponse(result)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
 # ── monitoring (no auth) ──────────────────────────────────────────
 
 @app.get("/health", response_class=HTMLResponse)
@@ -2202,12 +2219,41 @@ th{color:#8fa8c7;font-size:11px;letter-spacing:1px}tr:last-child td{border-botto
   </div>
 
   <div id="tab-performance" data-tab>
-    <div class="card"><h2>PERFORMANCE</h2>
-      <div style="margin-top:18px;font-size:17px">
-        Winrate: <span id="perf-winrate" class="g">--</span><br><br>
-        Avg PnL: <span id="perf-pnl" class="g">--</span><br><br>
-        Signals: <span id="perf-signals">--</span>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h2 style="margin:0">PERFORMANCE</h2>
+        <button id="rebuild-btn" onclick="doRebuild()"
+          style="background:linear-gradient(90deg,#08a98f,#20f0c0);color:#001b18;font-weight:700;
+                 font-size:12px;padding:8px 18px;border:0;border-radius:7px;cursor:pointer">
+          Rebuild Performance
+        </button>
       </div>
+      <div id="rebuild-msg" style="font-size:12px;color:#8fa8c7;margin-bottom:14px;min-height:16px"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div style="background:#0b1320;border:1px solid #17314b;border-radius:10px;padding:14px">
+          <div style="font-size:10px;color:#7fa0c8;letter-spacing:1px;text-transform:uppercase">Win Rate</div>
+          <div id="perf-winrate" style="font-size:28px;font-weight:900;color:#20ff80;margin-top:6px">--</div>
+        </div>
+        <div style="background:#0b1320;border:1px solid #17314b;border-radius:10px;padding:14px">
+          <div style="font-size:10px;color:#7fa0c8;letter-spacing:1px;text-transform:uppercase">Avg PnL / Trade</div>
+          <div id="perf-pnl" style="font-size:28px;font-weight:900;color:#20ff80;margin-top:6px">--</div>
+        </div>
+        <div style="background:#0b1320;border:1px solid #17314b;border-radius:10px;padding:14px">
+          <div style="font-size:10px;color:#7fa0c8;letter-spacing:1px;text-transform:uppercase">Profit Factor</div>
+          <div id="perf-pf" style="font-size:28px;font-weight:900;color:#20e6c3;margin-top:6px">--</div>
+        </div>
+        <div style="background:#0b1320;border:1px solid #17314b;border-radius:10px;padding:14px">
+          <div style="font-size:10px;color:#7fa0c8;letter-spacing:1px;text-transform:uppercase">Avg Risk/Reward</div>
+          <div id="perf-rr" style="font-size:28px;font-weight:900;color:#ffd84d;margin-top:6px">--</div>
+        </div>
+      </div>
+      <div style="margin-top:14px;padding:12px;background:#0b1320;border:1px solid #17314b;border-radius:10px;font-size:13px;color:#8fa8c7">
+        Signals: <span id="perf-signals" style="color:#eaf2ff;font-weight:700">--</span>
+        &nbsp;·&nbsp; Wins: <span id="perf-wins" style="color:#20ff80;font-weight:700">--</span>
+        &nbsp;·&nbsp; Losses: <span id="perf-losses" style="color:#ff4f61;font-weight:700">--</span>
+        &nbsp;·&nbsp; Open: <span id="perf-open" style="color:#20e6c3;font-weight:700">--</span>
+      </div>
+      <div id="perf-rebuilt-at" style="margin-top:8px;font-size:11px;color:#627a99"></div>
     </div>
   </div>
 
@@ -2257,6 +2303,10 @@ async function load(){
   document.getElementById('perf-pnl').textContent=(d.avgpnl>=0?'+':'')+d.avgpnl+'%';
   document.getElementById('perf-signals').textContent=d.signals7d;
   document.getElementById('perf-sum').innerHTML='Win rate: '+d.winrate+'%<br>Avg PnL: '+(d.avgpnl>=0?'+':'')+d.avgpnl+'%';
+  // wins/losses from 7d window
+  document.getElementById('perf-wins').textContent=d.wins??'--';
+  document.getElementById('perf-losses').textContent=d.losses??'--';
+  document.getElementById('perf-open').textContent=d.open_signals??'--';
   const lbH=(d.leaderboard||[]).map(x=>
     '<p><code>'+x.symbol+'</code> <span class="'+(x.avg>=0?'g':'r')+'">'+(x.avg>=0?'+':'')+x.avg+'%</span> ('+x.count+')</p>'
   ).join('');
@@ -2353,6 +2403,56 @@ function showTab(name){
   const n=document.getElementById('nav-'+name);
   if(n)n.classList.add('act');
   if(name==='health'){loadHealth();loadAffiliateStats();}
+  if(name==='performance'){loadPerfDetail();}
+}
+async function loadPerfDetail(){
+  try{
+    const r=await fetch('/api/public/performance');
+    if(!r.ok)return;
+    const d=await r.json();
+    if(d.error)return;
+    document.getElementById('perf-pf').textContent=d.profit_factor;
+    document.getElementById('perf-rr').textContent='1:'+d.avg_rr;
+  }catch(e){}
+}
+async function doRebuild(){
+  const btn=document.getElementById('rebuild-btn');
+  const msg=document.getElementById('rebuild-msg');
+  btn.disabled=true;
+  btn.textContent='Rebuilding…';
+  msg.style.color='#8fa8c7';
+  msg.textContent='Running performance rebuild — please wait…';
+  try{
+    const r=await fetch('/api/performance/rebuild');
+    const d=await r.json();
+    if(d.error){
+      msg.textContent='❌ Error: '+d.error;
+      msg.style.color='#ff4f61';
+    }else{
+      const sc=d.signal_count||{};
+      msg.textContent='✅ Rebuilt '+new Date(d.rebuilt_at).toLocaleTimeString()+
+        ' — '+sc.closed+' closed signals processed';
+      msg.style.color='#20ff80';
+      document.getElementById('perf-winrate').textContent=d.win_rate+'%';
+      const pEl=document.getElementById('perf-pnl');
+      pEl.textContent=(d.avg_pnl>=0?'+':'')+d.avg_pnl+'%';
+      pEl.style.color=d.avg_pnl>=0?'#20ff80':'#ff4f61';
+      document.getElementById('perf-pf').textContent=d.profit_factor;
+      document.getElementById('perf-rr').textContent='1:'+d.avg_rr;
+      document.getElementById('perf-signals').textContent=sc.closed??'--';
+      document.getElementById('perf-wins').textContent=sc.wins??'--';
+      document.getElementById('perf-losses').textContent=sc.losses??'--';
+      document.getElementById('perf-open').textContent=sc.open??'--';
+      document.getElementById('perf-rebuilt-at').textContent=
+        'Last rebuilt: '+new Date(d.rebuilt_at).toLocaleString()+
+        ' · daily_stats: '+d.daily_rows+' rows · weekly_stats: '+d.weekly_rows+' rows';
+    }
+  }catch(e){
+    msg.textContent='❌ Request failed — check console';
+    msg.style.color='#ff4f61';
+  }
+  btn.disabled=false;
+  btn.textContent='Rebuild Performance';
 }
 </script>
 </body>
