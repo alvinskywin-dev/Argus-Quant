@@ -133,6 +133,9 @@ class Settings(BaseSettings):
     # MOCK); placing REAL orders still requires live_trading_enabled=true AND
     # mock_exchange_mode=false. Default off.
     live_trading_api_enabled: bool = False
+    # 20H: mount the ADMIN-only platform oversight API (/api/admin/*). Read-only
+    # aggregation + user moderation; never exposes decrypted credentials. Default off.
+    admin_dashboard_enabled: bool = False
 
     # --- Tier routing ---
     public_min_confidence: float = 75.0

@@ -4383,6 +4383,13 @@ def create_app():
             setup_live(app)
         except Exception as exc:  # noqa: BLE001
             print(f"live trading setup skipped (non-fatal): {exc!r}")
+    # Sprint 20H — mount the ADMIN-only platform oversight API.
+    if settings.admin_dashboard_enabled:
+        try:
+            from app.admin import setup_admin
+            setup_admin(app)
+        except Exception as exc:  # noqa: BLE001
+            print(f"admin dashboard setup skipped (non-fatal): {exc!r}")
     return app
 
 
