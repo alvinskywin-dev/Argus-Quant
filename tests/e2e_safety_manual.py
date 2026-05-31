@@ -35,6 +35,16 @@ async def _register(c, email):
     return {"Authorization": f"Bearer {r.json()['access_token']}"}
 
 
+async def _promote(email):
+    """Force ADMIN role (role is read from the DB per request)."""
+    from sqlalchemy import select
+    from app.database.models import AuthUser
+    async with get_session() as db:
+        u = (await db.execute(
+            select(AuthUser).where(AuthUser.email == email.lower()))).scalar_one()
+        u.role = "ADMIN"
+
+
 async def _open_count(c, h) -> int:
     r = await c.get("/api/paper/account/positions?status=open", headers=h)
     return len(r.json())
@@ -71,8 +81,11 @@ async def main() -> None:
     app = create_app()
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
-        hA = await _register(c, "safeA@example.com")   # first user -> ADMIN
+        hA = await _register(c, "safeA@example.com")
         hB = await _register(c, "safeB@example.com")    # FREE
+        # Promote A to ADMIN explicitly — on the shared dev DB the first-ever
+        # account (not safeA) holds ADMIN, so don't rely on registration order.
+        await _promote("safeA@example.com")
 
         # auto config: BE off so SL is a real loss; all coins; high pos cap
         auto = {"enabled": True, "use_break_even": False, "max_positions": 10,

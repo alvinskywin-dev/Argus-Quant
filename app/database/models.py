@@ -47,7 +47,7 @@ class Signal(Base):
     stop_loss: Mapped[float] = mapped_column(Float)
     risk_reward: Mapped[float] = mapped_column(Float)
 
-    status: Mapped[str] = mapped_column(String(16), default="OPEN")  # OPEN/TP1/TP2/TP3/SL/EXPIRED
+    status: Mapped[str] = mapped_column(String(16), default="OPEN", index=True)  # OPEN/TP1/TP2/TP3/SL/EXPIRED
     pnl_pct: Mapped[float] = mapped_column(Float, default=0.0)
     max_favorable_pct: Mapped[float] = mapped_column(Float, default=0.0)
     max_adverse_pct: Mapped[float] = mapped_column(Float, default=0.0)

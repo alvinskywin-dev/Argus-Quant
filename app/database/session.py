@@ -50,6 +50,9 @@ _SCHEMA_UPGRADES: list[str] = [
     # records which break-even/trailing adjustment has been applied.
     "ALTER TABLE paper_account_positions ADD COLUMN IF NOT EXISTS auto_managed BOOLEAN DEFAULT false",
     "ALTER TABLE paper_account_positions ADD COLUMN IF NOT EXISTS protection VARCHAR(16)",
+    # V11 audit — index signals.status for status-filtered scans (dashboard,
+    # active-signal summary). Non-unique; complements uq_active_signal_symbol.
+    "CREATE INDEX IF NOT EXISTS ix_signals_status ON signals(status)",
 ]
 
 engine = create_async_engine(
