@@ -10,7 +10,8 @@ from pydantic import BaseModel, Field
 
 
 class OpenLiveIn(BaseModel):
-    exchange: str = Field(pattern="^(binance|okx|bybit|bitget)$")
+    # "auto" routes to the user's connected exchange (Signal -> Exchange Adapter).
+    exchange: str = Field(default="auto", pattern="^(auto|binance|okx|bybit|bitget)$")
     symbol: str = Field(min_length=2, max_length=32)
     side: str = Field(pattern="^(LONG|SHORT)$")
     quantity: Optional[float] = Field(default=None, gt=0)

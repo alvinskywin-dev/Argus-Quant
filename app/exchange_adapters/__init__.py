@@ -17,8 +17,10 @@ from app.config import settings
 from app.exchange_adapters.base import ExchangeAdapter
 from app.exchange_adapters.mock import MockExchangeAdapter
 
-# Real (LIVE) adapters by exchange. 20G adds okx/bybit/bitget.
-_LIVE_ADAPTERS = {"binance"}
+# Real (LIVE) adapters by exchange. Future-ready: hyperliquid/mexc/gate/kucoin.
+_LIVE_ADAPTERS = {"binance", "okx", "bybit", "bitget"}
+# Exchanges whose credentials include a passphrase.
+PASSPHRASE_EXCHANGES = ("okx", "bitget")
 
 SUPPORTED_EXCHANGES = ("binance", "okx", "bybit", "bitget")
 
@@ -35,13 +37,26 @@ def resolve_adapter(
     api_secret: Optional[str] = None,
     passphrase: Optional[str] = None,
 ) -> ExchangeAdapter:
-    """Return a LIVE adapter only if the gate is open AND creds are supplied."""
+    """
+    Return a LIVE adapter only if the gate is open AND creds are supplied;
+    otherwise a MockExchangeAdapter. This is the auto-routing target: callers
+    pass the exchange chosen for the signal and get the right adapter back.
+    """
     exchange = exchange.lower()
 
     if live_gate_open() and exchange in _LIVE_ADAPTERS and api_key and api_secret:
         if exchange == "binance":
             from app.exchange_adapters.binance import BinanceFuturesAdapter
             return BinanceFuturesAdapter(api_key, api_secret)
+        if exchange == "okx":
+            from app.exchange_adapters.okx import OKXAdapter
+            return OKXAdapter(api_key, api_secret, passphrase or "")
+        if exchange == "bybit":
+            from app.exchange_adapters.bybit import BybitAdapter
+            return BybitAdapter(api_key, api_secret)
+        if exchange == "bitget":
+            from app.exchange_adapters.bitget import BitgetAdapter
+            return BitgetAdapter(api_key, api_secret, passphrase or "")
 
     # Default, safe path: simulate everything.
     return MockExchangeAdapter(exchange)

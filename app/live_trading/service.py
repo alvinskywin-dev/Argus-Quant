@@ -67,6 +67,23 @@ async def _adapter_for(db: AsyncSession, user_id: int, exchange: str):
         passphrase=creds.get("passphrase"))
 
 
+# ── auto-routing (Signal → Exchange Adapter → Execution) ──────────
+
+async def connected_exchanges(db: AsyncSession, user_id: int) -> list[str]:
+    """Exchanges the user has a CONNECTED vault account for."""
+    return [a.exchange for a in await vault.list_accounts(db, user_id) if a.status == "CONNECTED"]
+
+
+async def route_exchange(db: AsyncSession, user_id: int, preferred: Optional[str] = None) -> str:
+    """Pick the exchange to route an order to: preferred if connected, else the first connected."""
+    connected = await connected_exchanges(db, user_id)
+    if not connected:
+        raise LiveTradingError(400, "No connected exchange to route to. Connect one in the vault first.")
+    if preferred and preferred.lower() in connected:
+        return preferred.lower()
+    return connected[0]
+
+
 # ── open ──────────────────────────────────────────────────────────
 
 async def open_position(
@@ -77,6 +94,8 @@ async def open_position(
     stop_loss: Optional[float] = None, trailing_pct: Optional[float] = None,
 ) -> dict:
     exchange = exchange.lower()
+    if exchange == "auto":
+        exchange = await route_exchange(db, user_id)  # Signal -> Exchange Adapter routing
     symbol = symbol.upper()
     mode = "LIVE" if live_gate_open() else "MOCK"
 

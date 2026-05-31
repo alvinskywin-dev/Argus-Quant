@@ -10,11 +10,18 @@ import asyncio
 
 import pytest
 
+import base64
+import hashlib
+import hmac
+
 from app.config import settings
 from app.exchange_adapters import live_gate_open, resolve_adapter
 from app.exchange_adapters.base import AdapterError, MODE_LIVE, MODE_MOCK
 from app.exchange_adapters.binance import BinanceFuturesAdapter, sign_query
+from app.exchange_adapters.bitget import BitgetAdapter, sign_bitget
+from app.exchange_adapters.bybit import BybitAdapter, sign_bybit
 from app.exchange_adapters.mock import MockExchangeAdapter
+from app.exchange_adapters.okx import OKXAdapter, sign_okx, to_inst_id
 
 
 @pytest.fixture
@@ -112,3 +119,122 @@ def test_mock_adapter_open_close():
                                  take_profit=55000, stop_loss=48000, trailing_pct=1.0)
         assert {r.type for r in tpsl} == {"TAKE_PROFIT_MARKET", "STOP_MARKET", "TRAILING_STOP_MARKET"}
     asyncio.run(run())
+
+
+# ── Sprint 20G: OKX / Bybit / Bitget ──────────────────────────────
+
+# Each exchange signs a different prehash string; these tests lock the exact
+# concatenation order (the #1 source of silent auth failures) by recomputing
+# the expected digest independently from the documented format.
+
+def test_okx_signature_format_and_order():
+    secret, ts = "topsecret", "2026-05-31T00:00:00.000Z"
+    expected = base64.b64encode(
+        hmac.new(secret.encode(), f"{ts}POST/api/v5/trade/order".encode(), hashlib.sha256).digest()
+    ).decode()
+    assert sign_okx(secret, ts, "post", "/api/v5/trade/order", "") == expected
+
+
+def test_bybit_signature_format_and_order():
+    secret, ts, key, rw = "topsecret", "1700000000000", "mykey", "5000"
+    payload = '{"category":"linear"}'
+    expected = hmac.new(secret.encode(), f"{ts}{key}{rw}{payload}".encode(), hashlib.sha256).hexdigest()
+    assert sign_bybit(secret, ts, key, rw, payload) == expected
+
+
+def test_bitget_signature_format_and_order():
+    secret, ts = "topsecret", "1700000000000"
+    expected = base64.b64encode(
+        hmac.new(secret.encode(), f"{ts}GET/api/v2/mix/account/accounts".encode(), hashlib.sha256).digest()
+    ).decode()
+    assert sign_bitget(secret, ts, "get", "/api/v2/mix/account/accounts", "") == expected
+
+
+def test_okx_inst_id_mapping():
+    assert to_inst_id("BTCUSDT") == "BTC-USDT-SWAP"
+    assert to_inst_id("ethusdc") == "ETH-USDC-SWAP"
+
+
+# ── routing: resolve_adapter returns the right LIVE adapter ────────
+
+def test_resolve_routes_to_each_live_adapter(gate):
+    gate.live_trading_enabled = True
+    gate.mock_exchange_mode = False
+    assert isinstance(resolve_adapter("okx", api_key="k", api_secret="s", passphrase="p"), OKXAdapter)
+    assert isinstance(resolve_adapter("bybit", api_key="k", api_secret="s"), BybitAdapter)
+    assert isinstance(resolve_adapter("bitget", api_key="k", api_secret="s", passphrase="p"), BitgetAdapter)
+
+
+def test_resolve_20g_adapters_mock_when_gate_closed(gate):
+    gate.live_trading_enabled = False
+    gate.mock_exchange_mode = True
+    for ex in ("okx", "bybit", "bitget"):
+        a = resolve_adapter(ex, api_key="k", api_secret="s", passphrase="p")
+        assert isinstance(a, MockExchangeAdapter) and a.mode == MODE_MOCK
+
+
+def test_passphrase_threaded_to_okx_and_bitget(gate):
+    gate.live_trading_enabled = True
+    gate.mock_exchange_mode = False
+    assert resolve_adapter("okx", api_key="k", api_secret="s", passphrase="pp")._passphrase == "pp"
+    assert resolve_adapter("bitget", api_key="k", api_secret="s", passphrase="pp")._passphrase == "pp"
+
+
+# ── defense in depth: every 20G adapter guards the gate ────────────
+
+def test_20g_guards_raise_when_gate_closed(gate):
+    gate.live_trading_enabled = False
+    gate.mock_exchange_mode = True
+    for cls in (OKXAdapter, BybitAdapter, BitgetAdapter):
+        with pytest.raises(AdapterError):
+            cls._guard()
+
+
+def test_20g_guards_pass_when_gate_open(gate):
+    gate.live_trading_enabled = True
+    gate.mock_exchange_mode = False
+    OKXAdapter._guard()
+    BybitAdapter._guard()
+    BitgetAdapter._guard()
+
+
+# ── auto-routing (Signal → connected exchange) ────────────────────
+
+class _Acct:
+    def __init__(self, exchange, status="CONNECTED"):
+        self.exchange, self.status = exchange, status
+
+
+def _patch_vault(monkeypatch, accounts):
+    from app.live_trading import service
+
+    async def fake_list_accounts(db, user_id):
+        return accounts
+
+    monkeypatch.setattr(service.vault, "list_accounts", fake_list_accounts)
+    return service
+
+
+def test_route_prefers_connected_match(monkeypatch):
+    service = _patch_vault(monkeypatch, [_Acct("binance"), _Acct("bybit")])
+    assert asyncio.run(service.route_exchange(None, 1, preferred="bybit")) == "bybit"
+
+
+def test_route_falls_back_to_first_connected(monkeypatch):
+    service = _patch_vault(monkeypatch, [_Acct("okx"), _Acct("bybit")])
+    # preferred not connected -> first connected
+    assert asyncio.run(service.route_exchange(None, 1, preferred="binance")) == "okx"
+    # no preference -> first connected
+    assert asyncio.run(service.route_exchange(None, 1)) == "okx"
+
+
+def test_route_ignores_non_connected_accounts(monkeypatch):
+    service = _patch_vault(monkeypatch, [_Acct("okx", status="ERROR"), _Acct("bybit")])
+    assert asyncio.run(service.connected_exchanges(None, 1)) == ["bybit"]
+
+
+def test_route_raises_when_nothing_connected(monkeypatch):
+    service = _patch_vault(monkeypatch, [])
+    with pytest.raises(service.LiveTradingError) as ei:
+        asyncio.run(service.route_exchange(None, 1))
+    assert ei.value.status_code == 400

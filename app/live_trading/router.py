@@ -37,6 +37,20 @@ async def status():
     return GateStatusOut(**service.gate_status())
 
 
+@router.get("/exchanges", response_model=dict)
+async def exchanges(user: AuthUser = Depends(get_current_user)):
+    from app.exchange_adapters import SUPPORTED_EXCHANGES
+    async with get_session() as db:
+        connected = await service.connected_exchanges(db, user.id)
+        routed = connected[0] if connected else None
+        return {
+            "supported": list(SUPPORTED_EXCHANGES),
+            "connected": connected,
+            "auto_routes_to": routed,
+            **service.gate_status(),
+        }
+
+
 @router.get("/balance", response_model=dict)
 async def balance(exchange: str = Query("binance"), user: AuthUser = Depends(get_current_user)):
     try:
