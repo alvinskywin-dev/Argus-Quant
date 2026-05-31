@@ -83,6 +83,23 @@ async def _maybe_open(
     account = await paper.get_or_create_account(db, user_id)
     summary = await paper.account_summary(db, account)
 
+    # Sprint 20E — safety layer runs FIRST (loss limits, correlation caps,
+    # cooldown, loss-streak, kill switches). It can set a timed lockout.
+    if settings.safety_layer_enabled:
+        from app.safety import service as safety
+
+        sdec = await safety.check(
+            db, user_id=user_id, account=account, summary=summary,
+            symbol=signal.symbol, side=signal.side,
+        )
+        if not sdec.allow:
+            await service.log_execution(
+                db, user_id=user_id, action="SKIP", reason=f"safety:{sdec.code}",
+                signal_id=signal.id, account_id=account.id, symbol=signal.symbol,
+                detail=sdec.reason,
+            )
+            return False
+
     decision = evaluate(
         enabled=cfg.enabled,
         symbol=signal.symbol,

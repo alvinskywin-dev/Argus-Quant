@@ -589,6 +589,49 @@ class AutoTradeExecution(Base):
     )
 
 
+# ════════════════════════════════════════════════════════════════════
+#  Sprint 20E — Real Trading Safety Layer (account-destruction guards)
+# ════════════════════════════════════════════════════════════════════
+
+
+class SafetyConfig(Base):
+    """Per-user protective limits applied before any auto open."""
+    __tablename__ = "safety_configs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("auth_users.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    max_daily_loss_pct: Mapped[float] = mapped_column(Float, default=5.0)
+    max_weekly_loss_pct: Mapped[float] = mapped_column(Float, default=15.0)
+    max_open_positions: Mapped[int] = mapped_column(Integer, default=5)
+    max_correlated_positions: Mapped[int] = mapped_column(Integer, default=3)
+    max_leverage: Mapped[int] = mapped_column(Integer, default=20)
+    trade_cooldown_minutes: Mapped[int] = mapped_column(Integer, default=0)
+    loss_streak_limit: Mapped[int] = mapped_column(Integer, default=3)
+    loss_streak_cooldown_hours: Mapped[int] = mapped_column(Integer, default=24)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class SafetyState(Base):
+    """Mutable per-user trading-enabled state (kill switch + timed lockouts)."""
+    __tablename__ = "safety_states"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("auth_users.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    kill_switch: Mapped[bool] = mapped_column(Boolean, default=False)  # user emergency stop
+    disabled_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    disabled_reason: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class SignalMessage(Base):
     __tablename__ = "signal_messages"
 

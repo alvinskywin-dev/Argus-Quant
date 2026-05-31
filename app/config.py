@@ -126,6 +126,9 @@ class Settings(BaseSettings):
     # Distinct from auto_trading_enabled (LIVE, hard-locked false). Per-user
     # opt-in is AutoTradeConfig.enabled / PaperAccount.auto_follow.
     auto_trade_demo_enabled: bool = False
+    # 20E: account-protection layer. On by default — wraps every auto open with
+    # loss limits, correlation caps, cooldown, loss-streak, and kill switches.
+    safety_layer_enabled: bool = True
 
     # --- Tier routing ---
     public_min_confidence: float = 75.0

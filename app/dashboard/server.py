@@ -4368,6 +4368,13 @@ def create_app():
             setup_auto_engine(app)
         except Exception as exc:  # noqa: BLE001
             print(f"auto engine setup skipped (non-fatal): {exc!r}")
+    # Sprint 20E — mount the safety-layer API (loss limits + kill switches).
+    if settings.safety_layer_enabled:
+        try:
+            from app.safety import setup_safety
+            setup_safety(app)
+        except Exception as exc:  # noqa: BLE001
+            print(f"safety layer setup skipped (non-fatal): {exc!r}")
     return app
 
 
