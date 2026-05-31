@@ -4347,6 +4347,13 @@ def create_app():
             setup_auth(app)
         except Exception as exc:  # noqa: BLE001
             print(f"auth setup skipped (non-fatal): {exc!r}")
+    # Sprint 20B — mount the per-user paper-trading API (needs auth to be usable).
+    if settings.paper_trading_enabled:
+        try:
+            from app.paper_engine import setup_paper
+            setup_paper(app)
+        except Exception as exc:  # noqa: BLE001
+            print(f"paper setup skipped (non-fatal): {exc!r}")
     return app
 
 

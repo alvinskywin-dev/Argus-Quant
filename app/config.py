@@ -113,6 +113,13 @@ class Settings(BaseSettings):
     # safety layer, and the API vault are fully validated.
     live_trading_enabled: bool = False
 
+    # --- Sprint 20 V11 platform feature flags ---
+    # Canonical 20B flag (legacy `paper_trading` above stays for back-compat).
+    paper_trading_enabled: bool = True
+    exchange_api_vault_enabled: bool = True   # 20C: encrypted exchange-key vault
+    mock_exchange_mode: bool = True           # adapters simulate fills, no real orders
+    default_demo_balance: float = 10_000.0    # starting virtual balance per account
+
     # --- Tier routing ---
     public_min_confidence: float = 75.0
     vip_min_confidence: float = 85.0

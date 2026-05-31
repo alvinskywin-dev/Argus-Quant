@@ -362,6 +362,118 @@ class LoginHistory(Base):
     )
 
 
+# ════════════════════════════════════════════════════════════════════
+#  Sprint 20B — Per-user paper (demo) futures accounts
+#
+#  Separate from the legacy GLOBAL paper engine (PaperPosition above,
+#  table `paper_positions`), which simulates one portfolio for the whole
+#  bot and feeds the public dashboard. These tables are per-AuthUser.
+# ════════════════════════════════════════════════════════════════════
+
+
+class PaperAccount(Base):
+    """One virtual futures account per SaaS user (default 10,000 USDT)."""
+    __tablename__ = "paper_accounts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("auth_users.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    initial_balance: Mapped[float] = mapped_column(Float, default=10_000.0)
+    balance: Mapped[float] = mapped_column(Float, default=10_000.0)   # realized wallet balance
+    currency: Mapped[str] = mapped_column(String(8), default="USDT")
+    default_leverage: Mapped[int] = mapped_column(Integer, default=10)
+    auto_follow: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class PaperAccountPosition(Base):
+    """An open or closed simulated futures position inside a paper account."""
+    __tablename__ = "paper_account_positions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    account_id: Mapped[int] = mapped_column(
+        ForeignKey("paper_accounts.id", ondelete="CASCADE"), index=True
+    )
+    signal_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("signals.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    side: Mapped[str] = mapped_column(String(8))               # LONG / SHORT
+    entry_price: Mapped[float] = mapped_column(Float)
+    quantity: Mapped[float] = mapped_column(Float)             # base-asset units
+    notional_usdt: Mapped[float] = mapped_column(Float)        # entry position value
+    leverage: Mapped[int] = mapped_column(Integer, default=10)
+    margin_usdt: Mapped[float] = mapped_column(Float)          # locked isolated margin
+    liquidation_price: Mapped[float] = mapped_column(Float, default=0.0)
+    stop_loss: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    tp1: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    tp2: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    tp3: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="OPEN")  # OPEN/CLOSED/LIQUIDATED
+    realized_pnl_usdt: Mapped[float] = mapped_column(Float, default=0.0)
+    funding_usdt: Mapped[float] = mapped_column(Float, default=0.0)
+    opened_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PaperOrder(Base):
+    """A simulated order. Market orders fill immediately; limit orders rest as NEW."""
+    __tablename__ = "paper_orders"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    account_id: Mapped[int] = mapped_column(
+        ForeignKey("paper_accounts.id", ondelete="CASCADE"), index=True
+    )
+    position_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("paper_account_positions.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    side: Mapped[str] = mapped_column(String(8))              # LONG / SHORT
+    order_type: Mapped[str] = mapped_column(String(8), default="MARKET")  # MARKET / LIMIT
+    price: Mapped[float] = mapped_column(Float, default=0.0)
+    quantity: Mapped[float] = mapped_column(Float, default=0.0)
+    notional_usdt: Mapped[float] = mapped_column(Float, default=0.0)
+    reduce_only: Mapped[bool] = mapped_column(Boolean, default=False)
+    status: Mapped[str] = mapped_column(String(12), default="NEW")  # NEW/FILLED/CANCELLED/REJECTED
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    filled_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PaperTrade(Base):
+    """Realized close record — the per-account trade history / PnL ledger."""
+    __tablename__ = "paper_trades"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    account_id: Mapped[int] = mapped_column(
+        ForeignKey("paper_accounts.id", ondelete="CASCADE"), index=True
+    )
+    position_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    signal_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    side: Mapped[str] = mapped_column(String(8))
+    entry_price: Mapped[float] = mapped_column(Float)
+    exit_price: Mapped[float] = mapped_column(Float)
+    quantity: Mapped[float] = mapped_column(Float)
+    notional_usdt: Mapped[float] = mapped_column(Float)
+    leverage: Mapped[int] = mapped_column(Integer, default=10)
+    pnl_usdt: Mapped[float] = mapped_column(Float, default=0.0)
+    pnl_pct: Mapped[float] = mapped_column(Float, default=0.0)     # ROE = pnl / margin
+    funding_usdt: Mapped[float] = mapped_column(Float, default=0.0)
+    reason: Mapped[str] = mapped_column(String(16), default="MANUAL")  # TP1/2/3/SL/MANUAL/LIQUIDATION
+    opened_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    closed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
 class SignalMessage(Base):
     __tablename__ = "signal_messages"
 
