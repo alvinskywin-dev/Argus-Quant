@@ -4475,6 +4475,12 @@ def create_app():
             setup_admin(app)
         except Exception as exc:  # noqa: BLE001
             print(f"admin dashboard setup skipped (non-fatal): {exc!r}")
+    # V12 — mount the SaaS portal shell at /app (static; APIs stay flag-gated).
+    try:
+        from app.dashboard.saas_app import setup_saas_app
+        setup_saas_app(app)
+    except Exception as exc:  # noqa: BLE001
+        print(f"saas portal setup skipped (non-fatal): {exc!r}")
     return app
 
 
@@ -4864,6 +4870,7 @@ th{color:#8fa8c7;font-size:11px;letter-spacing:1px}tr:last-child td{border-botto
     <div><h1>ALPHA RADAR SIGNALS</h1><div class="sub">Admin Dashboard</div></div>
     <div style="display:flex;align-items:center;gap:12px">
       <div id="last-update" style="color:#7fa0c8;font-size:12px">Updating...</div>
+      <a href="/app" style="color:#20f0c0;font-size:13px;text-decoration:none;font-weight:700">Portal V12 ▸</a>
       <a href="/" style="color:#8fa8c7;font-size:13px;text-decoration:none">Public Site</a>
       <a href="/logout" style="color:#8fa8c7;font-size:13px;text-decoration:none">Logout</a>
       <span class="live">LIVE</span>
