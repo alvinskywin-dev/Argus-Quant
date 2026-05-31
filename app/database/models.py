@@ -271,6 +271,97 @@ class OpenInterestSnapshot(Base):
     )
 
 
+# ════════════════════════════════════════════════════════════════════
+#  Sprint 20A — Multi-user SaaS auth
+#
+#  NOTE: these tables are intentionally separate from the legacy
+#  telegram-keyed `users`/`User` table above. The SaaS account is keyed
+#  by an auto-increment id with an email/password identity, and can be
+#  optionally bridged to a telegram subscriber via `telegram_user_id`.
+# ════════════════════════════════════════════════════════════════════
+
+
+class AuthUser(Base):
+    """A multi-user SaaS account (email + password identity)."""
+    __tablename__ = "auth_users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    username: Mapped[Optional[str]] = mapped_column(String(64), unique=True, nullable=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+
+    role: Mapped[str] = mapped_column(String(16), default="FREE")       # ADMIN / PREMIUM / FREE
+    status: Mapped[str] = mapped_column(String(16), default="ACTIVE")   # ACTIVE / SUSPENDED / PENDING
+    is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # 2FA (TOTP)
+    totp_secret: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    totp_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Optional bridge to the existing telegram subscriber identity
+    telegram_user_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True, index=True)
+
+    # Account lockout / login tracking
+    failed_login_count: Mapped[int] = mapped_column(Integer, default=0)
+    locked_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class AuthSession(Base):
+    """A refresh-token-backed login session for one device."""
+    __tablename__ = "auth_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("auth_users.id", ondelete="CASCADE"), index=True
+    )
+    refresh_token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)  # sha256 hex
+    ip: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    device: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)  # user-agent
+    revoked: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class AuthToken(Base):
+    """One-time token for email verification or password reset."""
+    __tablename__ = "auth_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("auth_users.id", ondelete="CASCADE"), index=True
+    )
+    kind: Mapped[str] = mapped_column(String(16))     # VERIFY / RESET
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)  # sha256 hex
+    used: Mapped[bool] = mapped_column(Boolean, default=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class LoginHistory(Base):
+    """Immutable record of every login attempt (success or failure)."""
+    __tablename__ = "login_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("auth_users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    email: Mapped[str] = mapped_column(String(255), index=True)
+    ip: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    device: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    success: Mapped[bool] = mapped_column(Boolean, default=False)
+    detail: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
 class SignalMessage(Base):
     __tablename__ = "signal_messages"
 

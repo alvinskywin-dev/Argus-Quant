@@ -106,6 +106,13 @@ class Settings(BaseSettings):
     auto_trading_max_position_pct: float = 2.0
     auto_trading_daily_loss_limit_pct: float = 5.0
 
+    # --- Live Trading master safety gate (Sprint 20D-20G) ---
+    # Global kill switch for REAL order execution. When false, every exchange
+    # adapter MUST run in MOCK mode and place no real orders, even if a user
+    # has connected valid API keys. Default false until paper trading, the
+    # safety layer, and the API vault are fully validated.
+    live_trading_enabled: bool = False
+
     # --- Tier routing ---
     public_min_confidence: float = 75.0
     vip_min_confidence: float = 85.0
@@ -125,6 +132,26 @@ class Settings(BaseSettings):
     funding_extreme_positive: float = 0.0008
     funding_extreme_negative: float = -0.0008
     funding_weight: int = 10
+
+    # --- Sprint 20A: Auth / User accounts (SaaS, feature-flagged) ---
+    auth_enabled: bool = False
+    jwt_secret: str = ""                     # falls back to secret_key if blank
+    jwt_algorithm: str = "HS256"
+    access_token_ttl_min: int = 30
+    refresh_token_ttl_days: int = 14
+    bcrypt_rounds: int = 12
+    email_verification_required: bool = True
+    account_lockout_threshold: int = 5       # failed logins before temporary lock
+    account_lockout_minutes: int = 15
+    app_base_url: str = "http://localhost:8010"
+    auth_issuer: str = "Alpha Radar Signals"
+    # SMTP (optional — if smtp_host is blank, emails are logged, never sent)
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = "no-reply@alpharadar.local"
+    smtp_tls: bool = True
 
     # --- Sprint 17: Liquidity Engine ---
     enable_liquidity_engine: bool = False
@@ -164,6 +191,15 @@ class Settings(BaseSettings):
     @property
     def redis_url(self) -> str:
         return f"redis://{self.redis_host}:{self.redis_port}/0"
+
+    @property
+    def jwt_signing_key(self) -> str:
+        """JWT signing key: dedicated jwt_secret, else the global secret_key."""
+        return (self.jwt_secret or self.secret_key or "").strip()
+
+    @property
+    def smtp_configured(self) -> bool:
+        return bool(self.smtp_host.strip())
 
     @field_validator("min_confidence")
     @classmethod

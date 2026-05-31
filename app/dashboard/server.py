@@ -4340,6 +4340,13 @@ document.addEventListener('DOMContentLoaded', renderAll);
 
 
 def create_app():
+    # Sprint 20A — mount the multi-user auth API only when feature-flagged on.
+    if settings.auth_enabled:
+        try:
+            from app.auth import setup_auth
+            setup_auth(app)
+        except Exception as exc:  # noqa: BLE001
+            print(f"auth setup skipped (non-fatal): {exc!r}")
     return app
 
 
