@@ -129,6 +129,10 @@ class Settings(BaseSettings):
     # 20E: account-protection layer. On by default — wraps every auto open with
     # loss limits, correlation caps, cooldown, loss-streak, and kill switches.
     safety_layer_enabled: bool = True
+    # 20F: mount the /api/live API. This only EXPOSES the endpoints (usable in
+    # MOCK); placing REAL orders still requires live_trading_enabled=true AND
+    # mock_exchange_mode=false. Default off.
+    live_trading_api_enabled: bool = False
 
     # --- Tier routing ---
     public_min_confidence: float = 75.0

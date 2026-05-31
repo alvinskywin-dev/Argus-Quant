@@ -4375,6 +4375,14 @@ def create_app():
             setup_safety(app)
         except Exception as exc:  # noqa: BLE001
             print(f"safety layer setup skipped (non-fatal): {exc!r}")
+    # Sprint 20F — mount the live-trading API (Binance). Exposing it is gated by
+    # LIVE_TRADING_API_ENABLED; REAL orders still need the execution gate.
+    if settings.live_trading_api_enabled:
+        try:
+            from app.live_trading import setup_live
+            setup_live(app)
+        except Exception as exc:  # noqa: BLE001
+            print(f"live trading setup skipped (non-fatal): {exc!r}")
     return app
 
 

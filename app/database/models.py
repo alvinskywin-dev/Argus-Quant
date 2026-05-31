@@ -632,6 +632,105 @@ class SafetyState(Base):
     )
 
 
+# ════════════════════════════════════════════════════════════════════
+#  Sprint 20F — Live trading (Binance USDT-M Futures)
+#
+#  These rows record real OR simulated execution; the `mode` column is
+#  "LIVE" only when the live-trading gate was open at execution time,
+#  otherwise "MOCK". No real order is placed unless mode == "LIVE".
+# ════════════════════════════════════════════════════════════════════
+
+
+class LiveOrder(Base):
+    __tablename__ = "live_orders"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("auth_users.id", ondelete="CASCADE"), index=True
+    )
+    exchange: Mapped[str] = mapped_column(String(16))
+    exchange_order_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    side: Mapped[str] = mapped_column(String(8))            # BUY / SELL
+    order_type: Mapped[str] = mapped_column(String(24))     # MARKET/LIMIT/STOP_MARKET/...
+    price: Mapped[float] = mapped_column(Float, default=0.0)
+    quantity: Mapped[float] = mapped_column(Float, default=0.0)
+    filled_qty: Mapped[float] = mapped_column(Float, default=0.0)
+    avg_price: Mapped[float] = mapped_column(Float, default=0.0)
+    reduce_only: Mapped[bool] = mapped_column(Boolean, default=False)
+    status: Mapped[str] = mapped_column(String(20), default="NEW")
+    mode: Mapped[str] = mapped_column(String(8), default="MOCK")   # MOCK / LIVE
+    error: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
+class LivePosition(Base):
+    __tablename__ = "live_positions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("auth_users.id", ondelete="CASCADE"), index=True
+    )
+    exchange: Mapped[str] = mapped_column(String(16))
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    side: Mapped[str] = mapped_column(String(8))            # LONG / SHORT
+    quantity: Mapped[float] = mapped_column(Float)
+    entry_price: Mapped[float] = mapped_column(Float)
+    leverage: Mapped[int] = mapped_column(Integer, default=1)
+    margin_type: Mapped[str] = mapped_column(String(10), default="isolated")
+    status: Mapped[str] = mapped_column(String(12), default="OPEN")  # OPEN / CLOSED
+    realized_pnl: Mapped[float] = mapped_column(Float, default=0.0)
+    mode: Mapped[str] = mapped_column(String(8), default="MOCK")
+    opened_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class LiveTrade(Base):
+    __tablename__ = "live_trades"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("auth_users.id", ondelete="CASCADE"), index=True
+    )
+    position_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    exchange: Mapped[str] = mapped_column(String(16))
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    side: Mapped[str] = mapped_column(String(8))
+    entry_price: Mapped[float] = mapped_column(Float)
+    exit_price: Mapped[float] = mapped_column(Float)
+    quantity: Mapped[float] = mapped_column(Float)
+    leverage: Mapped[int] = mapped_column(Integer, default=1)
+    pnl_usdt: Mapped[float] = mapped_column(Float, default=0.0)
+    mode: Mapped[str] = mapped_column(String(8), default="MOCK")
+    opened_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    closed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
+class LiveAuditLog(Base):
+    """Audit trail: every order, fill, error, and rejection."""
+    __tablename__ = "live_audit_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("auth_users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    exchange: Mapped[str] = mapped_column(String(16))
+    symbol: Mapped[str] = mapped_column(String(32), default="")
+    action: Mapped[str] = mapped_column(String(24))   # OPEN/CLOSE/LEVERAGE/TP_SL/ERROR/REJECT
+    result: Mapped[str] = mapped_column(String(16))   # OK / FAIL / REJECTED
+    mode: Mapped[str] = mapped_column(String(8), default="MOCK")
+    detail: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
 class SignalMessage(Base):
     __tablename__ = "signal_messages"
 

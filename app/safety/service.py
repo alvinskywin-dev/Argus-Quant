@@ -234,6 +234,23 @@ async def check(
     return SafetyDecision(True, "ok", "ok")
 
 
+async def trading_blocked(db: AsyncSession, user_id: int) -> Optional[str]:
+    """
+    Lightweight gate reusable by LIVE trading (Sprint 20F): checks the global
+    emergency stop, the user kill switch, and any active timed lockout. Returns
+    a reason string if blocked, else None. Does not evaluate loss limits (those
+    need an account context and are applied in the demo engine's full check()).
+    """
+    if await get_global_kill(db):
+        return "global emergency stop active"
+    state = await get_or_create_state(db, user_id)
+    if state.kill_switch:
+        return "kill switch enabled"
+    if state.disabled_until and state.disabled_until > _now():
+        return f"trading disabled until {state.disabled_until:%Y-%m-%d %H:%M} UTC ({state.disabled_reason})"
+    return None
+
+
 # ── status (for API) ──────────────────────────────────────────────
 
 async def status(db: AsyncSession, user_id: int, account: PaperAccount) -> dict:
