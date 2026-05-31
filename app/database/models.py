@@ -416,6 +416,9 @@ class PaperAccountPosition(Base):
     status: Mapped[str] = mapped_column(String(16), default="OPEN")  # OPEN/CLOSED/LIQUIDATED
     realized_pnl_usdt: Mapped[float] = mapped_column(Float, default=0.0)
     funding_usdt: Mapped[float] = mapped_column(Float, default=0.0)
+    # Sprint 20D — managed by the auto-trading engine + protection state.
+    auto_managed: Mapped[bool] = mapped_column(Boolean, default=False)
+    protection: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)  # BREAK_EVEN/TRAILING
     opened_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )
@@ -529,6 +532,58 @@ class ExchangeAuditLog(Base):
     result: Mapped[str] = mapped_column(String(16))    # OK / FAIL / REJECTED
     detail: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     ip: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
+# ════════════════════════════════════════════════════════════════════
+#  Sprint 20D — Auto Trading Engine (DEMO MODE ONLY — paper accounts)
+# ════════════════════════════════════════════════════════════════════
+
+
+class AutoTradeConfig(Base):
+    """Per-user auto-trading settings for the demo engine."""
+    __tablename__ = "auto_trade_configs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("auth_users.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)        # Auto Trade ON/OFF
+    max_positions: Mapped[int] = mapped_column(Integer, default=5)
+    max_leverage: Mapped[int] = mapped_column(Integer, default=10)        # Allowed Leverage
+    risk_per_trade_pct: Mapped[float] = mapped_column(Float, default=1.0)
+    allowed_exchanges: Mapped[str] = mapped_column(String(128), default="")  # csv, "" = any
+    allowed_coins: Mapped[str] = mapped_column(String(512), default="")      # csv base coins, "" = any
+    min_confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    order_type: Mapped[str] = mapped_column(String(8), default="MARKET")  # MARKET / LIMIT
+    # Protection
+    use_break_even: Mapped[bool] = mapped_column(Boolean, default=True)
+    break_even_trigger: Mapped[str] = mapped_column(String(8), default="TP1")  # TP1/TP2
+    use_trailing_stop: Mapped[bool] = mapped_column(Boolean, default=False)
+    trailing_distance_pct: Mapped[float] = mapped_column(Float, default=1.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class AutoTradeExecution(Base):
+    """Audit/statistics record for every auto-engine decision and action."""
+    __tablename__ = "auto_trade_executions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("auth_users.id", ondelete="CASCADE"), index=True
+    )
+    signal_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    account_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    position_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    symbol: Mapped[str] = mapped_column(String(32), default="")
+    action: Mapped[str] = mapped_column(String(16))   # OPEN/SKIP/CLOSE/BREAK_EVEN/TRAIL
+    reason: Mapped[str] = mapped_column(String(64), default="")
+    detail: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )

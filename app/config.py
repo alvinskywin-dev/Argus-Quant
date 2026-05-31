@@ -122,6 +122,10 @@ class Settings(BaseSettings):
     # AES-256 master key for the exchange-credential vault (20C).
     # Blank -> derived from secret_key. Rotating this invalidates stored keys.
     vault_master_key: str = ""
+    # 20D: global gate for the DEMO auto-trading engine (paper accounts only).
+    # Distinct from auto_trading_enabled (LIVE, hard-locked false). Per-user
+    # opt-in is AutoTradeConfig.enabled / PaperAccount.auto_follow.
+    auto_trade_demo_enabled: bool = False
 
     # --- Tier routing ---
     public_min_confidence: float = 75.0

@@ -46,6 +46,10 @@ _SCHEMA_UPGRADES: list[str] = [
     "ALTER TABLE signals ADD COLUMN IF NOT EXISTS regime_score INTEGER",
     "ALTER TABLE archive_signals ADD COLUMN IF NOT EXISTS market_regime VARCHAR(32)",
     "ALTER TABLE archive_signals ADD COLUMN IF NOT EXISTS regime_score INTEGER",
+    # Sprint 20D — auto-trading engine marks the positions it manages, and
+    # records which break-even/trailing adjustment has been applied.
+    "ALTER TABLE paper_account_positions ADD COLUMN IF NOT EXISTS auto_managed BOOLEAN DEFAULT false",
+    "ALTER TABLE paper_account_positions ADD COLUMN IF NOT EXISTS protection VARCHAR(16)",
 ]
 
 engine = create_async_engine(

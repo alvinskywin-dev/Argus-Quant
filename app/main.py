@@ -200,6 +200,15 @@ class App:
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"paper position open failed #{persisted.id}: {exc}")
 
+        # Sprint 20D — demo auto-trading: open per-user paper positions for
+        # opted-in users. Feature-flagged + isolated; never blocks broadcast.
+        if settings.auto_trade_demo_enabled:
+            try:
+                from app.auto_engine.engine import on_new_signal
+                await on_new_signal(persisted.id)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"auto-engine open failed #{persisted.id}: {exc}")
+
         try:
             sent_messages = await self.bot.broadcast_signal(sig)
         except Exception as exc:  # noqa: BLE001
@@ -242,6 +251,19 @@ class App:
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(f"paper position update failed ({event}): {exc}")
+
+            # Sprint 20D — manage demo auto-trading positions (break-even /
+            # trailing / close) for the same signal event.
+            if settings.auto_trade_demo_enabled:
+                try:
+                    from app.auto_engine.engine import on_signal_event as auto_event
+                    await auto_event(
+                        signal_id = int(payload["signal_id"]),
+                        event     = event,
+                        pnl_pct   = float(payload.get("pnl_pct") or 0),
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(f"auto-engine update failed ({event}): {exc}")
 
     async def _run_dashboard(self) -> None:
         cfg = uvicorn.Config(

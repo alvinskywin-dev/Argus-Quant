@@ -4361,6 +4361,13 @@ def create_app():
             setup_exchange_vault(app)
         except Exception as exc:  # noqa: BLE001
             print(f"exchange vault setup skipped (non-fatal): {exc!r}")
+    # Sprint 20D — mount the demo auto-trading config/status API.
+    if settings.auto_trade_demo_enabled:
+        try:
+            from app.auto_engine import setup_auto_engine
+            setup_auto_engine(app)
+        except Exception as exc:  # noqa: BLE001
+            print(f"auto engine setup skipped (non-fatal): {exc!r}")
     return app
 
 
