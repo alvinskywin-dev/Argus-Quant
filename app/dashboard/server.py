@@ -1696,6 +1696,65 @@ async def metrics():
     return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
 
 
+@app.get("/api/system/metrics")
+async def api_system_metrics():
+    """System-level signal metrics for monitoring and external integrations."""
+    try:
+        async with SessionLocal() as session:
+            total_res = await session.execute(
+                select(_sqlfunc.count(Signal.id))
+                .where(
+                    Signal.strategy == _MTF_STRATEGY,
+                    Signal.timeframe.in_(_MTF_TIMEFRAMES),
+                )
+            )
+            signals_total = int(total_res.scalar() or 0)
+
+            open_res = await session.execute(
+                select(_sqlfunc.count(Signal.id))
+                .where(
+                    Signal.strategy == _MTF_STRATEGY,
+                    Signal.timeframe.in_(_MTF_TIMEFRAMES),
+                    Signal.status == "OPEN",
+                )
+            )
+            open_signals = int(open_res.scalar() or 0)
+
+            closed_res = await session.execute(
+                select(_sqlfunc.count(Signal.id))
+                .where(
+                    Signal.strategy == _MTF_STRATEGY,
+                    Signal.timeframe.in_(_MTF_TIMEFRAMES),
+                    Signal.status.in_(["TP1", "TP2", "TP3", "SL"]),
+                )
+            )
+            closed_signals = int(closed_res.scalar() or 0)
+
+            wins_res = await session.execute(
+                select(_sqlfunc.count(Signal.id))
+                .where(
+                    Signal.strategy == _MTF_STRATEGY,
+                    Signal.timeframe.in_(_MTF_TIMEFRAMES),
+                    Signal.status.in_(["TP1", "TP2", "TP3"]),
+                )
+            )
+            wins = int(wins_res.scalar() or 0)
+
+        winrate_closed = round(wins / closed_signals * 100, 1) if closed_signals > 0 else None
+
+        return JSONResponse({
+            "ok": True,
+            "signals_total": signals_total,
+            "open_signals": open_signals,
+            "closed_signals": closed_signals,
+            "winrate_closed": winrate_closed,
+            "universe": len(universe.symbols),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
 # ── admin API (requires auth) ─────────────────────────────────────
 
 @app.get("/api/prices")

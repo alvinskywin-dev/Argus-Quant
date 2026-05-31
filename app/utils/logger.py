@@ -19,12 +19,33 @@ from app.config import settings
 _INITIALIZED = False
 
 
+def _add_file_sink(path: str, **kwargs) -> bool:
+    """Try to add a file sink; warn and return False on permission errors."""
+    try:
+        logger.add(path, **kwargs)
+        return True
+    except (PermissionError, OSError) as exc:
+        print(
+            f"WARNING: cannot open log file {path!r}: {exc} — "
+            "file logging disabled for this sink, stdout only",
+            file=sys.stderr,
+        )
+        return False
+
+
 def setup_logging() -> None:
     global _INITIALIZED
     if _INITIALIZED:
         return
 
-    Path(settings.log_dir).mkdir(parents=True, exist_ok=True)
+    try:
+        Path(settings.log_dir).mkdir(parents=True, exist_ok=True)
+    except (PermissionError, OSError) as exc:
+        print(
+            f"WARNING: cannot create log directory {settings.log_dir!r}: {exc} — "
+            "file logging disabled, stdout only",
+            file=sys.stderr,
+        )
 
     logger.remove()
 
@@ -38,7 +59,7 @@ def setup_logging() -> None:
     retention = f"{settings.log_retention_days} days"
     max_size = f"{settings.log_max_size_mb} MB"
 
-    # stdout
+    # stdout — always succeeds
     logger.add(
         sys.stdout,
         level=settings.log_level.upper(),
@@ -49,7 +70,7 @@ def setup_logging() -> None:
     )
 
     # master app log — configurable retention & size
-    logger.add(
+    _add_file_sink(
         os.path.join(settings.log_dir, "app.log"),
         level=settings.log_level.upper(),
         format=fmt,
@@ -61,7 +82,7 @@ def setup_logging() -> None:
 
     # errors-only log — always keep 30 days regardless of setting
     errors_retention = f"{max(30, settings.log_retention_days)} days"
-    logger.add(
+    _add_file_sink(
         os.path.join(settings.log_dir, "errors.log"),
         level="ERROR",
         format=fmt,
@@ -81,7 +102,7 @@ def setup_logging() -> None:
         "websocket.log": "app.market_data.ws_engine",
     }
     for filename, module_prefix in _subsystems.items():
-        logger.add(
+        _add_file_sink(
             os.path.join(settings.log_dir, filename),
             level="DEBUG",
             format=fmt,
