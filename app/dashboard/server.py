@@ -4354,6 +4354,13 @@ def create_app():
             setup_paper(app)
         except Exception as exc:  # noqa: BLE001
             print(f"paper setup skipped (non-fatal): {exc!r}")
+    # Sprint 20C — mount the encrypted exchange-credential vault API.
+    if settings.exchange_api_vault_enabled:
+        try:
+            from app.exchange_vault import setup_exchange_vault
+            setup_exchange_vault(app)
+        except Exception as exc:  # noqa: BLE001
+            print(f"exchange vault setup skipped (non-fatal): {exc!r}")
     return app
 
 

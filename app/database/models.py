@@ -474,6 +474,66 @@ class PaperTrade(Base):
     )
 
 
+# ════════════════════════════════════════════════════════════════════
+#  Sprint 20C — Exchange API credential vault
+#
+#  Secrets are stored ONLY as AES-256-GCM ciphertext. Withdrawal-enabled
+#  keys are rejected at connect time and never persisted.
+# ════════════════════════════════════════════════════════════════════
+
+
+class ExchangeAccount(Base):
+    __tablename__ = "exchange_accounts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("auth_users.id", ondelete="CASCADE"), index=True
+    )
+    exchange: Mapped[str] = mapped_column(String(16))   # binance / okx / bybit / bitget
+    label: Mapped[str] = mapped_column(String(64), default="default")
+
+    # Encrypted credentials (base64 nonce+ciphertext). Never plaintext.
+    encrypted_api_key: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    encrypted_api_secret: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    encrypted_passphrase: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Non-sensitive display hint (last 4 chars of the API key).
+    api_key_last4: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
+
+    status: Mapped[str] = mapped_column(String(16), default="PENDING")  # CONNECTED/DISCONNECTED/ERROR
+    can_trade: Mapped[bool] = mapped_column(Boolean, default=False)
+    can_futures: Mapped[bool] = mapped_column(Boolean, default=False)
+    can_withdraw: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_error: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    last_test: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "exchange", "label", name="uq_exchange_account"),
+    )
+
+
+class ExchangeAuditLog(Base):
+    """Audit trail for vault actions (connect/test/disconnect)."""
+    __tablename__ = "exchange_audit_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("auth_users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    exchange: Mapped[str] = mapped_column(String(16))
+    action: Mapped[str] = mapped_column(String(24))    # CONNECT/TEST/DISCONNECT/REJECT
+    result: Mapped[str] = mapped_column(String(16))    # OK / FAIL / REJECTED
+    detail: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    ip: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
 class SignalMessage(Base):
     __tablename__ = "signal_messages"
 

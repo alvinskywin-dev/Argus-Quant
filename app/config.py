@@ -119,6 +119,9 @@ class Settings(BaseSettings):
     exchange_api_vault_enabled: bool = True   # 20C: encrypted exchange-key vault
     mock_exchange_mode: bool = True           # adapters simulate fills, no real orders
     default_demo_balance: float = 10_000.0    # starting virtual balance per account
+    # AES-256 master key for the exchange-credential vault (20C).
+    # Blank -> derived from secret_key. Rotating this invalidates stored keys.
+    vault_master_key: str = ""
 
     # --- Tier routing ---
     public_min_confidence: float = 75.0
@@ -207,6 +210,11 @@ class Settings(BaseSettings):
     @property
     def smtp_configured(self) -> bool:
         return bool(self.smtp_host.strip())
+
+    @property
+    def vault_key_material(self) -> str:
+        """Master secret for the exchange vault: dedicated key, else secret_key."""
+        return (self.vault_master_key or self.secret_key or "").strip()
 
     @field_validator("min_confidence")
     @classmethod
