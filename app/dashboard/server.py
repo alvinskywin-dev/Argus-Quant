@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Plai
 from sqlalchemy import func as _sqlfunc, select, desc
 
 from app.config import settings
-from app.database.session import SessionLocal
+from app.database.session import SessionLocal, get_session
 from app.database.models import FundingRateSnapshot, Signal, AffiliateClick, OpenInterestSnapshot, PaperPosition
 from app.database.repo import get_active_signals_summary, ACTIVE_STATUSES
 from app.market_data import universe
@@ -1891,6 +1891,91 @@ async def admin_index(request: Request):
     if not _is_logged_in(request):
         return RedirectResponse("/login", status_code=302)
     return HTMLResponse(_ADMIN_HTML)
+
+
+# ── Sprint 20H — SaaS platform admin (HTML page + cookie-gated JSON) ──────
+# The page is served behind the existing dashboard cookie login and reads the
+# multi-user SaaS tables through app.admin.service (the same aggregation the
+# JWT /api/admin/* API uses). Credentials are never exposed (last4 only).
+
+@app.get("/admin/platform", response_class=HTMLResponse)
+async def admin_platform_page(request: Request):
+    if not _is_logged_in(request):
+        return RedirectResponse("/login", status_code=302)
+    return HTMLResponse(_PLATFORM_ADMIN_HTML)
+
+
+@app.get("/api/saas-admin/overview")
+async def saas_admin_overview(request: Request):
+    if not _is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        from app.admin import service as admin_service
+        async with get_session() as db:
+            return JSONResponse(await admin_service.overview(db))
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+@app.get("/api/saas-admin/users")
+async def saas_admin_users(request: Request, limit: int = 100, offset: int = 0,
+                           status: str = "", role: str = ""):
+    if not _is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        from app.admin import service as admin_service
+        async with get_session() as db:
+            return JSONResponse(await admin_service.list_users(
+                db, limit=limit, offset=offset,
+                status=status or None, role=role or None))
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+@app.get("/api/saas-admin/users/{user_id}")
+async def saas_admin_user_detail(request: Request, user_id: int):
+    if not _is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        from app.admin import service as admin_service
+        async with get_session() as db:
+            return JSONResponse(await admin_service.user_detail(db, user_id))
+    except admin_service.AdminError as exc:
+        return JSONResponse({"error": exc.detail}, status_code=exc.status_code)
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+@app.get("/api/saas-admin/audit")
+async def saas_admin_audit(request: Request, limit: int = 100):
+    if not _is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        from app.admin import service as admin_service
+        async with get_session() as db:
+            return JSONResponse(await admin_service.audit_feed(db, limit=limit))
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+@app.post("/api/saas-admin/users/{user_id}/status")
+async def saas_admin_set_status(request: Request, user_id: int):
+    if not _is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+        new_status = str(body.get("status", "")).upper()
+        from app.admin import service as admin_service
+        async with get_session() as db:
+            # admin_id=0: the dashboard operator is not a SaaS user, so the
+            # self-suspend guard never applies here.
+            result = await admin_service.set_user_status(
+                db, admin_id=0, user_id=user_id, status=new_status)
+        return JSONResponse(result)
+    except admin_service.AdminError as exc:
+        return JSONResponse({"error": exc.detail}, status_code=exc.status_code)
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"error": str(exc)}, status_code=500)
 
 
 # ── public homepage ───────────────────────────────────────────────
@@ -4551,6 +4636,178 @@ document.addEventListener('click',e=>{const m=document.getElementById('lang-menu
 </html>
 """
 
+_PLATFORM_ADMIN_HTML = """\
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>SaaS Platform — ALPHA RADAR SIGNALS</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#070b12;color:#eaf2ff;font-family:Inter,Arial,sans-serif}
+.top{display:flex;justify-content:space-between;align-items:center;padding:20px 28px;border-bottom:1px solid #13263a;background:linear-gradient(180deg,#08111c,#07101a)}
+h1{margin:0;color:#22e6c3;font-size:22px;letter-spacing:1px}.sub{color:#8fa8c7;font-size:12px;margin-top:3px}
+a.lnk{color:#8fa8c7;font-size:13px;text-decoration:none;margin-left:16px}a.lnk:hover{color:#20e6c3}
+.main{padding:24px 28px;max-width:1280px;margin:0 auto}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.card{background:linear-gradient(180deg,#101827,#0b1320);border:1px solid #17314b;border-radius:13px;padding:18px}
+.label{color:#7fa0c8;font-size:11px;letter-spacing:1px;text-transform:uppercase}
+.num{font-size:28px;font-weight:900;margin-top:8px}.small{font-size:12px;color:#8fa8c7;margin-top:6px}
+.g{color:#20ff80}.r{color:#ff4f61}.c{color:#20e6c3}.y{color:#ffd84d}
+h2{font-size:14px;letter-spacing:1px;color:#fff;margin:28px 0 12px;text-transform:uppercase}
+.panel{background:#0b1320;border:1px solid #17314b;border-radius:13px;overflow:hidden}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:10px 14px;border-bottom:1px solid #17283d;font-size:13px;white-space:nowrap}
+th{color:#8fa8c7;font-size:11px;letter-spacing:1px;text-transform:uppercase}tr:last-child td{border-bottom:none}
+tbody tr:hover{background:#0f2030}
+.pill{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:700}
+.pill.ADMIN{background:#3a2a08;color:#ffd84d}.pill.PREMIUM{background:#08303a;color:#20e6c3}.pill.FREE{background:#1a2433;color:#9fb6d4}
+.pill.ACTIVE{background:#073d2a;color:#20ff80}.pill.SUSPENDED{background:#3a1118;color:#ff7b8a}.pill.PENDING{background:#33240a;color:#ffd84d}
+.pill.LIVE{background:#3a1118;color:#ff7b8a}.pill.MOCK{background:#08303a;color:#20e6c3}
+button{border:0;border-radius:7px;padding:6px 11px;font-size:12px;font-weight:700;cursor:pointer;margin-right:5px}
+.btn-sus{background:#3a1118;color:#ff7b8a}.btn-act{background:#073d2a;color:#20ff80}.btn-view{background:#13263a;color:#9fd0ff}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%}.dot.on{background:#20ff80;box-shadow:0 0 8px #20ff80}.dot.off{background:#3a4a5e}
+#detail{position:fixed;inset:0;background:#000a;display:none;place-items:center;z-index:50}
+#detail.show{display:grid}
+.modal{width:min(720px,92vw);max-height:86vh;overflow:auto;background:#0b1320;border:1px solid #17314b;border-radius:14px;padding:24px}
+.modal h3{margin:0 0 4px;color:#22e6c3}.kv{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #15263a;font-size:13px}.kv span:first-child{color:#8fa8c7}
+.close{float:right;cursor:pointer;color:#8fa8c7;font-size:20px;line-height:1}
+.err{background:#3a1118;color:#ff7b8a;padding:10px 14px;border-radius:9px;margin:14px 0;display:none}
+.muted{color:#627a99;font-size:12px}
+@media(max-width:900px){.grid{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+<div class="top">
+  <div><h1>SaaS Platform Oversight</h1><div class="sub">Multi-user admin · read-only aggregation · credentials never exposed</div></div>
+  <div><span id="ts" class="muted">loading…</span><a class="lnk" href="/admin">◂ Admin</a><a class="lnk" href="/logout">Logout</a></div>
+</div>
+<div class="main">
+  <div id="err" class="err"></div>
+  <div class="grid" id="cards"></div>
+
+  <h2>Users</h2>
+  <div class="panel"><table>
+    <thead><tr><th>ID</th><th>Email</th><th>Role</th><th>Status</th><th>Verified</th><th>Exch</th><th>Auto</th><th>Kill</th><th>Last login</th><th>Actions</th></tr></thead>
+    <tbody id="users"><tr><td colspan="10" class="muted" style="padding:18px">Loading…</td></tr></tbody>
+  </table></div>
+
+  <h2>Recent Live Audit</h2>
+  <div class="panel"><table>
+    <thead><tr><th>When</th><th>User</th><th>Exchange</th><th>Symbol</th><th>Action</th><th>Result</th><th>Mode</th></tr></thead>
+    <tbody id="audit"><tr><td colspan="7" class="muted" style="padding:18px">Loading…</td></tr></tbody>
+  </table></div>
+</div>
+
+<div id="detail" onclick="if(event.target.id==='detail')closeDetail()">
+  <div class="modal"><span class="close" onclick="closeDetail()">×</span><div id="detailBody"></div></div>
+</div>
+
+<script>
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function pill(v){return '<span class="pill '+esc(v)+'">'+esc(v)+'</span>';}
+function dot(b){return '<span class="dot '+(b?'on':'off')+'"></span>';}
+function fmtTs(s){if(!s)return '—';try{return new Date(s).toLocaleString();}catch(e){return s;}}
+function showErr(m){var e=document.getElementById('err');e.textContent=m;e.style.display='block';}
+
+async function getJSON(u,opts){
+  const r=await fetch(u,Object.assign({credentials:'same-origin'},opts||{}));
+  if(r.status===401){location.href='/login';return null;}
+  const d=await r.json();
+  if(!r.ok){throw new Error(d.error||('HTTP '+r.status));}
+  return d;
+}
+
+function entries(o){return Object.entries(o||{}).map(([k,v])=>k+': '+v).join(', ')||'—';}
+
+async function loadOverview(){
+  const o=await getJSON('/api/saas-admin/overview');
+  if(!o)return;
+  document.getElementById('ts').textContent='updated '+fmtTs(o.generated_at);
+  const cards=[
+    ['Total Users','<span class="c">'+o.users.total+'</span>',entries(o.users.by_role)],
+    ['Connected Exchanges','<span class="g">'+o.exchange_accounts.connected+'</span>',entries(o.exchange_accounts.by_exchange)],
+    ['Open Positions','<span class="y">'+o.positions.open_total+'</span>','LIVE '+o.positions.open_live+' · MOCK '+o.positions.open_mock],
+    ['Realized PnL (USDT)','<span class="'+(o.realized_pnl_usdt>=0?'g':'r')+'">'+o.realized_pnl_usdt+'</span>','across all live trades'],
+    ['Auto-Trading Users','<span class="c">'+o.auto_trading_enabled_users+'</span>','users with auto enabled'],
+    ['Active Kill Switches','<span class="'+(o.user_kill_switches_active?'r':'g')+'">'+o.user_kill_switches_active+'</span>','per-user emergency stops'],
+    ['Global Kill',''+(o.global_kill?'<span class="r">ON</span>':'<span class="g">OFF</span>'),'platform emergency stop'],
+    ['Live Gate',''+(o.live_gate_open?'<span class="r">OPEN</span>':'<span class="g">CLOSED</span>'),o.live_gate_open?'REAL orders possible':'MOCK only — safe'],
+  ];
+  document.getElementById('cards').innerHTML=cards.map(c=>
+    '<div class="card"><div class="label">'+c[0]+'</div><div class="num">'+c[1]+'</div><div class="small">'+esc(c[2])+'</div></div>').join('');
+}
+
+async function loadUsers(){
+  const d=await getJSON('/api/saas-admin/users?limit=500');
+  if(!d)return;
+  const tb=document.getElementById('users');
+  if(!d.users.length){tb.innerHTML='<tr><td colspan="10" class="muted" style="padding:18px">No users yet.</td></tr>';return;}
+  tb.innerHTML=d.users.map(u=>{
+    const act=u.status==='SUSPENDED'
+      ? '<button class="btn-act" onclick="setStatus('+u.id+",'ACTIVE')\">Activate</button>"
+      : '<button class="btn-sus" onclick="setStatus('+u.id+",'SUSPENDED')\">Suspend</button>";
+    return '<tr><td>'+u.id+'</td><td>'+esc(u.email)+'</td><td>'+pill(u.role)+'</td><td>'+pill(u.status)+'</td>'+
+      '<td>'+dot(u.is_verified)+'</td><td>'+u.connected_exchanges+'</td><td>'+dot(u.auto_trading)+'</td>'+
+      '<td>'+(u.kill_switch?'<span class="r">●</span>':dot(false))+'</td><td class="muted">'+fmtTs(u.last_login_at)+'</td>'+
+      '<td><button class="btn-view" onclick="viewUser('+u.id+')">View</button>'+act+'</td></tr>';
+  }).join('');
+}
+
+async function loadAudit(){
+  const rows=await getJSON('/api/saas-admin/audit?limit=50');
+  if(!rows)return;
+  const tb=document.getElementById('audit');
+  if(!rows.length){tb.innerHTML='<tr><td colspan="7" class="muted" style="padding:18px">No live audit rows.</td></tr>';return;}
+  tb.innerHTML=rows.map(r=>'<tr><td class="muted">'+fmtTs(r.created_at)+'</td><td>'+(r.user_id==null?'—':r.user_id)+'</td>'+
+    '<td>'+esc(r.exchange)+'</td><td>'+esc(r.symbol||'—')+'</td><td>'+esc(r.action)+'</td>'+
+    '<td class="'+(r.result==='OK'?'g':(r.result==='REJECTED'?'y':'r'))+'">'+esc(r.result)+'</td><td>'+pill(r.mode)+'</td></tr>').join('');
+}
+
+async function viewUser(id){
+  try{
+    const d=await getJSON('/api/saas-admin/users/'+id);
+    if(!d)return;
+    const p=d.profile;
+    let h='<h3>'+esc(p.email)+'</h3><div class="muted">id '+p.id+' · '+esc(p.username||'no username')+'</div>';
+    h+='<div class="kv"><span>Role</span><span>'+pill(p.role)+'</span></div>';
+    h+='<div class="kv"><span>Status</span><span>'+pill(p.status)+'</span></div>';
+    h+='<div class="kv"><span>Verified / 2FA</span><span>'+dot(p.is_verified)+' / '+dot(p.totp_enabled)+'</span></div>';
+    h+='<div class="kv"><span>Last login</span><span>'+fmtTs(p.last_login_at)+'</span></div>';
+    h+='<div class="kv"><span>Created</span><span>'+fmtTs(p.created_at)+'</span></div>';
+    h+='<h2 style="margin:18px 0 8px">Exchange Accounts</h2>';
+    h+=(d.exchange_accounts.length?d.exchange_accounts.map(a=>
+      '<div class="kv"><span>'+esc(a.exchange)+' / '+esc(a.label)+' '+pill(a.status)+'</span><span class="muted">••••'+esc(a.api_key_last4||'????')+
+      ' · trade '+dot(a.can_trade)+' fut '+dot(a.can_futures)+' wd '+dot(a.can_withdraw)+'</span></div>').join('')
+      :'<div class="muted">None connected.</div>');
+    h+='<h2 style="margin:18px 0 8px">Auto-Trade</h2>';
+    h+=(d.auto_trade?'<div class="kv"><span>Enabled '+dot(d.auto_trade.enabled)+'</span><span class="muted">maxPos '+d.auto_trade.max_positions+' · maxLev '+d.auto_trade.max_leverage+'x · risk '+d.auto_trade.risk_per_trade_pct+'% · minConf '+d.auto_trade.min_confidence+'</span></div>':'<div class="muted">No config.</div>');
+    h+='<h2 style="margin:18px 0 8px">Open Positions ('+d.open_positions.length+')</h2>';
+    h+=(d.open_positions.length?d.open_positions.map(o=>
+      '<div class="kv"><span>'+esc(o.symbol)+' '+esc(o.side)+' '+pill(o.mode)+'</span><span class="muted">qty '+o.quantity+' @ '+o.entry_price+' · '+o.leverage+'x · '+esc(o.exchange)+'</span></div>').join('')
+      :'<div class="muted">None open.</div>');
+    document.getElementById('detailBody').innerHTML=h;
+    document.getElementById('detail').classList.add('show');
+  }catch(e){showErr(e.message);}
+}
+function closeDetail(){document.getElementById('detail').classList.remove('show');}
+
+async function setStatus(id,status){
+  if(!confirm((status==='SUSPENDED'?'Suspend':'Activate')+' user '+id+'?'))return;
+  try{
+    await getJSON('/api/saas-admin/users/'+id+'/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:status})});
+    await loadUsers();await loadOverview();
+  }catch(e){showErr(e.message);}
+}
+
+async function refresh(){try{await loadOverview();await loadUsers();await loadAudit();}catch(e){showErr(e.message);}}
+refresh();
+setInterval(loadOverview,30000);
+</script>
+</body>
+</html>
+"""
+
+
 _ADMIN_HTML = """\
 <!doctype html>
 <html>
@@ -4598,6 +4855,7 @@ th{color:#8fa8c7;font-size:11px;letter-spacing:1px}tr:last-child td{border-botto
     <div id="nav-leaderboard" onclick="showTab('leaderboard')">Leaderboard</div>
     <div id="nav-settings" onclick="showTab('settings')">Settings</div>
     <div id="nav-health" onclick="showTab('health')">Health</div>
+    <div id="nav-platform" onclick="location.href='/admin/platform'">SaaS Platform ▸</div>
   </div>
   <div class="status"><b>Bot Status</b><p class="ok">● All Systems Operational</p><p style="color:#8fa8c7;margin-top:6px">Database OK<br>Redis OK<br>Telegram OK<br>Scanner OK</p></div>
 </aside>
