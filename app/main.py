@@ -172,6 +172,10 @@ class App:
                 "structure_score":sig.get("structure_score"),
                 "setup_score":    sig.get("setup_score"),
                 "entry_score":    sig.get("entry_score"),
+                # Sprint 16A — signal diagnostics
+                "diagnostics":    sig.get("diagnostics"),
+                # Sprint 16C — dynamic RR method
+                "rr_method":      sig.get("rr_method"),
             })
         except Exception as exc:  # noqa: BLE001
             logger.exception(f"💾 persist signal FAILED {sig.get('symbol')}: {exc}")

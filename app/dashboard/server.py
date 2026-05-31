@@ -486,6 +486,51 @@ async def api_public_signal(signal_id: int):
         return JSONResponse({"error": str(exc)}, status_code=500)
 
 
+@app.get("/api/public/diagnostics/{signal_id}")
+async def api_public_diagnostics(signal_id: int):
+    """
+    Sprint 16A — Return full diagnostics for a signal.
+    Includes per-layer scores, funding/OI/liquidity scores, and RR method.
+    """
+    import json as _json
+    try:
+        async with SessionLocal() as session:
+            sig = await session.get(Signal, signal_id)
+        if sig is None:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        diag: dict = {}
+        if sig.diagnostics:
+            try:
+                diag = _json.loads(sig.diagnostics)
+            except Exception:
+                diag = {}
+        return JSONResponse({
+            "signal_id":  signal_id,
+            "symbol":     sig.symbol,
+            "side":       sig.side,
+            "confidence": round(float(sig.confidence or 0), 1),
+            "rr_method":  sig.rr_method or "atr",
+            "diagnostics": diag,
+        })
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+@app.get("/api/public/winrate-analysis")
+async def api_public_winrate_analysis():
+    """
+    Sprint 16B — Auto winrate analyzer.
+    Returns win rates broken down by side, confidence, RR, timeframe,
+    funding classification, and OI direction.
+    """
+    try:
+        from app.analytics.winrate import compute_winrate_analysis
+        result = await compute_winrate_analysis()
+        return JSONResponse(result)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
 @app.get("/api/public/languages")
 async def api_public_languages():
     """List of all supported UI languages with code and native name."""

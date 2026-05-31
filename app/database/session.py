@@ -35,6 +35,12 @@ _SCHEMA_UPGRADES: list[str] = [
     """CREATE UNIQUE INDEX IF NOT EXISTS uq_active_signal_symbol
        ON signals(symbol)
        WHERE status IN ('OPEN', 'ACTIVE', 'PENDING')""",
+    # Sprint 16A — signal diagnostics JSON
+    "ALTER TABLE signals ADD COLUMN IF NOT EXISTS diagnostics TEXT",
+    "ALTER TABLE archive_signals ADD COLUMN IF NOT EXISTS diagnostics TEXT",
+    # Sprint 16C — dynamic RR method tracking
+    "ALTER TABLE signals ADD COLUMN IF NOT EXISTS rr_method VARCHAR(32)",
+    "ALTER TABLE archive_signals ADD COLUMN IF NOT EXISTS rr_method VARCHAR(32)",
 ]
 
 engine = create_async_engine(

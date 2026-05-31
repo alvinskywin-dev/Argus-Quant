@@ -12,11 +12,19 @@ Per-symbol pipeline:
 
 Rejection diagnostics are printed for every filtered symbol.
 A full scan summary is printed at the end of every cycle.
+
+Sprint 16A: diagnostics object built and attached to each signal.
+Sprint 16C: dynamic RR selection (atr / structure / liquidity).
+Sprint 17:  optional liquidity sweep engine (ENABLE_LIQUIDITY_ENGINE=true).
+Sprint 18:  adaptive threshold cycle runs after every full scan.
 """
 from __future__ import annotations
 
 import asyncio
-from typing import Awaitable, Callable, Dict, List, Optional
+import json
+from typing import Awaitable, Callable, Dict, List, Optional, Tuple
+
+import pandas as pd
 
 from app.ai_scoring import MTFDecision, MTFRejection, evaluate_pipeline
 from app.config import settings
@@ -64,15 +72,17 @@ class MarketScanner:
     def __init__(self, on_signal: SignalCallback, concurrency: int = 12) -> None:
         self.on_signal = on_signal
         self.sem = asyncio.Semaphore(concurrency)
-        # Keep for startup report compatibility
         self.timeframes: List[str] = list(MTF_TIMEFRAMES)
         self.primary_tf: str = "15m"
 
-    async def _snap_for(self, symbol: str, tf: str) -> Optional[FeatureSnapshot]:
+    async def _snap_for(
+        self, symbol: str, tf: str
+    ) -> Tuple[Optional[FeatureSnapshot], Optional[pd.DataFrame]]:
+        """Fetch klines and build a FeatureSnapshot. Returns (snap, raw_df)."""
         df = await fetch_klines(symbol, tf, limit=250)
         if df.empty:
-            return None
-        return build_snapshot(symbol, tf, df)
+            return None, None
+        return build_snapshot(symbol, tf, df), df
 
     async def _analyze_symbol(self, symbol: str) -> Optional[dict]:
         """
@@ -83,10 +93,13 @@ class MarketScanner:
         """
         async with self.sem:
             snaps: Dict[str, FeatureSnapshot] = {}
+            dfs: Dict[str, pd.DataFrame] = {}
             for tf in MTF_TIMEFRAMES:
-                s = await self._snap_for(symbol, tf)
-                if s is not None:
-                    snaps[tf] = s
+                snap, df = await self._snap_for(symbol, tf)
+                if snap is not None:
+                    snaps[tf] = snap
+                    if df is not None:
+                        dfs[tf] = df
 
             # ── MTF pipeline ────────────────────────────────────────────
             decision, rejection = evaluate_pipeline(snaps)
@@ -106,7 +119,6 @@ class MarketScanner:
                     "entry":     "Entry failed",
                 }.get(stage, f"{stage.capitalize()} failed")
 
-                # Entry-stage diagnostics: always log factor breakdown for visibility
                 if stage == "entry" and rejection.entry_factors:
                     logger.info(
                         _fmt_entry_diag(
@@ -125,10 +137,9 @@ class MarketScanner:
                     )
                 return {"_DIAG_": True, "stage": stage, "side": side}
 
-            # ── Market quality filters (confidence adjustments + hard rejects) ─
+            # ── Market quality filters ───────────────────────────────────
             primary_snap = snaps["15m"]
 
-            # Log entry diagnostic for every setup that passed the pipeline
             logger.info(
                 _fmt_entry_diag(
                     symbol, decision.side,
@@ -154,8 +165,26 @@ class MarketScanner:
                     "side": decision.side, "conf": decision.confidence,
                 }
 
-            # ── RR check ────────────────────────────────────────────────
-            levels = build_levels(primary_snap, decision.side)
+            # ── Sprint 17: Liquidity Sweep Engine (optional) ─────────────
+            liq_signal = None
+            liquidity_score = 0
+            if settings.enable_liquidity_engine and "15m" in dfs:
+                try:
+                    from app.indicators.liquidity import analyze_liquidity, liquidity_score_for_side
+                    liq_signal = analyze_liquidity(dfs["15m"])
+                    liquidity_score = liquidity_score_for_side(liq_signal, decision.side)
+                    if liquidity_score > 0:
+                        logger.info(
+                            f"💧 {symbol} {decision.side} | "
+                            f"liquidity_score={liquidity_score} "
+                            f"(sweep_up={liq_signal.sweep_up} sweep_down={liq_signal.sweep_down} "
+                            f"eq_h={liq_signal.equal_highs} eq_l={liq_signal.equal_lows})"
+                        )
+                except Exception as exc:
+                    logger.debug(f"liquidity engine failed for {symbol}: {exc}")
+
+            # ── Sprint 16C: Dynamic RR ────────────────────────────────────
+            levels = build_levels(primary_snap, decision.side, liq_signal)
             if levels is None:
                 if settings.log_rejection_detail:
                     logger.info(
@@ -175,8 +204,7 @@ class MarketScanner:
                     "side": decision.side, "rr": levels.risk_reward,
                 }
 
-            # ── Active-signal guard ─────────────────────────────────────
-            # Block any new signal while the same symbol already has an OPEN position.
+            # ── Active-signal guard ──────────────────────────────────────
             if settings.block_same_symbol_while_open:
                 if await has_active_signal(symbol):
                     logger.info(
@@ -201,7 +229,6 @@ class MarketScanner:
                     }
 
             # ── Post-close cooldown ──────────────────────────────────────
-            # Suppress re-entry for the same symbol+side for N hours after TP/SL.
             if settings.signal_duplicate_cooldown_hours > 0:
                 if await in_post_close_cooldown(
                     symbol, decision.side, settings.signal_duplicate_cooldown_hours
@@ -300,47 +327,69 @@ class MarketScanner:
 
             funding_score = funding_fs.score if funding_fs else 0
 
+            # Include liquidity score in confidence adjustment
             adjusted_confidence = round(
-                max(0.0, min(100.0, decision.confidence + oi_score + funding_score)), 1
+                max(0.0, min(100.0, decision.confidence + oi_score + funding_score + (liquidity_score * 0.5))),
+                1,
             )
 
             logger.info(
                 f"✅ SIGNAL  {symbol} {decision.side}  "
                 f"tier={decision.tier}  conf={adjusted_confidence:.1f}%  "
-                f"(base={decision.confidence:.1f} oi={oi_score:+d} funding={funding_score:+d})  "
-                f"rr=1:{levels.risk_reward}  tfs={decision.contributing_tfs}"
+                f"(base={decision.confidence:.1f} oi={oi_score:+d} "
+                f"funding={funding_score:+d} liq={liquidity_score:+d})  "
+                f"rr=1:{levels.risk_reward} method={levels.rr_method}  "
+                f"tfs={decision.contributing_tfs}"
             )
 
+            # ── Sprint 16A: Build diagnostics object ─────────────────────
+            diagnostics = json.dumps({
+                "trend_score":      round(float(decision.trend_score), 1),
+                "structure_score":  round(float(decision.structure_score), 1),
+                "setup_score":      round(float(decision.setup_score), 1),
+                "entry_score":      round(float(decision.entry_score_pts), 1),
+                "funding_score":    funding_score,
+                "oi_score":         oi_score,
+                "liquidity_score":  liquidity_score,
+                "base_confidence":  round(float(decision.confidence), 1),
+                "total_score":      adjusted_confidence,
+                "rr_method":        levels.rr_method,
+                "funding_class":    funding_data.classification if funding_data else None,
+                "tier":             decision.tier,
+            })
+
             return {
-                "symbol":         symbol,
-                "side":           decision.side,
-                "timeframe":      "15m",
-                "confidence":     adjusted_confidence,
-                "risk_level":     decision.risk_level,
-                "strategy":       "MTF_SMC_STRICT",
-                "reasons":        " | ".join(
+                "symbol":          symbol,
+                "side":            decision.side,
+                "timeframe":       "15m",
+                "confidence":      adjusted_confidence,
+                "risk_level":      decision.risk_level,
+                "strategy":        "MTF_SMC_STRICT",
+                "reasons":         " | ".join(
                     r for r in [*decision.reasons[:6], oi_diag, funding_diag] if r
                 ),
-                "entry_low":      levels.entry_low,
-                "entry_high":     levels.entry_high,
-                "tp1":            levels.tp1,
-                "tp2":            levels.tp2,
-                "tp3":            levels.tp3,
-                "stop_loss":      levels.stop_loss,
-                "risk_reward":    levels.risk_reward,
-                "status":         "OPEN",
-                "trend_score":    decision.trend_score,
-                "structure_score":decision.structure_score,
-                "setup_score":    decision.setup_score,
-                "entry_score":    decision.entry_score_pts,
-                "_snapshot":          primary_snap,
-                "_contributing_tfs":  decision.contributing_tfs,
-                "_detected_at":       utcnow(),
-                "_tier":              decision.tier,
-                "_funding_rate":      funding_data.funding_rate if funding_data else None,
-                "_funding_class":     funding_data.classification if funding_data else None,
-                "_funding_score":     funding_score,
-                "_funding_reason":    funding_fs.reason if funding_fs else "",
+                "entry_low":       levels.entry_low,
+                "entry_high":      levels.entry_high,
+                "tp1":             levels.tp1,
+                "tp2":             levels.tp2,
+                "tp3":             levels.tp3,
+                "stop_loss":       levels.stop_loss,
+                "risk_reward":     levels.risk_reward,
+                "rr_method":       levels.rr_method,
+                "status":          "OPEN",
+                "trend_score":     decision.trend_score,
+                "structure_score": decision.structure_score,
+                "setup_score":     decision.setup_score,
+                "entry_score":     decision.entry_score_pts,
+                "diagnostics":     diagnostics,
+                "_snapshot":           primary_snap,
+                "_contributing_tfs":   decision.contributing_tfs,
+                "_detected_at":        utcnow(),
+                "_tier":               decision.tier,
+                "_funding_rate":       funding_data.funding_rate if funding_data else None,
+                "_funding_class":      funding_data.classification if funding_data else None,
+                "_funding_score":      funding_score,
+                "_funding_reason":     funding_fs.reason if funding_fs else "",
             }
 
     async def scan_once(self) -> int:
@@ -412,6 +461,14 @@ class MarketScanner:
             f"  Emitted:         {emitted}\n"
             f"{'─'*52}"
         )
+
+        # ── Sprint 18: Adaptive threshold cycle ──────────────────────────
+        if settings.adaptive_thresholds:
+            try:
+                from app.adaptive.engine import run_adaptive_cycle
+                await run_adaptive_cycle()
+            except Exception as exc:
+                logger.debug(f"adaptive cycle failed: {exc}")
 
         return emitted
 

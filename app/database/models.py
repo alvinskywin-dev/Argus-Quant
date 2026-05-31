@@ -17,6 +17,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    JSON,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -58,6 +59,12 @@ class Signal(Base):
     structure_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     setup_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     entry_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    # Sprint 16A — full diagnostics object (JSON stored as text)
+    diagnostics: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Sprint 16C — which RR method was selected ("atr" | "structure" | "liquidity")
+    rr_method: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
@@ -181,6 +188,10 @@ class ArchivedSignal(Base):
     structure_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     setup_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     entry_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    # Sprint 16A / 16C — mirrors Signal
+    diagnostics: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    rr_method: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
 
     created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

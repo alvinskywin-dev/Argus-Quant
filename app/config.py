@@ -126,6 +126,14 @@ class Settings(BaseSettings):
     funding_extreme_negative: float = -0.0008
     funding_weight: int = 10
 
+    # --- Sprint 17: Liquidity Engine ---
+    enable_liquidity_engine: bool = False
+
+    # --- Sprint 18: Adaptive Threshold Engine ---
+    adaptive_thresholds: bool = False
+    adaptive_min_trades: int = 50    # minimum closed trades before adapting
+    adaptive_lookback: int = 100     # analyze last N closed trades
+
     # --- Misc ---
     production_start_utc: str = ""
     timezone: str = "UTC"
