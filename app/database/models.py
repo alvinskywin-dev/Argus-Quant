@@ -66,6 +66,10 @@ class Signal(Base):
     # Sprint 16C — which RR method was selected ("atr" | "structure" | "liquidity")
     rr_method: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
 
+    # Sprint 19A — market regime at signal creation time
+    market_regime: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    regime_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )
@@ -192,6 +196,10 @@ class ArchivedSignal(Base):
     # Sprint 16A / 16C — mirrors Signal
     diagnostics: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     rr_method: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+
+    # Sprint 19A — mirrors Signal
+    market_regime: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    regime_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

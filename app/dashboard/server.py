@@ -1314,6 +1314,46 @@ async def api_public_watchlist(symbols: str = ""):
         return JSONResponse({"error": str(exc)}, status_code=500)
 
 
+# ── Sprint 19A: Market Regime ─────────────────────────────────────
+
+@app.get("/api/public/market-regime")
+async def api_public_market_regime():
+    """Current market regime classification and supporting metrics."""
+    try:
+        from app.market_data.market_regime import get_market_regime
+        regime = await get_market_regime()
+        if regime is None:
+            return JSONResponse(
+                {"error": "market regime not yet calculated — try again after the first scan cycle"},
+                status_code=503,
+            )
+        return JSONResponse({
+            "market_regime":   regime.market_regime,
+            "regime_score":    regime.regime_score,
+            "breadth":         regime.breadth_ema200,
+            "breadth_ema50":   regime.breadth_ema50,
+            "btc_trend":       regime.btc_trend,
+            "eth_trend":       regime.eth_trend,
+            "atr_percentile":  regime.atr_percentile,
+            "calculated_at":   regime.calculated_at,
+        })
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+# ── Sprint 19B: Short Protection Analytics ────────────────────────
+
+@app.get("/api/public/short-protection")
+async def api_public_short_protection():
+    """Short protection filter statistics — rejection counts and top reasons."""
+    try:
+        from app.scanner.short_protection import get_short_protection_stats
+        stats = await get_short_protection_stats()
+        return JSONResponse(stats)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
 @app.get("/aff/{exchange}")
 async def affiliate_redirect(exchange: str, request: Request):
     """Track affiliate click then redirect to the affiliate URL."""

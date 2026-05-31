@@ -41,6 +41,11 @@ _SCHEMA_UPGRADES: list[str] = [
     # Sprint 16C — dynamic RR method tracking
     "ALTER TABLE signals ADD COLUMN IF NOT EXISTS rr_method VARCHAR(32)",
     "ALTER TABLE archive_signals ADD COLUMN IF NOT EXISTS rr_method VARCHAR(32)",
+    # Sprint 19A — market regime classification at signal creation time
+    "ALTER TABLE signals ADD COLUMN IF NOT EXISTS market_regime VARCHAR(32)",
+    "ALTER TABLE signals ADD COLUMN IF NOT EXISTS regime_score INTEGER",
+    "ALTER TABLE archive_signals ADD COLUMN IF NOT EXISTS market_regime VARCHAR(32)",
+    "ALTER TABLE archive_signals ADD COLUMN IF NOT EXISTS regime_score INTEGER",
 ]
 
 engine = create_async_engine(

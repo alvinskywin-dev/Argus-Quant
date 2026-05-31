@@ -17,6 +17,8 @@ Sprint 16A: diagnostics object built and attached to each signal.
 Sprint 16C: dynamic RR selection (atr / structure / liquidity).
 Sprint 17:  optional liquidity sweep engine (ENABLE_LIQUIDITY_ENGINE=true).
 Sprint 18:  adaptive threshold cycle runs after every full scan.
+Sprint 19A: market regime engine — classifies BULL/BEAR/SIDEWAYS/HV/LV.
+Sprint 19B: short protection layer — rejects low-quality SHORT signals.
 """
 from __future__ import annotations
 
@@ -33,8 +35,10 @@ from app.database.repo import has_active_signal, in_post_close_cooldown
 from app.database.session import SessionLocal
 from app.market_data import fetch_klines, universe
 from app.market_data.funding import fetch_funding_rate, score_funding_for_side
+from app.market_data.market_regime import ensure_regime_fresh, get_market_regime
 from app.market_data.open_interest import fetch_oi_snapshot
 from app.risk import build_levels, cooldown, passes_market_filters, rate_limiter
+from app.scanner.short_protection import apply_short_protection
 from app.strategies import FeatureSnapshot, build_snapshot
 from app.utils.helpers import utcnow
 from app.utils.logger import logger
@@ -326,23 +330,76 @@ class MarketScanner:
                         logger.debug(f"funding DB save failed for {symbol}: {exc}")
 
             funding_score = funding_fs.score if funding_fs else 0
+            funding_class = funding_data.classification if funding_data else None
 
-            # Include liquidity score in confidence adjustment
+            # ── Base confidence after OI, funding, and liquidity ─────────
             adjusted_confidence = round(
                 max(0.0, min(100.0, decision.confidence + oi_score + funding_score + (liquidity_score * 0.5))),
                 1,
             )
 
+            # ── Sprint 19A: Market regime scoring impact ──────────────────
+            regime = await get_market_regime()
+            regime_delta = 0
+            if regime:
+                rn = regime.market_regime
+                if rn == "BULL":
+                    regime_delta = 5 if decision.side == "LONG" else -10
+                elif rn == "BEAR":
+                    regime_delta = 5 if decision.side == "SHORT" else -10
+                elif rn == "SIDEWAYS":
+                    regime_delta = -5
+                # HIGH_VOLATILITY / LOW_VOLATILITY have no direct delta — handled below
+
+                if regime_delta:
+                    adjusted_confidence = round(
+                        max(0.0, min(100.0, adjusted_confidence + regime_delta)),
+                        1,
+                    )
+
+            # Secondary confidence gate: regime may have pushed us below threshold
+            if adjusted_confidence < settings.min_confidence:
+                if settings.log_rejection_detail:
+                    logger.info(
+                        f"⛔ {symbol} {decision.side} — Regime confidence gate: "
+                        f"conf={adjusted_confidence:.1f}% after regime_delta={regime_delta:+d}"
+                    )
+                return {
+                    "_DIAG_": True, "stage": "confidence",
+                    "side": decision.side, "conf": adjusted_confidence,
+                }
+
+            # ── Sprint 19B: Short protection layer ───────────────────────
+            short_protection = await apply_short_protection(
+                side=decision.side,
+                snaps=snaps,
+                regime=regime,
+                funding_class=funding_class,
+                oi_snap=oi_snap,
+                liquidity_score=liquidity_score,
+                adjusted_confidence=adjusted_confidence,
+            )
+            if not short_protection.passed:
+                logger.info(
+                    f"🛡 SHORT REJECTED {symbol} — {short_protection.rejection_reason}"
+                )
+                return {
+                    "_DIAG_": True, "stage": "short_protection",
+                    "side": decision.side,
+                    "reason": short_protection.rejection_reason,
+                }
+
             logger.info(
                 f"✅ SIGNAL  {symbol} {decision.side}  "
                 f"tier={decision.tier}  conf={adjusted_confidence:.1f}%  "
                 f"(base={decision.confidence:.1f} oi={oi_score:+d} "
-                f"funding={funding_score:+d} liq={liquidity_score:+d})  "
+                f"funding={funding_score:+d} liq={liquidity_score:+d} "
+                f"regime={regime_delta:+d})  "
                 f"rr=1:{levels.risk_reward} method={levels.rr_method}  "
                 f"tfs={decision.contributing_tfs}"
             )
 
-            # ── Sprint 16A: Build diagnostics object ─────────────────────
+            # ── Sprint 16A / 19A: Build diagnostics object ───────────────
             diagnostics = json.dumps({
                 "trend_score":      round(float(decision.trend_score), 1),
                 "structure_score":  round(float(decision.structure_score), 1),
@@ -354,8 +411,15 @@ class MarketScanner:
                 "base_confidence":  round(float(decision.confidence), 1),
                 "total_score":      adjusted_confidence,
                 "rr_method":        levels.rr_method,
-                "funding_class":    funding_data.classification if funding_data else None,
+                "funding_class":    funding_class,
                 "tier":             decision.tier,
+                # Sprint 19A
+                "market_regime":    regime.market_regime if regime else None,
+                "regime_score":     regime.regime_score if regime else None,
+                "regime_delta":     regime_delta,
+                # Sprint 19B
+                "short_protection_pass":    short_protection.passed,
+                "short_rejection_reason":   short_protection.rejection_reason,
             })
 
             return {
@@ -382,12 +446,15 @@ class MarketScanner:
                 "setup_score":     decision.setup_score,
                 "entry_score":     decision.entry_score_pts,
                 "diagnostics":     diagnostics,
+                # Sprint 19A — stored on the Signal row
+                "market_regime":   regime.market_regime if regime else None,
+                "regime_score":    regime.regime_score if regime else None,
                 "_snapshot":           primary_snap,
                 "_contributing_tfs":   decision.contributing_tfs,
                 "_detected_at":        utcnow(),
                 "_tier":               decision.tier,
                 "_funding_rate":       funding_data.funding_rate if funding_data else None,
-                "_funding_class":      funding_data.classification if funding_data else None,
+                "_funding_class":      funding_class,
                 "_funding_score":      funding_score,
                 "_funding_reason":     funding_fs.reason if funding_fs else "",
             }
@@ -397,6 +464,12 @@ class MarketScanner:
         if not symbols:
             logger.warning("symbol universe empty — refresh first")
             return 0
+
+        # Sprint 19A: warm market regime cache before scanning symbols
+        try:
+            await ensure_regime_fresh()
+        except Exception as exc:
+            logger.warning(f"market regime calculation failed: {exc}")
 
         tasks = [self._analyze_symbol(s) for s in symbols]
         emitted = 0
@@ -414,6 +487,7 @@ class MarketScanner:
             "post_close_cooldown": 0,
             "cooldown":        0,
             "rate_limit":      0,
+            "short_protection": 0,
             "error":           0,
         }
 
@@ -457,6 +531,7 @@ class MarketScanner:
             f"  Entry pass:      {entry_pass}\n"
             f"  Confidence pass: {conf_pass}\n"
             f"  RR pass:         {rr_pass}\n"
+            f"  Short rejected:  {c['short_protection']}\n"
             f"  Dup skipped:     {dup_skip}\n"
             f"  Emitted:         {emitted}\n"
             f"{'─'*52}"
