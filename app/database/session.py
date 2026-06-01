@@ -57,6 +57,24 @@ _SCHEMA_UPGRADES: list[str] = [
     "ALTER TABLE exchange_accounts ADD COLUMN IF NOT EXISTS can_read BOOLEAN DEFAULT false",
     "ALTER TABLE exchange_accounts ADD COLUMN IF NOT EXISTS last_validation_status VARCHAR(24)",
     "ALTER TABLE exchange_accounts ADD COLUMN IF NOT EXISTS permission_warning VARCHAR(256)",
+    # ── Sprint 21B/21C — live_positions safety + recovery columns ──
+    "ALTER TABLE live_positions ADD COLUMN IF NOT EXISTS tp_sl_status VARCHAR(16) DEFAULT 'UNKNOWN'",
+    "ALTER TABLE live_positions ADD COLUMN IF NOT EXISTS requires_review BOOLEAN DEFAULT false",
+    "ALTER TABLE live_positions ADD COLUMN IF NOT EXISTS unsafe_reason VARCHAR(256)",
+    "ALTER TABLE live_positions ADD COLUMN IF NOT EXISTS recovered_at TIMESTAMPTZ",
+    "ALTER TABLE live_positions ADD COLUMN IF NOT EXISTS last_reconciled_at TIMESTAMPTZ",
+    # ── Sprint 21 — indexes for the new tables + hot lookups ──
+    "CREATE INDEX IF NOT EXISTS ix_live_positions_user ON live_positions(user_id)",
+    "CREATE INDEX IF NOT EXISTS ix_live_positions_exchange ON live_positions(exchange)",
+    "CREATE INDEX IF NOT EXISTS ix_live_positions_status ON live_positions(status)",
+    "CREATE INDEX IF NOT EXISTS ix_live_orders_position ON live_orders(exchange_order_id)",
+    "CREATE INDEX IF NOT EXISTS ix_live_orders_status ON live_orders(status)",
+    "CREATE INDEX IF NOT EXISTS ix_recon_issues_user ON reconciliation_issues(user_id)",
+    "CREATE INDEX IF NOT EXISTS ix_recon_issues_resolved ON reconciliation_issues(resolved)",
+    "CREATE INDEX IF NOT EXISTS ix_order_failures_user ON order_failures(user_id)",
+    "CREATE INDEX IF NOT EXISTS ix_order_failures_final ON order_failures(final_state)",
+    "CREATE INDEX IF NOT EXISTS ix_trade_acct_user ON live_trade_accounting(user_id)",
+    "CREATE INDEX IF NOT EXISTS ix_daily_pnl_user ON daily_user_pnl(user_id)",
 ]
 
 engine = create_async_engine(
@@ -82,6 +100,16 @@ async def init_db() -> None:
     unique index) require clean data and must be applied manually after a
     deduplication migration has run.
     """
+    # Sprint 21 — register the live-safety models on Base.metadata so
+    # create_all builds their tables. Imported here (not at module load) to
+    # avoid import cycles with app.database.models.
+    try:
+        import app.reconciliation.models  # noqa: F401
+        import app.order_failures.models  # noqa: F401
+        import app.accounting.models      # noqa: F401
+    except Exception as exc:  # noqa: BLE001 — missing optional module is non-fatal
+        logger.warning(f"sprint21 model import skipped: {exc!s:.160}")
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 

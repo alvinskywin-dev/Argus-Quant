@@ -86,6 +86,14 @@ class ExchangeAdapter:
     async def get_positions(self) -> list[PositionInfo]:
         raise NotImplementedError
 
+    async def get_open_orders(self, symbol: Optional[str] = None) -> list[OrderResult]:
+        """
+        Read-only: open (working) orders, optionally for one symbol. Used by the
+        reconciliation (21B) and recovery (21C) engines to detect TP/SL drift.
+        Default returns [] for adapters that do not implement it yet.
+        """
+        return []
+
     async def set_leverage(self, symbol: str, leverage: int) -> None:
         raise NotImplementedError
 

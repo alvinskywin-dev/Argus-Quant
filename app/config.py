@@ -137,6 +137,22 @@ class Settings(BaseSettings):
     # aggregation + user moderation; never exposes decrypted credentials. Default off.
     admin_dashboard_enabled: bool = False
 
+    # --- Sprint 21 — Live Safety Foundation feature flags (all default OFF) ---
+    # These engines are read-only / non-destructive by design; the flags only
+    # gate whether their APIs + startup hooks are active. None of them place,
+    # cancel, or modify real orders except emergency_close (admin-triggered,
+    # reduce-only) which additionally requires the live execution gate.
+    reconciliation_enabled: bool = False        # 21B: DB↔exchange drift detection API
+    position_recovery_enabled: bool = False     # 21C: rebuild state on startup + API
+    order_failure_engine_enabled: bool = False  # 21D: failure tracking + retry policy API
+    accounting_enabled: bool = False            # 21E: net-PnL accounting API
+    emergency_close_enabled: bool = False       # allow reduce-only emergency close action
+    # When >0, a user who hits this many live-order failures inside the window
+    # below has their auto-trading tripped by the circuit breaker.
+    order_failure_breaker_threshold: int = 5
+    order_failure_breaker_window_sec: int = 300
+    tp_sl_retry_max: int = 3                    # TP/SL placement retries before UNSAFE
+
     # --- Tier routing ---
     public_min_confidence: float = 75.0
     vip_min_confidence: float = 85.0

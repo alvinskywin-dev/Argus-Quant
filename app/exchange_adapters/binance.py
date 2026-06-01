@@ -175,6 +175,17 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             out.append(self._to_order(d, symbol, close_side, "TRAILING_STOP_MARKET", True))
         return out
 
+    async def get_open_orders(self, symbol: Optional[str] = None) -> list[OrderResult]:
+        params = {"symbol": symbol} if symbol else None
+        rows = await self._request("GET", "/fapi/v1/openOrders", params)
+        out: list[OrderResult] = []
+        for d in (rows or []):
+            out.append(self._to_order(
+                d, d.get("symbol", symbol or ""), d.get("side", ""),
+                d.get("type", d.get("origType", "MARKET")),
+                str(d.get("reduceOnly", "")).lower() == "true"))
+        return out
+
     async def get_order_status(self, *, symbol: str, order_id: str) -> OrderResult:
         d = await self._request("GET", "/fapi/v1/order", {"symbol": symbol, "orderId": order_id})
         return self._to_order(d, symbol, d.get("side", ""), d.get("type", "MARKET"),

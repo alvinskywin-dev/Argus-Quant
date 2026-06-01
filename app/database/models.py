@@ -684,9 +684,16 @@ class LivePosition(Base):
     entry_price: Mapped[float] = mapped_column(Float)
     leverage: Mapped[int] = mapped_column(Integer, default=1)
     margin_type: Mapped[str] = mapped_column(String(10), default="isolated")
-    status: Mapped[str] = mapped_column(String(12), default="OPEN")  # OPEN / CLOSED
+    # OPEN / CLOSED / RECOVERED / CLOSED_UNKNOWN / UNSAFE
+    status: Mapped[str] = mapped_column(String(16), default="OPEN")
     realized_pnl: Mapped[float] = mapped_column(Float, default=0.0)
     mode: Mapped[str] = mapped_column(String(8), default="MOCK")
+    # Sprint 21B/21C — reconciliation + recovery safety state.
+    tp_sl_status: Mapped[str] = mapped_column(String(16), default="UNKNOWN")  # see recovery.tp_sl
+    requires_review: Mapped[bool] = mapped_column(Boolean, default=False)
+    unsafe_reason: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    recovered_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_reconciled_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     opened_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )
