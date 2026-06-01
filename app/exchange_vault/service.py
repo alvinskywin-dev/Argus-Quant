@@ -17,7 +17,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.models import ExchangeAccount, ExchangeAuditLog
 from app.database.session import SessionLocal
 from app.exchange_vault import crypto
-from app.exchange_vault.adapters import Permissions, get_validator
+from app.exchange_vault.permission_validator import (
+    STATUS_CONNECTED,
+    STATUS_INVALID,
+    STATUS_IP_RESTRICTED,
+    STATUS_PERMISSION_DENIED,
+    STATUS_VALIDATION_UNAVAILABLE,
+    ExchangePermissionResult,
+    validate_permissions,
+)
 from app.utils.logger import logger
 
 
@@ -65,17 +73,23 @@ async def _get(db: AsyncSession, user_id: int, exchange: str, label: str) -> Opt
     return res.scalar_one_or_none()
 
 
-def _enforce_permissions(perms: Permissions) -> None:
-    """Raise VaultError if the key is invalid or not safe to store."""
-    if not perms.valid:
-        raise VaultError(400, perms.message or "Invalid API credentials")
-    if perms.can_withdraw:
-        raise VaultError(403, "Withdrawal-enabled API keys are not allowed. "
-                              "Create a key with trading-only permission.")
-    if not perms.can_trade:
-        raise VaultError(400, "API key lacks trading permission")
-    if not perms.can_futures:
-        raise VaultError(400, "API key lacks futures permission")
+def _status_to_vault_error(r: ExchangePermissionResult) -> VaultError:
+    """Map a non-CONNECTED validation outcome to the right HTTP error."""
+    detail = r.permission_warning or r.error_message or "API key validation failed"
+    if r.status == STATUS_INVALID:
+        return VaultError(400, f"Invalid API credentials. {r.error_message}".strip())
+    if r.status == STATUS_IP_RESTRICTED:
+        return VaultError(403, "API key is IP-restricted and this server's IP is not allowed. "
+                               "Whitelist the server IP or use an unrestricted trade-only key.")
+    if r.status == STATUS_VALIDATION_UNAVAILABLE:
+        return VaultError(503, "Could not validate the API key right now. Please try again. "
+                               f"{r.error_message}".strip())
+    if r.status == STATUS_PERMISSION_DENIED and r.can_withdraw:
+        return VaultError(403, "Withdrawal-enabled API keys are not allowed. "
+                               "Create a key with trading-only permission.")
+    if r.status == STATUS_PERMISSION_DENIED:
+        return VaultError(400, detail)
+    return VaultError(400, detail)
 
 
 # ── connect ───────────────────────────────────────────────────────
@@ -92,18 +106,18 @@ async def connect(
     ip: Optional[str] = None,
 ) -> ExchangeAccount:
     exchange = exchange.lower()
-    try:
-        validator = get_validator(exchange)
-    except (ValueError, NotImplementedError) as exc:
-        raise VaultError(400, str(exc))
 
-    perms = validator.validate(api_key, api_secret, passphrase)
-    try:
-        _enforce_permissions(perms)
-    except VaultError as exc:
-        action = "REJECT" if perms.can_withdraw else "CONNECT"
-        await _audit(db, user_id, exchange, action, "REJECTED", exc.detail, ip)
-        raise
+    # Sprint 21A — real, read-only permission validation BEFORE anything is
+    # stored. A key is only ever persisted as CONNECTED when validation passes
+    # (valid + trade + futures + NOT withdrawal-enabled). Withdrawal-enabled or
+    # invalid keys are rejected and never written to the vault.
+    result = await validate_permissions(exchange, api_key, api_secret, passphrase)
+    if result.status != STATUS_CONNECTED:
+        exc = _status_to_vault_error(result)
+        action = "REJECT" if result.can_withdraw else "CONNECT"
+        await _audit(db, user_id, exchange, action, "REJECTED",
+                     f"{result.status}: {exc.detail}", ip)
+        raise exc
 
     acc = await _get(db, user_id, exchange, label)
     if acc is None:
@@ -116,15 +130,18 @@ async def connect(
     acc.encrypted_passphrase = crypto.encrypt_optional(passphrase)
     acc.api_key_last4 = api_key[-4:]
     acc.status = "CONNECTED"
-    acc.can_trade = perms.can_trade
-    acc.can_futures = perms.can_futures
-    acc.can_withdraw = False  # guaranteed by _enforce_permissions
+    acc.can_read = result.can_read
+    acc.can_trade = result.can_trade
+    acc.can_futures = result.can_futures
+    acc.can_withdraw = False  # guaranteed: a withdraw-enabled key never reaches here
+    acc.last_validation_status = result.status
+    acc.permission_warning = (result.permission_warning or None)
     acc.last_error = None
     acc.last_test = _now()
 
     await db.flush()
     await _audit(db, user_id, exchange, "CONNECT", "OK", f"label={label}", ip)
-    logger.info(f"[vault] connected user={user_id} {exchange}/{label}")
+    logger.info(f"[vault] connected user={user_id} {exchange}/{label} status={result.status}")
     return acc
 
 
@@ -133,7 +150,7 @@ async def connect(
 async def test_connection(
     db: AsyncSession, *, user_id: int, exchange: str, label: str = "default",
     ip: Optional[str] = None,
-) -> tuple[ExchangeAccount, Permissions]:
+) -> tuple[ExchangeAccount, ExchangePermissionResult]:
     exchange = exchange.lower()
     acc = await _get(db, user_id, exchange, label)
     if acc is None or not acc.encrypted_api_key:
@@ -149,26 +166,30 @@ async def test_connection(
         await _audit(db, user_id, exchange, "TEST", "FAIL", str(exc), ip)
         raise VaultError(500, "Stored credentials could not be decrypted")
 
-    perms = get_validator(exchange).validate(api_key, api_secret, passphrase)
+    result = await validate_permissions(exchange, api_key, api_secret, passphrase)
     acc.last_test = _now()
-    acc.can_trade = perms.can_trade
-    acc.can_futures = perms.can_futures
-    acc.can_withdraw = perms.can_withdraw
+    acc.can_read = result.can_read
+    acc.can_trade = result.can_trade
+    acc.can_futures = result.can_futures
+    acc.can_withdraw = bool(result.can_withdraw)   # None (undetectable) -> False
+    acc.last_validation_status = result.status
+    acc.permission_warning = (result.permission_warning or None)
 
-    if not perms.valid:
-        acc.status = "ERROR"
-        acc.last_error = perms.message
-        await _audit(db, user_id, exchange, "TEST", "FAIL", perms.message, ip)
-    elif perms.can_withdraw:
+    if result.status == STATUS_CONNECTED:
+        acc.status = "CONNECTED"
+        acc.last_error = None
+        await _audit(db, user_id, exchange, "TEST", "OK", result.permission_warning or "", ip)
+    elif result.status == STATUS_PERMISSION_DENIED and result.can_withdraw:
         # A previously-safe key gained withdrawal rights — quarantine it.
         acc.status = "ERROR"
         acc.last_error = "withdrawal permission detected"
         await _audit(db, user_id, exchange, "TEST", "REJECTED", "withdrawal enabled", ip)
     else:
-        acc.status = "CONNECTED"
-        acc.last_error = None
-        await _audit(db, user_id, exchange, "TEST", "OK", "", ip)
-    return acc, perms
+        # INVALID / PERMISSION_DENIED / IP_RESTRICTED / VALIDATION_UNAVAILABLE / ERROR
+        acc.status = "ERROR"
+        acc.last_error = (result.error_message or result.permission_warning or result.status)[:256]
+        await _audit(db, user_id, exchange, "TEST", "FAIL", f"{result.status}: {acc.last_error}", ip)
+    return acc, result
 
 
 # ── disconnect ────────────────────────────────────────────────────

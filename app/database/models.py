@@ -503,9 +503,13 @@ class ExchangeAccount(Base):
     api_key_last4: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
 
     status: Mapped[str] = mapped_column(String(16), default="PENDING")  # CONNECTED/DISCONNECTED/ERROR
+    can_read: Mapped[bool] = mapped_column(Boolean, default=False)
     can_trade: Mapped[bool] = mapped_column(Boolean, default=False)
     can_futures: Mapped[bool] = mapped_column(Boolean, default=False)
     can_withdraw: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Sprint 21A — real-permission-validation outcome (see permission_validator).
+    last_validation_status: Mapped[Optional[str]] = mapped_column(String(24), nullable=True)
+    permission_warning: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     last_error: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     last_test: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 

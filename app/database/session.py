@@ -53,6 +53,10 @@ _SCHEMA_UPGRADES: list[str] = [
     # V11 audit — index signals.status for status-filtered scans (dashboard,
     # active-signal summary). Non-unique; complements uq_active_signal_symbol.
     "CREATE INDEX IF NOT EXISTS ix_signals_status ON signals(status)",
+    # ── Sprint 21A — exchange permission validation outcome columns ──
+    "ALTER TABLE exchange_accounts ADD COLUMN IF NOT EXISTS can_read BOOLEAN DEFAULT false",
+    "ALTER TABLE exchange_accounts ADD COLUMN IF NOT EXISTS last_validation_status VARCHAR(24)",
+    "ALTER TABLE exchange_accounts ADD COLUMN IF NOT EXISTS permission_warning VARCHAR(256)",
 ]
 
 engine = create_async_engine(

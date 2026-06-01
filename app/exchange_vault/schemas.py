@@ -29,9 +29,12 @@ class ExchangeAccountOut(BaseModel):
     label: str
     status: str
     api_key_last4: Optional[str]
+    can_read: bool = False
     can_trade: bool
     can_futures: bool
     can_withdraw: bool
+    last_validation_status: Optional[str] = None
+    permission_warning: Optional[str] = None
     last_error: Optional[str]
     last_test: Optional[datetime]
     created_at: Optional[datetime]
@@ -41,10 +44,14 @@ class TestResultOut(BaseModel):
     exchange: str
     label: str
     status: str
+    last_validation_status: Optional[str] = None
+    can_read: bool = False
     can_trade: bool
     can_futures: bool
-    can_withdraw: bool
-    message: str
+    can_withdraw: Optional[bool] = None
+    permission_warning: Optional[str] = None
+    error_code: Optional[str] = None
+    message: str = ""
 
 
 class MessageOut(BaseModel):

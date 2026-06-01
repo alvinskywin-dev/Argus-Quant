@@ -35,9 +35,12 @@ def _account_out(a: ExchangeAccount) -> ExchangeAccountOut:
         label=a.label,
         status=a.status,
         api_key_last4=a.api_key_last4,
+        can_read=a.can_read,
         can_trade=a.can_trade,
         can_futures=a.can_futures,
         can_withdraw=a.can_withdraw,
+        last_validation_status=a.last_validation_status,
+        permission_warning=a.permission_warning,
         last_error=a.last_error,
         last_test=a.last_test,
         created_at=a.created_at,
@@ -67,7 +70,7 @@ async def connect(body: ConnectIn, request: Request, user: AuthUser = Depends(ge
 async def test(body: AccountRef, request: Request, user: AuthUser = Depends(get_current_user)):
     try:
         async with get_session() as db:
-            acc, perms = await service.test_connection(
+            acc, result = await service.test_connection(
                 db, user_id=user.id, exchange=body.exchange,
                 label=body.label, ip=client_ip(request),
             )
@@ -75,10 +78,14 @@ async def test(body: AccountRef, request: Request, user: AuthUser = Depends(get_
                 exchange=acc.exchange,
                 label=acc.label,
                 status=acc.status,
-                can_trade=perms.can_trade,
-                can_futures=perms.can_futures,
-                can_withdraw=perms.can_withdraw,
-                message=perms.message,
+                last_validation_status=result.status,
+                can_read=result.can_read,
+                can_trade=result.can_trade,
+                can_futures=result.can_futures,
+                can_withdraw=result.can_withdraw,
+                permission_warning=result.permission_warning or None,
+                error_code=result.error_code or None,
+                message=result.permission_warning or result.error_message or result.status,
             )
     except service.VaultError as exc:
         return _err(exc)
