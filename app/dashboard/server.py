@@ -4782,21 +4782,45 @@ function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','
 function pill(v){return '<span class="pill '+esc(v)+'">'+esc(v)+'</span>';}
 function dot(b){return '<span class="dot '+(b?'on':'off')+'"></span>';}
 function fmtTs(s){if(!s)return '—';try{return new Date(s).toLocaleString();}catch(e){return s;}}
-function showErr(m){var e=document.getElementById('err');e.textContent=m;e.style.display='block';}
+function showErr(m,kind){var e=document.getElementById('err');e.textContent=m;e.style.display='block';e.style.background=kind==='warn'?'#33240a':'#3a1118';e.style.color=kind==='warn'?'#ffd84d':'#ff7b8a';}
+function clearErr(){var e=document.getElementById('err');e.style.display='none';e.textContent='';}
+
+// status-aware error so every fetch failure becomes a visible message (never infinite loading)
+function HttpError(status,msg){this.status=status;this.message=msg;}
+function authMsg(e){
+  if(!e)return 'Unknown error.';
+  if(e.status===401)return 'Admin login required — your session is missing or expired.';
+  if(e.status===403)return 'Admin permission required — this account cannot view platform oversight.';
+  if(e.status>=500)return 'Backend error: '+(e.message||('HTTP '+e.status));
+  return e.message||'Request failed.';
+}
+function errRow(cols,e){
+  var link=(e&&e.status===401)?' <a class="lnk" href="/login" style="margin-left:6px">Sign in →</a>':'';
+  return '<tr><td colspan="'+cols+'" style="padding:18px;color:#ff7b8a">'+esc(authMsg(e))+link+'</td></tr>';
+}
 
 async function getJSON(u,opts){
-  const r=await fetch(u,Object.assign({credentials:'same-origin'},opts||{}));
-  if(r.status===401){location.href='/login';return null;}
-  const d=await r.json();
-  if(!r.ok){throw new Error(d.error||('HTTP '+r.status));}
+  opts=opts||{};
+  // 12s timeout so a hanging request surfaces as an error instead of loading forever
+  var ctl=new AbortController();
+  var t=setTimeout(function(){ctl.abort();},12000);
+  var r;
+  try{
+    r=await fetch(u,Object.assign({credentials:'include',signal:ctl.signal},opts));
+  }catch(err){
+    throw new HttpError(0, err&&err.name==='AbortError'?'Request timed out — backend not responding.':'Network error — could not reach the server.');
+  }finally{clearTimeout(t);}
+  var d=null;
+  try{ d=await r.json(); }catch(_){ d=null; }   // tolerate non-JSON error bodies (proxy 5xx etc.)
+  if(!r.ok){ throw new HttpError(r.status,(d&&(d.error||d.detail))||('HTTP '+r.status)); }
   return d;
 }
 
 function entries(o){return Object.entries(o||{}).map(([k,v])=>k+': '+v).join(', ')||'—';}
 
 async function loadOverview(){
+ try{
   const o=await getJSON('/api/saas-admin/overview');
-  if(!o)return;
   document.getElementById('ts').textContent='updated '+fmtTs(o.generated_at);
   const cards=[
     ['Total Users','<span class="c">'+o.users.total+'</span>',entries(o.users.by_role)],
@@ -4810,12 +4834,17 @@ async function loadOverview(){
   ];
   document.getElementById('cards').innerHTML=cards.map(c=>
     '<div class="card"><div class="label">'+c[0]+'</div><div class="num">'+c[1]+'</div><div class="small">'+esc(c[2])+'</div></div>').join('');
+ }catch(e){
+  document.getElementById('ts').textContent='—';
+  document.getElementById('cards').innerHTML='<div class="card" style="grid-column:1/-1;border-color:#7a2330"><div class="label" style="color:#ff7b8a">Overview unavailable</div><div class="small" style="color:#ff7b8a;margin-top:8px">'+esc(authMsg(e))+'</div></div>';
+  if(e.status===401||e.status===403)showErr(authMsg(e),'warn');
+ }
 }
 
 async function loadUsers(){
+ const tb=document.getElementById('users');
+ try{
   const d=await getJSON('/api/saas-admin/users?limit=500');
-  if(!d)return;
-  const tb=document.getElementById('users');
   if(!d.users.length){tb.innerHTML='<tr><td colspan="10" class="muted" style="padding:18px">No users yet.</td></tr>';return;}
   tb.innerHTML=d.users.map(u=>{
     const act=u.status==='SUSPENDED'
@@ -4826,22 +4855,23 @@ async function loadUsers(){
       '<td>'+(u.kill_switch?'<span class="r">●</span>':dot(false))+'</td><td class="muted">'+fmtTs(u.last_login_at)+'</td>'+
       '<td><button class="btn-view" onclick="viewUser('+u.id+')">View</button>'+act+'</td></tr>';
   }).join('');
+ }catch(e){ tb.innerHTML=errRow(10,e); if(e.status===401||e.status===403)showErr(authMsg(e),'warn'); }
 }
 
 async function loadAudit(){
+ const tb=document.getElementById('audit');
+ try{
   const rows=await getJSON('/api/saas-admin/audit?limit=50');
-  if(!rows)return;
-  const tb=document.getElementById('audit');
   if(!rows.length){tb.innerHTML='<tr><td colspan="7" class="muted" style="padding:18px">No live audit rows.</td></tr>';return;}
   tb.innerHTML=rows.map(r=>'<tr><td class="muted">'+fmtTs(r.created_at)+'</td><td>'+(r.user_id==null?'—':r.user_id)+'</td>'+
     '<td>'+esc(r.exchange)+'</td><td>'+esc(r.symbol||'—')+'</td><td>'+esc(r.action)+'</td>'+
     '<td class="'+(r.result==='OK'?'g':(r.result==='REJECTED'?'y':'r'))+'">'+esc(r.result)+'</td><td>'+pill(r.mode)+'</td></tr>').join('');
+ }catch(e){ tb.innerHTML=errRow(7,e); if(e.status===401||e.status===403)showErr(authMsg(e),'warn'); }
 }
 
 async function viewUser(id){
   try{
     const d=await getJSON('/api/saas-admin/users/'+id);
-    if(!d)return;
     const p=d.profile;
     let h='<h3>'+esc(p.email)+'</h3><div class="muted">id '+p.id+' · '+esc(p.username||'no username')+'</div>';
     h+='<div class="kv"><span>Role</span><span>'+pill(p.role)+'</span></div>';
@@ -4862,7 +4892,7 @@ async function viewUser(id){
       :'<div class="muted">None open.</div>');
     document.getElementById('detailBody').innerHTML=h;
     document.getElementById('detail').classList.add('show');
-  }catch(e){showErr(e.message);}
+  }catch(e){showErr(authMsg(e),(e.status===401||e.status===403)?'warn':'');}
 }
 function closeDetail(){document.getElementById('detail').classList.remove('show');}
 
@@ -4871,10 +4901,11 @@ async function setStatus(id,status){
   try{
     await getJSON('/api/saas-admin/users/'+id+'/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:status})});
     await loadUsers();await loadOverview();
-  }catch(e){showErr(e.message);}
+  }catch(e){showErr(authMsg(e),(e.status===401||e.status===403)?'warn':'');}
 }
 
-async function refresh(){try{await loadOverview();await loadUsers();await loadAudit();}catch(e){showErr(e.message);}}
+// each loader handles its own errors, so one failing call never blocks the others
+async function refresh(){clearErr();await Promise.allSettled([loadOverview(),loadUsers(),loadAudit()]);}
 refresh();
 setInterval(loadOverview,30000);
 </script>
