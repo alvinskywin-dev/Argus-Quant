@@ -186,6 +186,10 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                 str(d.get("reduceOnly", "")).lower() == "true"))
         return out
 
+    async def cancel_all_orders(self, symbol: str) -> int:
+        await self._request("DELETE", "/fapi/v1/allOpenOrders", {"symbol": symbol})
+        return 1
+
     async def get_order_status(self, *, symbol: str, order_id: str) -> OrderResult:
         d = await self._request("GET", "/fapi/v1/order", {"symbol": symbol, "orderId": order_id})
         return self._to_order(d, symbol, d.get("side", ""), d.get("type", "MARKET"),

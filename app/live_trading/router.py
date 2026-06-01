@@ -17,6 +17,7 @@ from app.database.session import get_session
 from app.live_trading import service
 from app.live_trading.schemas import (
     CloseLiveIn,
+    EmergencyCloseIn,
     GateStatusOut,
     LiveOrderOut,
     LivePositionOut,
@@ -93,6 +94,23 @@ async def set_leverage(body: SetLeverageIn, user: AuthUser = Depends(get_current
         return _err(exc)
 
 
+@router.post("/positions/{position_id}/emergency-close", response_model=dict)
+async def emergency_close(position_id: int, body: EmergencyCloseIn,
+                          user: AuthUser = Depends(get_current_user)):
+    # Confirmation-phrase guard — a deliberate, hard-to-fat-finger action.
+    if body.confirm.strip() != service.EMERGENCY_CONFIRM_PHRASE:
+        return JSONResponse(
+            status_code=400,
+            content={"detail": f'Confirmation required: type exactly "{service.EMERGENCY_CONFIRM_PHRASE}".'})
+    try:
+        async with get_session() as db:
+            return await service.emergency_close_position(
+                db, position_id=position_id, reason=body.reason,
+                actor_user_id=user.id, is_admin=(getattr(user, "role", "") == "ADMIN"))
+    except service.LiveTradingError as exc:
+        return _err(exc)
+
+
 @router.get("/positions", response_model=list[LivePositionOut])
 async def positions(status: str = Query(default=""), user: AuthUser = Depends(get_current_user)):
     async with get_session() as db:
@@ -119,6 +137,9 @@ def _pos_out(p: LivePosition) -> LivePositionOut:
         id=p.id, exchange=p.exchange, symbol=p.symbol, side=p.side, quantity=p.quantity,
         entry_price=p.entry_price, leverage=p.leverage, margin_type=p.margin_type,
         status=p.status, realized_pnl=round(p.realized_pnl, 2), mode=p.mode,
+        tp_sl_status=getattr(p, "tp_sl_status", "UNKNOWN"),
+        requires_review=getattr(p, "requires_review", False),
+        unsafe_reason=getattr(p, "unsafe_reason", None),
         opened_at=p.opened_at, closed_at=p.closed_at)
 
 

@@ -1986,6 +1986,42 @@ async def saas_admin_overview(request: Request):
         return JSONResponse({"error": str(exc)}, status_code=500)
 
 
+@app.get("/api/saas-admin/safety-overview")
+async def saas_admin_safety_overview(request: Request):
+    """Sprint 21 — read-only live-safety snapshot for the admin platform."""
+    if not _is_logged_in(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    out: dict = {"reconciliation": {}, "recovery": {}, "order_failures": {},
+                 "accounting": {}, "live_gate": {}}
+    try:
+        from app.live_trading.service import gate_status
+        out["live_gate"] = gate_status()
+    except Exception as exc:  # noqa: BLE001
+        out["live_gate"] = {"error": str(exc)[:120]}
+    async with get_session() as db:
+        try:
+            from app.reconciliation import report as recon_report
+            out["reconciliation"] = await recon_report.summary(db)
+        except Exception as exc:  # noqa: BLE001
+            out["reconciliation"] = {"error": str(exc)[:120]}
+        try:
+            from app.recovery.status import recovery_status
+            out["recovery"] = await recovery_status(db)
+        except Exception as exc:  # noqa: BLE001
+            out["recovery"] = {"error": str(exc)[:120]}
+        try:
+            from app.order_failures import service as of_service
+            out["order_failures"] = await of_service.summary(db)
+        except Exception as exc:  # noqa: BLE001
+            out["order_failures"] = {"error": str(exc)[:120]}
+        try:
+            from app.accounting import service as acct_service
+            out["accounting"] = await acct_service.summary(db)
+        except Exception as exc:  # noqa: BLE001
+            out["accounting"] = {"error": str(exc)[:120]}
+    return JSONResponse(out)
+
+
 @app.get("/api/saas-admin/users")
 async def saas_admin_users(request: Request, limit: int = 100, offset: int = 0,
                            status: str = "", role: str = ""):
@@ -4544,6 +4580,34 @@ def create_app():
             setup_admin(app)
         except Exception as exc:  # noqa: BLE001
             print(f"admin dashboard setup skipped (non-fatal): {exc!r}")
+    # Sprint 21B — reconciliation engine API (read-only drift detection).
+    if settings.reconciliation_enabled:
+        try:
+            from app.reconciliation import setup_reconciliation
+            setup_reconciliation(app)
+        except Exception as exc:  # noqa: BLE001
+            print(f"reconciliation setup skipped (non-fatal): {exc!r}")
+    # Sprint 21C — position recovery engine API.
+    if settings.position_recovery_enabled:
+        try:
+            from app.recovery import setup_recovery
+            setup_recovery(app)
+        except Exception as exc:  # noqa: BLE001
+            print(f"recovery setup skipped (non-fatal): {exc!r}")
+    # Sprint 21D — order failure / retry engine API.
+    if settings.order_failure_engine_enabled:
+        try:
+            from app.order_failures import setup_order_failures
+            setup_order_failures(app)
+        except Exception as exc:  # noqa: BLE001
+            print(f"order failure engine setup skipped (non-fatal): {exc!r}")
+    # Sprint 21E — net-PnL accounting engine API.
+    if settings.accounting_enabled:
+        try:
+            from app.accounting import setup_accounting
+            setup_accounting(app)
+        except Exception as exc:  # noqa: BLE001
+            print(f"accounting setup skipped (non-fatal): {exc!r}")
     # V12 — mount the SaaS portal shell at /app (static; APIs stay flag-gated).
     try:
         from app.dashboard.saas_app import setup_saas_app

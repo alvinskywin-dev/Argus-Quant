@@ -78,7 +78,10 @@ def test_mock_passphrase_required_for_okx_bitget():
     assert not MockExchangeValidator("bitget").validate("KEY", "secret", None).valid
 
 
-def test_get_validator_supported_and_unsupported():
-    assert get_validator("binance").name == "mock"   # MOCK_EXCHANGE_MODE default true
+def test_get_validator_supported_and_unsupported(monkeypatch):
+    # Force MOCK so the test is independent of the deployment's live gate.
+    from app.config import settings
+    monkeypatch.setattr(settings, "mock_exchange_mode", True)
+    assert get_validator("binance").name == "mock"
     with pytest.raises(ValueError):
         get_validator("ftx")

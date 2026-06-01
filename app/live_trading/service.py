@@ -239,6 +239,124 @@ async def close_position(
     return {"position_id": pos.id, "exit_price": exit_px, "pnl_usdt": round(pnl, 2), "mode": order.mode}
 
 
+EMERGENCY_CONFIRM_PHRASE = "CLOSE UNSAFE POSITION"
+
+
+async def emergency_close_position(
+    db: AsyncSession, *, position_id: int, reason: str, actor_user_id: int,
+    is_admin: bool = False,
+) -> dict:
+    """
+    Force-close a (possibly UNSAFE / RECOVERED) position with a REDUCE-ONLY
+    market order. Steps, each audited:
+      1) authorise (owner or admin) + require EMERGENCY_CLOSE_ENABLED,
+      2) reconcile: read the true exchange position first,
+      3) cancel stale TP/SL working orders,
+      4) reduce-only market close (never opens an opposite position),
+      5) finalise DB state + accounting + alert admin.
+    """
+    from app.config import settings
+    if not settings.emergency_close_enabled:
+        raise LiveTradingError(403, "Emergency close is disabled (EMERGENCY_CLOSE_ENABLED=false).")
+
+    pos = await db.get(LivePosition, position_id)
+    if pos is None:
+        raise LiveTradingError(404, "Position not found")
+    if pos.user_id != actor_user_id and not is_admin:
+        raise LiveTradingError(403, "Not allowed to close another user's position")
+    if pos.status in ("CLOSED", "CLOSED_UNKNOWN"):
+        raise LiveTradingError(409, "Position already closed")
+
+    mode = pos.mode
+    await _audit(db, pos.user_id, pos.exchange, pos.symbol, "EMERGENCY_CLOSE", "START", mode,
+                 f"reason={reason} actor={actor_user_id} admin={is_admin}")
+
+    try:
+        adapter = await _adapter_for(db, pos.user_id, pos.exchange)
+    except vault.VaultError as exc:
+        raise LiveTradingError(exc.status_code, exc.detail)
+
+    try:
+        # 2) Reconcile against the exchange — close the ACTUAL size if known.
+        ex_qty = pos.quantity
+        try:
+            ex_positions = await adapter.get_positions()
+            match = next((p for p in ex_positions if p.symbol == pos.symbol), None)
+            if match is not None and match.qty > 0:
+                ex_qty = match.qty
+            elif match is None:
+                # Already flat on the exchange — nothing to close.
+                pos.status = "CLOSED_UNKNOWN"
+                pos.closed_at = _now()
+                pos.tp_sl_status = "UNKNOWN"
+                pos.unsafe_reason = (reason or "")[:256]
+                await db.flush()
+                await _audit(db, pos.user_id, pos.exchange, pos.symbol, "EMERGENCY_CLOSE", "OK",
+                             mode, "position already flat on exchange -> CLOSED_UNKNOWN")
+                return {"position_id": pos.id, "closed": False, "status": "CLOSED_UNKNOWN",
+                        "mode": mode, "note": "exchange already flat"}
+        except AdapterError as exc:
+            await _audit(db, pos.user_id, pos.exchange, pos.symbol, "EMERGENCY_CLOSE", "FAIL",
+                         mode, f"reconcile read failed: {exc}")
+
+        # 3) Cancel stale TP/SL (best-effort; never raises the close).
+        try:
+            await adapter.cancel_all_orders(pos.symbol)
+            await _audit(db, pos.user_id, pos.exchange, pos.symbol, "EMERGENCY_CLOSE", "OK",
+                         mode, "cancelled working orders")
+        except AdapterError as exc:
+            await _audit(db, pos.user_id, pos.exchange, pos.symbol, "EMERGENCY_CLOSE", "FAIL",
+                         mode, f"cancel orders failed: {exc}")
+
+        # 4) Reduce-only market close.
+        try:
+            order = await adapter.close_order(symbol=pos.symbol, side=to_side(pos.side), qty=ex_qty)
+        except AdapterError as exc:
+            await mark_position_unsafe_fallback(db, pos, f"emergency close failed: {exc}")
+            await _audit(db, pos.user_id, pos.exchange, pos.symbol, "EMERGENCY_CLOSE", "FAIL",
+                         mode, str(exc))
+            raise LiveTradingError(502, f"Emergency close failed: {exc}")
+    finally:
+        await adapter.close()
+
+    # 5) Finalise.
+    exit_px = float(order.avg_price or order.price or pmath_mark(pos.symbol) or pos.entry_price)
+    notional = ex_qty * pos.entry_price
+    pnl = pmath.unrealized_pnl(pos.side, pos.entry_price, exit_px, notional)
+    pos.status = "CLOSED"
+    pos.realized_pnl = round(pnl, 6)
+    pos.closed_at = _now()
+    pos.tp_sl_status = "SYNCED"
+    pos.unsafe_reason = None
+    db.add(LiveOrder(
+        user_id=pos.user_id, exchange=pos.exchange, exchange_order_id=order.order_id,
+        symbol=pos.symbol, side=opposite_side(to_side(pos.side)), order_type="MARKET",
+        price=exit_px, quantity=ex_qty, filled_qty=order.filled_qty, avg_price=order.avg_price,
+        reduce_only=True, status=order.status, mode=order.mode))
+    trade = LiveTrade(
+        user_id=pos.user_id, position_id=pos.id, exchange=pos.exchange, symbol=pos.symbol,
+        side=pos.side, entry_price=pos.entry_price, exit_price=exit_px, quantity=ex_qty,
+        leverage=pos.leverage, pnl_usdt=round(pnl, 6), mode=order.mode, opened_at=pos.opened_at)
+    db.add(trade)
+    await db.flush()
+    await _record_accounting(db, trade=trade, gross_pnl=pnl, entry_price=pos.entry_price,
+                             exit_price=exit_px, opened_at=pos.opened_at, closed_at=pos.closed_at)
+    await _audit(db, pos.user_id, pos.exchange, pos.symbol, "EMERGENCY_CLOSE", "OK", order.mode,
+                 f"reduce-only close qty={ex_qty} exit={exit_px} pnl={pnl:.2f} reason={reason}")
+    logger.warning(f"[live] EMERGENCY_CLOSE user={pos.user_id} {pos.exchange} {pos.symbol} "
+                   f"pnl={pnl:.2f} mode={order.mode} reason={reason}")
+    return {"position_id": pos.id, "closed": True, "exit_price": exit_px,
+            "pnl_usdt": round(pnl, 2), "mode": order.mode}
+
+
+async def mark_position_unsafe_fallback(db, pos, reason: str) -> None:
+    """Mark a position UNSAFE in-line (used when an emergency close itself fails)."""
+    pos.tp_sl_status = "UNSAFE"
+    pos.unsafe_reason = (reason or "")[:256]
+    pos.requires_review = True
+    await db.flush()
+
+
 async def set_leverage(db: AsyncSession, *, user_id: int, exchange: str, symbol: str, leverage: int) -> dict:
     try:
         adapter = await _adapter_for(db, user_id, exchange.lower())

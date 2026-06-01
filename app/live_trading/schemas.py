@@ -36,6 +36,12 @@ class SetLeverageIn(BaseModel):
     leverage: int = Field(ge=1, le=125)
 
 
+class EmergencyCloseIn(BaseModel):
+    reason: str = Field(min_length=1, max_length=256)
+    # Must equal the exact confirmation phrase "CLOSE UNSAFE POSITION".
+    confirm: str = Field(min_length=1, max_length=64)
+
+
 class GateStatusOut(BaseModel):
     live_trading_enabled: bool
     mock_exchange_mode: bool
@@ -55,6 +61,9 @@ class LivePositionOut(BaseModel):
     status: str
     realized_pnl: float
     mode: str
+    tp_sl_status: str = "UNKNOWN"
+    requires_review: bool = False
+    unsafe_reason: Optional[str] = None
     opened_at: Optional[datetime]
     closed_at: Optional[datetime]
 

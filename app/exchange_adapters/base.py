@@ -94,6 +94,14 @@ class ExchangeAdapter:
         """
         return []
 
+    async def cancel_all_orders(self, symbol: str) -> int:
+        """
+        Cancel all working orders for a symbol — used by emergency close to clear
+        stale TP/SL before a reduce-only market close. This NEVER opens or
+        increases a position. Default no-op for adapters not implementing it.
+        """
+        return 0
+
     async def set_leverage(self, symbol: str, leverage: int) -> None:
         raise NotImplementedError
 
