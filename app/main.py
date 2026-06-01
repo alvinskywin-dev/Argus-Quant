@@ -294,6 +294,14 @@ class App:
             asyncio.create_task(self._run_dashboard()),
         ]
 
+        # Sprint 21C — one-shot position-recovery sweep at boot (no-ops unless
+        # POSITION_RECOVERY_ENABLED; never opens positions; never raises).
+        try:
+            from app.recovery import run_startup_recovery
+            self._tasks.append(asyncio.create_task(run_startup_recovery()))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"startup recovery not scheduled (non-fatal): {exc!r}")
+
         logger.info(
             f"=== all services running  "
             f"universe={len(universe.symbols)} symbols  "

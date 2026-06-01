@@ -144,10 +144,15 @@ async def open_position(
         filled_qty=order.filled_qty, avg_price=order.avg_price, reduce_only=False,
         status=order.status, mode=order.mode))
 
+    # Sprint 21C — persist intended TP/SL so the recovery engine can detect a
+    # missing protective order and re-place it after a restart/crash.
+    _tp_sl_status = "SYNCED" if (take_profit and stop_loss) else (
+        "MISSING_TP" if stop_loss else "MISSING_SL" if take_profit else "MISSING_BOTH")
     pos = LivePosition(
         user_id=user_id, exchange=exchange, symbol=symbol, side=side.upper(),
         quantity=quantity, entry_price=fill_price, leverage=leverage,
-        margin_type=margin_type, status="OPEN", mode=order.mode)
+        margin_type=margin_type, status="OPEN", mode=order.mode,
+        take_profit=take_profit, stop_loss=stop_loss, tp_sl_status=_tp_sl_status)
     db.add(pos)
     await db.flush()
     await _audit(db, user_id, exchange, symbol, "OPEN", "OK", order.mode,

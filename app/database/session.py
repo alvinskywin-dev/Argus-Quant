@@ -58,6 +58,8 @@ _SCHEMA_UPGRADES: list[str] = [
     "ALTER TABLE exchange_accounts ADD COLUMN IF NOT EXISTS last_validation_status VARCHAR(24)",
     "ALTER TABLE exchange_accounts ADD COLUMN IF NOT EXISTS permission_warning VARCHAR(256)",
     # ── Sprint 21B/21C — live_positions safety + recovery columns ──
+    "ALTER TABLE live_positions ADD COLUMN IF NOT EXISTS take_profit FLOAT",
+    "ALTER TABLE live_positions ADD COLUMN IF NOT EXISTS stop_loss FLOAT",
     "ALTER TABLE live_positions ADD COLUMN IF NOT EXISTS tp_sl_status VARCHAR(16) DEFAULT 'UNKNOWN'",
     "ALTER TABLE live_positions ADD COLUMN IF NOT EXISTS requires_review BOOLEAN DEFAULT false",
     "ALTER TABLE live_positions ADD COLUMN IF NOT EXISTS unsafe_reason VARCHAR(256)",

@@ -689,6 +689,8 @@ class LivePosition(Base):
     realized_pnl: Mapped[float] = mapped_column(Float, default=0.0)
     mode: Mapped[str] = mapped_column(String(8), default="MOCK")
     # Sprint 21B/21C — reconciliation + recovery safety state.
+    take_profit: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    stop_loss: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     tp_sl_status: Mapped[str] = mapped_column(String(16), default="UNKNOWN")  # see recovery.tp_sl
     requires_review: Mapped[bool] = mapped_column(Boolean, default=False)
     unsafe_reason: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
