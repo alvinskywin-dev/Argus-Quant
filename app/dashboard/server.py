@@ -4848,8 +4848,8 @@ async function loadUsers(){
   if(!d.users.length){tb.innerHTML='<tr><td colspan="10" class="muted" style="padding:18px">No users yet.</td></tr>';return;}
   tb.innerHTML=d.users.map(u=>{
     const act=u.status==='SUSPENDED'
-      ? '<button class="btn-act" onclick="setStatus('+u.id+",'ACTIVE')\">Activate</button>"
-      : '<button class="btn-sus" onclick="setStatus('+u.id+",'SUSPENDED')\">Suspend</button>";
+      ? '<button class="btn-act" onclick="setStatus('+u.id+',\\'ACTIVE\\')">Activate</button>'
+      : '<button class="btn-sus" onclick="setStatus('+u.id+',\\'SUSPENDED\\')">Suspend</button>';
     return '<tr><td>'+u.id+'</td><td>'+esc(u.email)+'</td><td>'+pill(u.role)+'</td><td>'+pill(u.status)+'</td>'+
       '<td>'+dot(u.is_verified)+'</td><td>'+u.connected_exchanges+'</td><td>'+dot(u.auto_trading)+'</td>'+
       '<td>'+(u.kill_switch?'<span class="r">●</span>':dot(false))+'</td><td class="muted">'+fmtTs(u.last_login_at)+'</td>'+
