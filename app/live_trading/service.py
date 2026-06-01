@@ -22,6 +22,7 @@ from app.exchange_adapters import live_gate_open, resolve_adapter
 from app.exchange_adapters.base import AdapterError, opposite_side, to_side
 from app.exchange_vault import service as vault
 from app.paper_engine import math as pmath
+from app.recovery import tp_sl as tp_sl_const
 from app.safety import service as safety
 from app.utils.logger import logger
 
@@ -121,22 +122,24 @@ async def open_position(
         raise LiveTradingError(400, "Quantity must be positive")
 
     bside = to_side(side)
+
+    # ── 1) ENTRY ─────────────────────────────────────────────────────
+    # If the entry itself fails, no position exists — record + reject cleanly.
     try:
         await adapter.set_margin_type(symbol, margin_type)
         await adapter.set_leverage(symbol, leverage)
         order = await adapter.open_order(
             symbol=symbol, side=bside, qty=quantity, order_type=order_type, price=entry_price)
-        if take_profit or stop_loss or trailing_pct:
-            await adapter.set_tp_sl(
-                symbol=symbol, side=bside, qty=quantity,
-                take_profit=take_profit, stop_loss=stop_loss, trailing_pct=trailing_pct)
     except AdapterError as exc:
         await _record_order_error(db, user_id, exchange, symbol, bside, order_type, mode, str(exc))
+        await _record_failure(db, user_id, exchange, symbol, bside, order_type, mode, quantity,
+                              entry_price or 0.0, exc, is_tp_sl=False)
         await _audit(db, user_id, exchange, symbol, "ERROR", "FAIL", mode, str(exc))
-        raise LiveTradingError(502, f"Exchange error: {exc}")
-    finally:
         await adapter.close()
+        raise LiveTradingError(502, f"Exchange error: {exc}")
 
+    # Entry filled — persist the order + position FIRST so a real fill is never
+    # lost even if protection placement fails below.
     fill_price = order.avg_price or order.price or px
     db.add(LiveOrder(
         user_id=user_id, exchange=exchange, exchange_order_id=order.order_id, symbol=symbol,
@@ -144,21 +147,44 @@ async def open_position(
         filled_qty=order.filled_qty, avg_price=order.avg_price, reduce_only=False,
         status=order.status, mode=order.mode))
 
-    # Sprint 21C — persist intended TP/SL so the recovery engine can detect a
-    # missing protective order and re-place it after a restart/crash.
-    _tp_sl_status = "SYNCED" if (take_profit and stop_loss) else (
-        "MISSING_TP" if stop_loss else "MISSING_SL" if take_profit else "MISSING_BOTH")
+    # ── 2) PROTECTION (TP/SL) — partial-failure aware ────────────────
+    want_protection = bool(take_profit or stop_loss or trailing_pct)
+    tp_sl_status = tp_sl_const.SYNCED      # nothing-to-protect counts as synced
+    unsafe_reason: Optional[str] = None
+    if want_protection:
+        try:
+            await adapter.set_tp_sl(
+                symbol=symbol, side=bside, qty=quantity,
+                take_profit=take_profit, stop_loss=stop_loss, trailing_pct=trailing_pct)
+            tp_sl_status = tp_sl_const.SYNCED
+        except AdapterError as exc:
+            # CRITICAL partial failure: entry is LIVE but UNPROTECTED. Keep the
+            # position, mark it UNSAFE for the recovery engine to retry / the
+            # admin to emergency-close. Do NOT raise — losing track is worse.
+            tp_sl_status = tp_sl_const.UNSAFE
+            unsafe_reason = f"TP/SL placement failed after entry: {exc}"[:256]
+            await _record_failure(db, user_id, exchange, symbol, bside, "TP_SL", order.mode,
+                                  quantity, 0.0, exc, is_tp_sl=True)
+            await _audit(db, user_id, exchange, symbol, "TP_SL", "FAIL", order.mode, unsafe_reason)
+            logger.warning(f"[live] UNPROTECTED position user={user_id} {exchange} {symbol}: {unsafe_reason}")
+    await adapter.close()
+
     pos = LivePosition(
         user_id=user_id, exchange=exchange, symbol=symbol, side=side.upper(),
         quantity=quantity, entry_price=fill_price, leverage=leverage,
         margin_type=margin_type, status="OPEN", mode=order.mode,
-        take_profit=take_profit, stop_loss=stop_loss, tp_sl_status=_tp_sl_status)
+        take_profit=take_profit, stop_loss=stop_loss, tp_sl_status=tp_sl_status,
+        unsafe_reason=unsafe_reason, requires_review=(tp_sl_status == tp_sl_const.UNSAFE))
     db.add(pos)
     await db.flush()
     await _audit(db, user_id, exchange, symbol, "OPEN", "OK", order.mode,
-                 f"{side} {quantity}@{fill_price} lev={leverage} {order.mode}")
-    logger.info(f"[live] OPEN user={user_id} {exchange} {symbol} {side} qty={quantity} mode={order.mode}")
-    return {"order": _order_dict(order), "position_id": pos.id, "mode": order.mode}
+                 f"{side} {quantity}@{fill_price} lev={leverage} {order.mode} tp_sl={tp_sl_status}")
+    logger.info(f"[live] OPEN user={user_id} {exchange} {symbol} {side} qty={quantity} "
+                f"mode={order.mode} tp_sl={tp_sl_status}")
+    return {
+        "order": _order_dict(order), "position_id": pos.id, "mode": order.mode,
+        "tp_sl_status": tp_sl_status, "unsafe": tp_sl_status == tp_sl_const.UNSAFE,
+    }
 
 
 # ── close ─────────────────────────────────────────────────────────
@@ -289,3 +315,25 @@ async def _record_order_error(db, user_id, exchange, symbol, side, order_type, m
             await adb.commit()
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"[live] order-error record failed: {exc}")
+
+
+async def _record_failure(db, user_id, exchange, symbol, side, order_type, mode, qty,
+                          price, exc: Exception, *, is_tp_sl: bool = False) -> None:
+    """
+    Sprint 21D — classify + persist the failure via the order-failure engine
+    (own session so it survives the caller's rollback). No-op unless enabled.
+    """
+    from app.config import settings
+    if not settings.order_failure_engine_enabled:
+        return
+    from app.database.session import SessionLocal
+    from app.order_failures import service as of_service
+    try:
+        async with SessionLocal() as adb:
+            await of_service.record_failure(
+                adb, user_id=user_id, exchange=exchange, symbol=symbol, side=side,
+                order_type=order_type, quantity=qty, price=price, reduce_only=is_tp_sl,
+                error_message=str(exc), is_tp_sl=is_tp_sl, mode=mode)
+            await adb.commit()
+    except Exception as e:  # noqa: BLE001 — failure recording must never break the flow
+        logger.warning(f"[live] failure record skipped: {e}")
