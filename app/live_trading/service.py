@@ -224,11 +224,15 @@ async def close_position(
         side=opposite_side(to_side(pos.side)), order_type="MARKET", price=exit_px,
         quantity=pos.quantity, filled_qty=order.filled_qty, avg_price=order.avg_price,
         reduce_only=True, status=order.status, mode=order.mode))
-    db.add(LiveTrade(
+    trade = LiveTrade(
         user_id=user_id, position_id=pos.id, exchange=pos.exchange, symbol=pos.symbol,
         side=pos.side, entry_price=pos.entry_price, exit_price=exit_px, quantity=pos.quantity,
-        leverage=pos.leverage, pnl_usdt=round(pnl, 6), mode=order.mode, opened_at=pos.opened_at))
+        leverage=pos.leverage, pnl_usdt=round(pnl, 6), mode=order.mode, opened_at=pos.opened_at)
+    db.add(trade)
     await db.flush()
+    await _record_accounting(
+        db, trade=trade, gross_pnl=pnl, entry_price=pos.entry_price, exit_price=exit_px,
+        expected_exit=exit_price, opened_at=pos.opened_at, closed_at=pos.closed_at)
     await _audit(db, user_id, pos.exchange, pos.symbol, "CLOSE", "OK", order.mode,
                  f"exit={exit_px} pnl={pnl:.2f} {order.mode}")
     logger.info(f"[live] CLOSE user={user_id} {pos.exchange} {pos.symbol} pnl={pnl:.2f} mode={order.mode}")
@@ -315,6 +319,28 @@ async def _record_order_error(db, user_id, exchange, symbol, side, order_type, m
             await adb.commit()
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"[live] order-error record failed: {exc}")
+
+
+async def _record_accounting(db, *, trade, gross_pnl, entry_price, exit_price,
+                             expected_exit=None, opened_at=None, closed_at=None) -> None:
+    """
+    Sprint 21E — record the net-PnL breakdown for a closed trade. Uses the
+    caller's session (same transaction as the close). No-op unless enabled and
+    never breaks the close on error.
+    """
+    from app.config import settings
+    if not settings.accounting_enabled:
+        return
+    try:
+        from app.accounting import service as acct
+        await acct.record_trade_accounting(
+            db, user_id=trade.user_id, exchange=trade.exchange, symbol=trade.symbol,
+            side=trade.side, mode=trade.mode, gross_pnl=gross_pnl, quantity=trade.quantity,
+            entry_price=entry_price, exit_price=exit_price, leverage=trade.leverage,
+            trade_id=trade.id, expected_exit=expected_exit,
+            opened_at=opened_at, closed_at=closed_at)
+    except Exception as e:  # noqa: BLE001 — accounting must never break the close
+        logger.warning(f"[live] accounting record skipped: {e}")
 
 
 async def _record_failure(db, user_id, exchange, symbol, side, order_type, mode, qty,
