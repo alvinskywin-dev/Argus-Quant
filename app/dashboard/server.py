@@ -200,6 +200,75 @@ async def api_public_stats():
         return JSONResponse({"error": str(exc)}, status_code=500)
 
 
+# ── V13: single aggregated dashboard read (perf) ──────────────────
+# Bundles the existing public reads into ONE response so the SaaS portal
+# fetches the whole dashboard in a single request. Purely additive — every
+# underlying endpoint (/api/public/stats, /signals, /performance,
+# /market-regime, /status) is unchanged and still served for back-compat.
+# Cached server-side for 30s (separate from the 45s perf-center cache).
+_dash_cache: dict = {"data": None, "ts": 0.0}
+_DASH_TTL = 30.0  # seconds
+
+
+async def _json_body(resp):
+    """Normalise a handler return (JSONResponse or plain dict/list) to a value."""
+    if isinstance(resp, JSONResponse):
+        try:
+            import json as _json
+            return _json.loads(resp.body)
+        except Exception:
+            return None
+    return resp
+
+
+@app.get("/api/public/dashboard")
+async def api_public_dashboard():
+    now = time.time()
+    if _dash_cache["data"] is not None and now - _dash_cache["ts"] < _DASH_TTL:
+        return JSONResponse(_dash_cache["data"])
+
+    result = {"stats": {}, "signals": [], "positions": [],
+              "health": {}, "performance": {}, "market_regime": {}}
+
+    try:
+        result["stats"] = await _get_stats() or {}
+    except Exception:
+        result["stats"] = {}
+
+    try:
+        sigs = await _json_body(await api_public_signals(limit=100))
+        result["signals"] = sigs if isinstance(sigs, list) else []
+    except Exception:
+        result["signals"] = []
+
+    # open positions = open signals (public proxy), normalised to signal shape
+    result["positions"] = [
+        s for s in result["signals"]
+        if isinstance(s, dict) and str(s.get("status", "")).upper() == "OPEN"
+    ][:20]
+
+    try:
+        result["health"] = await status_route() or {}
+    except Exception:
+        result["health"] = {}
+
+    try:
+        perf = await _json_body(await api_public_performance())
+        result["performance"] = perf if isinstance(perf, dict) and "error" not in perf else {}
+    except Exception:
+        result["performance"] = {}
+
+    try:
+        mr = await _json_body(await api_public_market_regime())
+        result["market_regime"] = mr if isinstance(mr, dict) and "error" not in mr else {}
+    except Exception:
+        result["market_regime"] = {}
+
+    _dash_cache["data"] = result
+    _dash_cache["ts"] = now
+    return JSONResponse(result)
+
+
 @app.get("/api/public/signals")
 async def api_public_signals(limit: int = 50):
     limit = min(max(1, limit), 200)

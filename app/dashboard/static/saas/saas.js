@@ -38,34 +38,138 @@ async function api(path, opts={}) {
 }
 const pub = (p) => api(p, {auth:false});
 
-// ── perf: short-TTL cache for public/idempotent GETs (dedupes route churn)
-const CACHE = new Map();                 // path -> {t, p}
-const CACHE_TTL = 20000;                 // 20s — Phase 12
+// ── V13 perf: request dedup + 30s cache (Tasks 2 & 7) ──────────────
+const CACHE = new Map();                 // path -> {t, p}  resolved-value cache
+const INFLIGHT = new Map();              // path -> promise  in-flight dedup
+const CACHE_TTL = 30000;                 // 30s
+
+// dedup: identical concurrent GETs share ONE network request (Task 7)
+function dedupGet(path){
+  if(INFLIGHT.has(path)) return INFLIGHT.get(path);
+  const p = tryGet(path).finally(()=>INFLIGHT.delete(path));
+  INFLIGHT.set(path, p);
+  return p;
+}
+// cache: serve sub-TTL results, else fetch (deduped)
 function cachedGet(path, ttl=CACHE_TTL){
   const now=Date.now(), e=CACHE.get(path);
   if(e && now-e.t < ttl) return e.p;
-  const p = tryGet(path).then(r=>{ if(r && r.error) CACHE.delete(path); return r; });
+  const p = dedupGet(path).then(r=>{ if(r && r.error) CACHE.delete(path); return r; });
   CACHE.set(path,{t:now,p});
   return p;
 }
-function invalidate(){ CACHE.clear(); }   // after a mutation
+function invalidate(){ CACHE.clear(); window.dashboardCache={data:null,timestamp:0}; }
 function refresh(){ invalidate(); route(); }
 
-// ── perf: Chart.js lifecycle — destroy before recreate, skip if unchanged
+// dashboard aggregate cache (Task 2) — whole page in ONE request
+window.dashboardCache = {data:null, timestamp:0};
+async function getDashboard(force=false){
+  const c=window.dashboardCache, now=Date.now();
+  if(!force && c.data && now-c.timestamp < CACHE_TTL) return c.data;   // <30s → cached
+  const r = await dedupGet("/api/public/dashboard");
+  if(r && r.data){ window.dashboardCache={data:r.data, timestamp:Date.now()}; return r.data; }
+  return c.data;   // fall back to last good data on error
+}
+
+// ── V13 perf: Chart.js REUSE — create once, update in place (Task 4)
 const CHARTS = {};
-function mkChart(key, ctx, cfg, sig){
+function upsertChart(key, ctx, type, labels, datasets, options){
   const ex = CHARTS[key];
-  if(ex){ if(sig!=null && ex.sig===sig) return ex.chart; try{ex.chart.destroy();}catch(_){} }
-  const chart = new Chart(ctx, cfg);
-  CHARTS[key] = {chart, sig};
+  if(ex && ex.chart){                     // reuse — no destroy, no flicker
+    const ch=ex.chart; ch.data.labels=labels;
+    datasets.forEach((d,i)=>{
+      const ds=ch.data.datasets[i];
+      if(ds){ ds.data=d.data; if(d.label!=null)ds.label=d.label; if(d.backgroundColor!=null)ds.backgroundColor=d.backgroundColor; }
+      else ch.data.datasets[i]=d;
+    });
+    ch.update();
+    return ch;
+  }
+  const chart = new Chart(ctx, {type, data:{labels, datasets}, options});
+  CHARTS[key] = {chart};
   return chart;
 }
+// destroy only when leaving the page (Task 4)
 function destroyCharts(){ for(const k in CHARTS){try{CHARTS[k].chart.destroy();}catch(_){}} for(const k in CHARTS) delete CHARTS[k]; }
 
-// ── perf: per-page timers — only the active page auto-refreshes
-let PAGE_TIMERS = [];
-function every(ms, fn){ const id=setInterval(fn, ms); PAGE_TIMERS.push(id); return id; }
-function clearPageTimers(){ PAGE_TIMERS.forEach(clearInterval); PAGE_TIMERS = []; }
+// ── V13 perf: ONE global timer for the whole app (Task 3) ──────────
+let activeTimer = null;
+let CURRENT_PAGE = null;
+const REFRESHERS = {};                    // page -> in-place update fn
+function startPageTimer(page){
+  clearInterval(activeTimer);
+  activeTimer = setInterval(()=>refreshCurrentPage(page), 15000);
+}
+function stopPageTimer(){ clearInterval(activeTimer); activeTimer=null; }
+async function refreshCurrentPage(page){
+  if(page!==CURRENT_PAGE || document.hidden) return;   // stale-tick / hidden-tab guard
+  const fn = REFRESHERS[page];
+  if(fn){ try{ await fn(); }catch(_){} }
+}
+
+// ── V13 perf: lazy mount via IntersectionObserver (Task 6) ─────────
+function lazyMount(el, fn){
+  if(!el) return;
+  if(!("IntersectionObserver" in window)){ fn(); return; }
+  const io = new IntersectionObserver((ents,obs)=>{
+    ents.forEach(e=>{ if(e.isIntersecting){ obs.disconnect(); fn(); } });
+  }, {rootMargin:"140px"});
+  io.observe(el);
+}
+
+// ── V13 perf: virtual-scroll table (Task 5) ───────────────────────
+// Renders only the visible window of rows (+buffer) via spacer rows, so a
+// 1000+ row table scrolls without lag. Supports sort, filter and search.
+function virtualTable(mount, opts){
+  const rowH = opts.rowH || 40, BUF = 6, colspan = opts.columns.length;
+  let rows = (opts.rows||[]).slice(), view = rows;
+  let sortKey=null, sortDir=1, q="", filt={};
+  mount.innerHTML = `
+    <div class="vt-toolbar">
+      ${opts.search?'<input class="vt-search" placeholder="Search symbol…" id="vt-q">':""}
+      ${(opts.filters||[]).map(f=>`<select data-f="${f.key}"><option value="">${esc(f.label)}: All</option>${f.opts.map(o=>`<option value="${esc(o)}">${esc(o)}</option>`).join("")}</select>`).join("")}
+      <span class="vt-count" id="vt-count"></span>
+    </div>
+    <div class="vt-scroll" id="vt-scroll">
+      <table><thead><tr>${opts.columns.map(c=>`<th data-k="${c.key}" style="text-align:${c.align||"left"}">${esc(c.label)}<span class="arr" data-arr="${c.key}"></span></th>`).join("")}</tr></thead>
+      <tbody id="vt-body"></tbody></table>
+    </div>`;
+  const scroll=$("#vt-scroll",mount), body=$("#vt-body",mount), count=$("#vt-count",mount);
+  function applyView(){
+    view = rows.filter(r=>{
+      for(const k in filt){ if(filt[k] && String(r[k])!==filt[k]) return false; }
+      if(q){ const hay=(opts.search||[]).map(k=>String(r[k]==null?"":r[k])).join(" ").toLowerCase(); if(!hay.includes(q)) return false; }
+      return true;
+    });
+    if(sortKey){ const col=opts.columns.find(c=>c.key===sortKey); const sv=(col&&col.sortVal)?col.sortVal:(r=>r[sortKey]);
+      view=view.slice().sort((a,b)=>{const x=sv(a),y=sv(b);return (x>y?1:x<y?-1:0)*sortDir;}); }
+    count.textContent = view.length+" rows";
+    render();
+  }
+  function render(){
+    const total=view.length, h=scroll.clientHeight||440;
+    const start=Math.max(0, Math.floor(scroll.scrollTop/rowH)-BUF);
+    const end=Math.min(total, start+Math.ceil(h/rowH)+BUF*2);
+    const top=start*rowH, bot=Math.max(0,(total-end)*rowH);
+    let html = total ? "" : `<tr><td colspan="${colspan}">${empty("📭","No signals match")}</td></tr>`;
+    if(top) html += `<tr class="vt-pad"><td colspan="${colspan}" style="height:${top}px"></td></tr>`;
+    for(let i=start;i<end;i++){ const r=view[i];
+      html += `<tr>${opts.columns.map(c=>`<td class="num" style="text-align:${c.align||"left"}">${c.render?c.render(r):esc(r[c.key])}</td>`).join("")}</tr>`; }
+    if(bot) html += `<tr class="vt-pad"><td colspan="${colspan}" style="height:${bot}px"></td></tr>`;
+    body.innerHTML = html;
+  }
+  scroll.addEventListener("scroll", render, {passive:true});
+  mount.querySelectorAll("th[data-k]").forEach(th=>th.onclick=()=>{
+    const k=th.dataset.k; if(sortKey===k) sortDir=-sortDir; else {sortKey=k;sortDir=1;}
+    mount.querySelectorAll("[data-arr]").forEach(a=>a.textContent="");
+    const arr=mount.querySelector(`[data-arr="${k}"]`); if(arr)arr.textContent=sortDir>0?"▲":"▼";
+    applyView();
+  });
+  const qi=$("#vt-q",mount); if(qi)qi.oninput=()=>{q=qi.value.trim().toLowerCase();applyView();};
+  mount.querySelectorAll("select[data-f]").forEach(s=>s.onchange=()=>{filt[s.dataset.f]=s.value;applyView();});
+  applyView();
+  return { setRows(n){ rows=(n||[]).slice(); applyView(); } };
+}
 
 // ── dom + format helpers ───────────────────────────────────────────
 const $ = (s,r=document)=>r.querySelector(s);
@@ -162,6 +266,9 @@ function renderShell(){
           <div><h2 id="ptitle">Dashboard</h2><div class="sub" id="psub"></div></div>
         </div>
         <div class="right">
+          <span class="hdr-stat" id="sysstat" title="System status"><span class="dot off"></span>System</span>
+          <span class="hdr-stat" id="mktstat" title="Market regime">Market <b>—</b></span>
+          <span id="lastupd"></span>
           <span class="badge muted" id="gatebadge">gate…</span>
           <div class="userchip"><div class="avatar">${esc((ME.email||"?")[0].toUpperCase())}</div>
             <div class="uname"><div style="font-weight:700">${esc(ME.username||ME.email.split("@")[0])}</div></div>
@@ -250,103 +357,181 @@ function renderRegister(){
   $("#showlogin").onclick=renderLanding;
 }
 async function logout(){ try{ if(TK.r) await api("/api/auth/logout",{method:"POST",body:{refresh_token:TK.r}}); }catch(_){}
-  clearPageTimers(); destroyCharts(); invalidate();
+  stopPageTimer(); destroyCharts(); invalidate();
   TK.clear(); ME=null; location.hash=""; renderLanding(); }
 
 // ── PAGES ──────────────────────────────────────────────────────────
 const PAGES = {};
 
-// signal feed renderer (shared) — Symbol/Side/TF/Confidence/RR/Status/PnL
-function signalRows(rows){
-  return rows.map(s=>{
-    const open = (s.status||"").toUpperCase()==="OPEN";
-    const pnlCell = open ? '<span class="sub">live</span>'
-      : `<span class="num ${cls(s.pnl_pct)}">${pct(s.pnl_pct)}</span>`;
-    return `<tr><td><b>${esc(s.symbol)}</b></td><td>${badge(s.side)}</td><td><span class="badge muted">${esc(s.timeframe)}</span></td>
-      <td class="num">${num(s.confidence,1)}</td><td class="num">${num(s.risk_reward,2)}</td>
-      <td>${badge(s.status,open?"":"muted")}</td><td>${pnlCell}</td></tr>`;
-  }).join("");
-}
+// dashboard render helpers ─────────────────────────────────────────
+const shortTime=(s)=>{if(!s)return "—";try{return new Date(s).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});}catch(_){return "—";}};
+function confBadge(c){const v=Number(c||0);const t=v>=85?"hi":v>=70?"mid":"lo";return `<span class="conf ${t}">${num(v,0)}</span>`;}
+const regColor=(rg="")=>rg.includes("BULL")||rg.includes("LOW")?"var(--success)":rg.includes("BEAR")||rg.includes("HIGH")?"var(--danger)":"var(--warning)";
+const trendBadge=(t)=>{const u=String(t||"").toUpperCase();const c=u.includes("UP")||u.includes("BULL")?"ok":u.includes("DOWN")||u.includes("BEAR")?"bad":"muted";return `<span class="badge ${c}">${esc(t||"—")}</span>`;}
+function gauge(label, val, max, suffix=""){const pcts=Math.max(0,Math.min(100,(Number(val||0)/max)*100));const col=pcts>=66?"var(--success)":pcts>=33?"var(--warning)":"var(--danger)";
+  return `<div class="gauge-c"><div class="gl">${esc(label)}<b>${num(val,1)}${suffix}</b></div><div class="gbar"><i style="width:${pcts}%;background:${col}"></i></div></div>`;}
 
 PAGES.dashboard = async (v) => {
-  v.innerHTML = `<div class="kpis" id="kpis">${Array(4).fill('<div class="sk kpi"></div>').join("")}</div>
-    <div class="grid g2 mt">
-      <div class="card"><div class="card-h"><h3>Market Regime</h3><span class="sub" id="rg-when"></span></div><div class="card-b" id="regime">${skel(2)}</div></div>
-      <div class="card"><div class="card-h"><h3>System Health</h3><span class="dot off" id="hdot"></span></div><div class="card-b" id="health">${skel(3)}</div></div>
+  // ── static structure (skeletons) — Phase 2 six-row layout ────────
+  v.innerHTML = `
+    <div class="kpis k5" id="kpis">${Array(5).fill('<div class="sk kpi"></div>').join("")}</div>
+
+    <div class="sec-h">Live Signals</div>
+    <div class="card">
+      <div class="card-h"><h3>Signal Feed</h3><span class="live-ind"><span class="pulse"></span>LIVE</span></div>
+      <div id="sigtable">${skel(5)}</div>
     </div>
-    <div class="card mt"><div class="card-h"><h3>Live Signals</h3><a href="#/analytics" class="btn sm">Analytics →</a></div><div id="signals">${skel(5)}</div></div>
-    <div class="card mt"><div class="card-h"><h3>Winrate Summary</h3></div><div class="card-b" id="wrsum">${skel(2)}</div></div>`;
 
-  // KPIs — user-centric for everyone, platform KPIs added for admins
-  const [status, wr, regime, acct] = await Promise.all([
-    cachedGet("/status"), cachedGet("/api/public/winrate-analysis"),
-    cachedGet("/api/public/market-regime"), tryGet("/api/paper/account/"),
-  ]);
-  const S = status.data, W = wr.data, A = acct.data;
-  const winrate = W ? ((W.long_winrate+W.short_winrate)/2).toFixed(1)+"%" : "—";
-  const kpis = [
-    stat("Avg Winrate", winrate, W?("long "+W.long_winrate+"% · short "+W.short_winrate+"%"):"","🎯"),
-    stat("Signal Sample", W?W.sample_size:"—","best TF "+(W?W.best_timeframe:"—"),"📡"),
-    stat("Your Equity", A?money(A.equity):"—", A?(A.open_positions+" open · uPnL "+money(A.unrealized_pnl)):"","💰"),
-    stat("System Health", S?(S.status==="ok"?'<span class="pos">HEALTHY</span>':'<span class="neg">DEGRADED</span>'):"—", S?("universe "+S.universe):"","💚"),
-  ];
-  if(ME.role==="ADMIN"){
-    const ov = await cachedGet("/api/admin/overview"); const O=ov.data;
-    if(O) kpis.push(
-      stat("Active Users", O.users.total, "admins "+(O.users.by_role.ADMIN||0),"👥"),
-      stat("Connected Exch", O.exchange_accounts.connected, Object.keys(O.exchange_accounts.by_exchange||{}).join(", ")||"none","🔗"),
-      stat("Auto Users", O.auto_trading_enabled_users, "kills "+O.user_kill_switches_active,"🤖"),
-      stat("Global Kill", O.global_kill?'<span class="neg">ON</span>':'<span class="pos">OFF</span>', O.live_gate_open?"gate OPEN":"gate closed","🛑"),
-    );
+    <div class="sec-h">Open Positions</div>
+    <div id="positions">${skel(2)}</div>
+
+    <div class="grid g2 mt">
+      <div class="card"><div class="card-h"><h3>Market Regime</h3><span class="sub" id="rg-when"></span></div><div class="card-b" id="regime">${skel(3)}</div></div>
+      <div class="card"><div class="card-h"><h3>System Health</h3><span class="dot off" id="hdot"></span></div><div class="card-b" id="health">${skel(4)}</div></div>
+    </div>
+
+    <div class="sec-h" id="perf-sec">Performance</div>
+    <div class="grid g2">
+      <div class="card"><div class="card-h"><h3>Equity Curve</h3></div><div class="card-b"><div class="chart-box"><canvas id="pc1"></canvas></div></div></div>
+      <div class="card"><div class="card-h"><h3>Win Rate Trend</h3></div><div class="card-b"><div class="chart-box"><canvas id="pc2"></canvas></div></div></div>
+      <div class="card"><div class="card-h"><h3>Monthly PnL</h3></div><div class="card-b"><div class="chart-box"><canvas id="pc3"></canvas></div></div></div>
+      <div class="card"><div class="card-h"><h3>Signal Distribution</h3></div><div class="card-b"><div class="chart-box"><canvas id="pc4"></canvas></div></div></div>
+    </div>`;
+
+  let vt = null, perfMounted = false, LAST = null;
+
+  // ── KPI row (Total Signals / Win Rate / Profit Factor / Open / Markets)
+  function kpiRow(d){
+    const P=d.performance||{}, S=d.stats||{}, H=d.health||{};
+    const total = P.total_signals!=null?P.total_signals:(S.signals7d!=null?S.signals7d:"—");
+    const wrr = P.win_rate!=null?P.win_rate:(S.winrate!=null?S.winrate:null);
+    const pf = P.profit_factor;
+    const openp = S.open_signals!=null?S.open_signals:(d.positions||[]).length;
+    const markets = H.universe!=null?H.universe:(S.universe!=null?S.universe:"—");
+    return [
+      stat("Total Signals", total, P.closed_signals!=null?(P.closed_signals+" closed"):"tracked","📡"),
+      stat("Win Rate", wrr!=null?`<span class="${cls(wrr-50)}">${num(wrr,1)}%</span>`:"—", P.avg_pnl!=null?("avg "+pct(P.avg_pnl)):"","🎯"),
+      stat("Profit Factor", pf!=null?num(pf,2):"—", pf==null?"no losses yet":"gross win ÷ loss","⚖️"),
+      stat("Open Positions", openp, "live signals","📂"),
+      stat("Markets Scanned", markets, "symbol universe","🌐"),
+    ].join("");
   }
-  $("#kpis").innerHTML = kpis.join("");
 
-  // regime
-  const rEl=$("#regime");
-  if(regime.data){const r=regime.data;const score=Math.max(0,Math.min(100,r.regime_score||0));
-    const color=r.market_regime.includes("BULL")||r.market_regime.includes("LOW")?"var(--success)":r.market_regime.includes("BEAR")||r.market_regime.includes("HIGH")?"var(--danger)":"var(--warning)";
-    $("#rg-when").textContent=ago(r.calculated_at)+" ago";
-    rEl.innerHTML=`<div class="regime"><div class="big r-${esc(r.market_regime)}">${esc(r.market_regime.replace("_"," "))}</div>
-      <div class="gauge"><i style="width:${score}%;background:${color}"></i></div><b style="color:${color}">${score}</b></div>
-      <div class="row" style="margin-top:14px">
-        <span class="badge muted">BTC ${esc(r.btc_trend)}</span><span class="badge muted">ETH ${esc(r.eth_trend)}</span>
-        <span class="badge muted">Breadth ${num(r.breadth,1)}%</span><span class="badge muted">ATR pct ${num(r.atr_percentile,1)}</span></div>`;
-  } else rEl.innerHTML=empty("🌍","Regime unavailable");
+  // ── open position cards (Symbol/Side/Entry/PnL/TP/SL) ────────────
+  function positionCards(rows){
+    if(!rows||!rows.length) return `<div class="card">${empty("📭","No open positions","Open signals will appear here as the scanner detects setups.")}</div>`;
+    return `<div class="pcards">${rows.map(p=>`<div class="pcard">
+      <div class="ph"><b>${esc(p.symbol)}</b>${badge(p.side)}</div>
+      <div class="pg">
+        <div><div class="k">Entry</div><div class="num">${num(p.entry_low,4)}</div></div>
+        <div><div class="k">TF</div><div class="num">${esc(p.timeframe||"—")}</div></div>
+        <div><div class="k">TP</div><div class="num pos">${num(p.tp1,4)}</div></div>
+        <div><div class="k">SL</div><div class="num neg">${num(p.sl,4)}</div></div>
+      </div>
+      <div class="pnl ${cls(p.pnl_pct)}">${pct(p.pnl_pct)}</div>
+    </div>`).join("")}</div>`;
+  }
 
-  // health
-  const hEl=$("#health");
-  if(S){const ws=S.websocket||{}; const okAll=S.status==="ok";
-    const hd=$("#hdot"); if(hd){hd.className="dot "+(okAll?"on":"warn");}
-    hEl.innerHTML=[["Scanner",S.status==="ok"],["WebSocket",ws.ok],["Database",true],["Redis",true]].map(([k,ok])=>
-      `<div class="kv"><span>${dot(ok)} ${k}</span><span class="badge ${ok?"ok":"bad"}">${ok?"OK":"DOWN"}</span></div>`).join("")+
-      `<div class="kv"><span>Universe</span><span>${S.universe} symbols</span></div>
-       <div class="kv"><span>Last price update</span><span>${num(ws.last_update_age_sec,1)}s ago</span></div>
-       <div class="kv"><span>Uptime</span><span>${Math.floor((S.uptime_sec||0)/60)}m</span></div>`;
-  } else hEl.innerHTML=empty("💔","Status unavailable");
+  // ── market regime (gauges + trend badges) ────────────────────────
+  function regimeHtml(r){
+    if(!r||r.market_regime==null) return empty("🌍","Regime unavailable","Available after the first scan cycle.");
+    const score=Math.max(0,Math.min(100,r.regime_score||0));
+    $("#rg-when") && ($("#rg-when").textContent=r.calculated_at?ago(r.calculated_at)+" ago":"");
+    return `<div class="regime-head">
+        <div class="big r-${esc(r.market_regime)}" style="color:${regColor(r.market_regime)}">${esc(String(r.market_regime).replace(/_/g," "))}</div>
+        <span class="badge muted">score ${num(score,0)}</span></div>
+      <div class="row" style="margin-bottom:14px">BTC ${trendBadge(r.btc_trend)} &nbsp; ETH ${trendBadge(r.eth_trend)}</div>
+      <div class="gauges">
+        ${gauge("Regime Score", score, 100)}
+        ${gauge("Market Breadth", r.breadth, 100, "%")}
+        ${gauge("Breadth EMA50", r.breadth_ema50, 100, "%")}
+        ${gauge("ATR Percentile", r.atr_percentile, 100)}
+      </div>`;
+  }
 
-  // live signals feed
-  const renderSignals = async()=>{
-    const sg=await cachedGet("/api/public/signals?limit=12");const rows=sg.data||[];
-    const el=$("#signals"); if(!el) return;
-    el.innerHTML = rows.length
-      ? tableWrap(["Symbol","Side","TF","Conf","RR","Status","PnL"], signalRows(rows))
-      : empty("📭","No recent signals","Signals appear here as the scanner detects setups.");
-  };
-  await renderSignals();
+  // ── system health (services + uptime) ────────────────────────────
+  function healthHtml(H, S){
+    if(!H||H.status==null) return empty("💔","Status unavailable");
+    const ws=H.websocket||{}, ok=H.status==="ok", wsok=!!ws.ok, dbok=!!(S&&Object.keys(S).length);
+    const sb=(v)=>v==="ok"?'<span class="badge ok">Healthy</span>':v==="warn"?'<span class="badge warn">Warning</span>':'<span class="badge bad">Offline</span>';
+    const svc=[
+      ["Binance REST", ok?"ok":"off"],
+      ["Binance WS", wsok?"ok":"warn"],
+      ["Scanner", ok?"ok":"off"],
+      ["Database", dbok?"ok":"warn"],
+      ["Dashboard", "ok"],
+    ];
+    const hd=$("#hdot"); if(hd) hd.className="dot "+(ok&&wsok?"on":ok?"warn":"off");
+    return svc.map(([n,st])=>`<div class="hrow"><span class="svc">${dot(st==="ok")} ${n}</span>${sb(st)}</div>`).join("")+
+      `<div class="hrow"><span class="svc">Universe</span><b>${num(H.universe,0)} symbols</b></div>
+       <div class="hrow"><span class="svc">Last price update</span><b>${num(ws.last_update_age_sec,1)}s ago</b></div>
+       <div class="hrow"><span class="svc">Uptime</span><b>${Math.floor((H.uptime_sec||0)/60)}m</b></div>`;
+  }
 
-  // winrate mini summary
-  const ws=$("#wrsum");
-  if(W){ ws.innerHTML=`<div class="grid g3">
-      <div class="kv"><span>Long winrate</span><b class="${cls(W.long_winrate-50)}">${num(W.long_winrate,1)}%</b></div>
-      <div class="kv"><span>Short winrate</span><b class="${cls(W.short_winrate-50)}">${num(W.short_winrate,1)}%</b></div>
-      <div class="kv"><span>Average</span><b>${winrate}</b></div>
-      <div class="kv"><span>Best confidence</span><b>${esc(W.best_confidence_bucket)}</b></div>
-      <div class="kv"><span>Best RR</span><b>${esc(W.best_rr_bucket)}</b></div>
-      <div class="kv"><span>Best timeframe</span><b>${esc(W.best_timeframe)}</b></div></div>`;
-  } else ws.innerHTML=empty("📉","No winrate data");
+  // ── performance charts (lazy + reuse) ────────────────────────────
+  const lineOpt={responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:"#a3b8d4"},grid:{color:"#17314b"}},y:{ticks:{color:"#a3b8d4"},grid:{color:"#17314b"}}}};
+  const barOpt={responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:"#a3b8d4"},grid:{color:"#17314b"}},y:{ticks:{color:"#a3b8d4"},grid:{color:"#17314b"}}}};
+  const dnOpt={responsive:true,maintainAspectRatio:false,cutout:"62%",plugins:{legend:{labels:{color:"#a3b8d4"}}}};
+  function buildPerfCharts(P){
+    if(!window.Chart||!P) return;
+    const m=P.monthly||[]; const months=m.map(x=>x.month);
+    let cum=0; const eq=m.map(x=>(cum+= (x.total_pnl||0), +cum.toFixed(2)));
+    upsertChart("pc1",$("#pc1"),"line",months,[{label:"Equity %",data:eq,borderColor:"#20f0c0",backgroundColor:"#20f0c022",fill:true,tension:.3}],lineOpt);
+    upsertChart("pc2",$("#pc2"),"line",months,[{label:"Win %",data:m.map(x=>x.win_rate||0),borderColor:"#38bdf8",backgroundColor:"#38bdf822",fill:true,tension:.3}],lineOpt);
+    upsertChart("pc3",$("#pc3"),"bar",months,[{label:"PnL %",data:m.map(x=>x.total_pnl||0),backgroundColor:"#f59e0baa",borderRadius:6}],barOpt);
+    const lt=(P.long&&P.long.total)||0, st=(P.short&&P.short.total)||0;
+    upsertChart("pc4",$("#pc4"),"doughnut",["Long","Short"],[{data:[lt,st],backgroundColor:["#22c55e","#ef4444"]}],dnOpt);
+  }
 
-  // refresh ONLY this page's live data on an interval (Phase 11/12)
-  every(20000, renderSignals);
+  // ── header chips ────────────────────────────────────────────────
+  function updateHeader(d){
+    const H=d.health||{}, r=d.market_regime||{}; const ws=H.websocket||{};
+    const ss=$("#sysstat"); if(ss){const ok=H.status==="ok"&&ws.ok, warn=H.status==="ok";
+      ss.innerHTML=`<span class="dot ${ok?"on":warn?"warn":"off"}"></span>${ok?"Operational":warn?"Degraded":"Offline"}`;}
+    const ms=$("#mktstat"); if(ms&&r.market_regime) ms.innerHTML=`Market <b style="color:${regColor(r.market_regime)}">${esc(String(r.market_regime).replace(/_/g," "))}</b>`;
+    const lu=$("#lastupd"); if(lu) lu.textContent="Updated "+new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit",second:"2-digit"});
+  }
+
+  // ── fill the page from aggregate data ────────────────────────────
+  function fill(d){
+    if(!d) return; LAST=d;
+    $("#kpis") && ($("#kpis").innerHTML = kpiRow(d));
+    const sigs=(d.signals||[]);
+    const sigEl=$("#sigtable");
+    if(sigEl){
+      if(!vt){
+        vt = virtualTable(sigEl, {
+          rows: sigs, rowH:40, search:["symbol"],
+          filters:[{key:"side",label:"Side",opts:["LONG","SHORT"]},{key:"status",label:"Status",opts:["OPEN","TP1","TP2","TP3","SL"]}],
+          columns:[
+            {key:"created_at",label:"Time",render:s=>shortTime(s.created_at),sortVal:s=>s.created_at||""},
+            {key:"symbol",label:"Symbol",render:s=>`<b>${esc(s.symbol)}</b>`},
+            {key:"side",label:"Side",render:s=>badge(s.side)},
+            {key:"timeframe",label:"TF",render:s=>`<span class="badge muted">${esc(s.timeframe)}</span>`},
+            {key:"confidence",label:"Conf",align:"right",render:s=>confBadge(s.confidence),sortVal:s=>+s.confidence||0},
+            {key:"risk_reward",label:"RR",align:"right",render:s=>num(s.risk_reward,2),sortVal:s=>+s.risk_reward||0},
+            {key:"status",label:"Status",render:s=>badge(s.status,String(s.status).toUpperCase()==="OPEN"?"":"muted")},
+            {key:"pnl_pct",label:"PnL",align:"right",render:s=>String(s.status).toUpperCase()==="OPEN"?'<span class="sub">live</span>':`<span class="${cls(s.pnl_pct)}">${pct(s.pnl_pct)}</span>`,sortVal:s=>+s.pnl_pct||0},
+          ],
+        });
+      } else vt.setRows(sigs);
+    }
+    $("#positions") && ($("#positions").innerHTML = positionCards(d.positions||[]));
+    $("#regime") && ($("#regime").innerHTML = regimeHtml(d.market_regime||{}));
+    $("#health") && ($("#health").innerHTML = healthHtml(d.health||{}, d.stats||{}));
+    updateHeader(d);
+    if(perfMounted) buildPerfCharts(d.performance||{});
+  }
+
+  // initial load — ONE request for the whole dashboard
+  const data = await getDashboard();
+  fill(data);
+
+  // lazy-build the performance charts only when scrolled into view (Task 6)
+  lazyMount($("#perf-sec"), ()=>{ perfMounted=true; if(LAST) buildPerfCharts(LAST.performance||{}); });
+
+  // register the in-place refresher driven by the single global timer (Task 3)
+  REFRESHERS.dashboard = async ()=>{ const d=await getDashboard(); fill(d); };
 };
 
 PAGES.analytics = async (v) => {
@@ -376,12 +561,18 @@ PAGES.analytics = async (v) => {
 
   if(!window.Chart) return;
   const gridc="#17314b", txtc="#a3b8d4";
-  const opt=(extra={})=>Object.assign({responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:txtc}}},scales:{x:{ticks:{color:txtc},grid:{color:gridc}},y:{ticks:{color:txtc},grid:{color:gridc}}}},extra);
-  const sig=JSON.stringify({cb,rb,l:W.long_winrate,s:W.short_winrate});
-  mkChart("c1",$("#c1"),{type:"bar",data:{labels:cb.map(b=>b.label),datasets:[{label:"Winrate %",data:cb.map(b=>b.winrate||0),backgroundColor:"#20f0c0aa",borderRadius:6}]},options:opt()},sig);
-  mkChart("c2",$("#c2"),{type:"doughnut",data:{labels:["Long","Short"],datasets:[{data:[W.long_winrate,W.short_winrate],backgroundColor:["#22c55e","#ef4444"]}]},options:{responsive:true,maintainAspectRatio:false,cutout:"62%",plugins:{legend:{labels:{color:txtc}}}}},sig);
-  mkChart("c3",$("#c3"),{type:"bar",data:{labels:rb.map(b=>b.label),datasets:[{label:"Winrate %",data:rb.map(b=>b.winrate||0),backgroundColor:"#f59e0baa",borderRadius:6}]},options:opt()},sig);
-  mkChart("c4",$("#c4"),{type:"bar",data:{labels:cb.map(b=>b.label),datasets:[{label:"Trades",data:cb.map(b=>b.total??b.count??0),backgroundColor:"#38bdf8aa",borderRadius:6}]},options:opt()},sig);
+  const opt={responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:txtc}}},scales:{x:{ticks:{color:txtc},grid:{color:gridc}},y:{ticks:{color:txtc},grid:{color:gridc}}}};
+  const dn={responsive:true,maintainAspectRatio:false,cutout:"62%",plugins:{legend:{labels:{color:txtc}}}};
+  function build(WW){
+    const cbx=WW.confidence_buckets||[], rbx=WW.rr_buckets||[];
+    upsertChart("c1",$("#c1"),"bar",cbx.map(b=>b.label),[{label:"Winrate %",data:cbx.map(b=>b.winrate||0),backgroundColor:"#20f0c0aa",borderRadius:6}],opt);
+    upsertChart("c2",$("#c2"),"doughnut",["Long","Short"],[{data:[WW.long_winrate,WW.short_winrate],backgroundColor:["#22c55e","#ef4444"]}],dn);
+    upsertChart("c3",$("#c3"),"bar",rbx.map(b=>b.label),[{label:"Winrate %",data:rbx.map(b=>b.winrate||0),backgroundColor:"#f59e0baa",borderRadius:6}],opt);
+    upsertChart("c4",$("#c4"),"bar",cbx.map(b=>b.label),[{label:"Trades",data:cbx.map(b=>b.total??b.count??0),backgroundColor:"#38bdf8aa",borderRadius:6}],opt);
+  }
+  let mounted=false;
+  lazyMount($("#c1").closest(".grid"), ()=>{ mounted=true; build(W); });   // lazy (Task 6)
+  REFRESHERS.analytics = async ()=>{ const r=await cachedGet("/api/public/winrate-analysis"); if(r.data && mounted) build(r.data); };  // reuse (Task 4)
 };
 
 PAGES.paper = async (v) => {
@@ -674,20 +865,22 @@ async function adminUser(id){try{const d=await api("/api/admin/users/"+id);const
 async function adminStatus(id,status){confirmModal({title:status+" user "+id,body:`<div class="alert ${status==="SUSPENDED"?"warn":"info"}">${status==="SUSPENDED"?"Suspending blocks this user from trading.":"Re-activate this user's account."}</div>`,confirmText:status==="SUSPENDED"?"Suspend":"Activate",danger:status==="SUSPENDED",onConfirm:async()=>{await api("/api/admin/users/"+id+"/status",{method:"PUT",body:{status}});toast("User "+status,"ok");refresh();}});}
 
 // ── router (debounced; tears down previous page) ───────────────────
-let ROUTE_PENDING=false, ROUTE_TOKEN=0;
+let ROUTE_TOKEN=0;
 async function route(){
   if(!ME)return;
   let r=(location.hash||"#/dashboard").replace("#/","");
   if(!PAGES[r])r="dashboard";
-  // teardown previous page: stop its timers + destroy charts (Phase 12)
-  clearPageTimers(); destroyCharts();
+  // teardown previous page: stop the single timer, destroy charts, drop refreshers
+  stopPageTimer(); destroyCharts();
+  for(const k in REFRESHERS) delete REFRESHERS[k];
+  CURRENT_PAGE = r;
   setActive(r);
   const token=++ROUTE_TOKEN;
   const v=$("#view"); if(!v)return;
   v.innerHTML=skel(6);
   // re-trigger page transition
   v.style.animation="none"; void v.offsetWidth; v.style.animation="fade .22s ease";
-  try{ await PAGES[r](v); }
+  try{ await PAGES[r](v); if(token===ROUTE_TOKEN) startPageTimer(r); }
   catch(e){ if(token!==ROUTE_TOKEN)return; if(e.status===401){logout();return;} v.innerHTML=`<div class="card pad">${empty("⚠️","Failed to load page",e.detail||"")}</div>`; }
 }
 // debounce rapid hashchange bursts
