@@ -80,6 +80,13 @@ CLI that runs the real (read-only) validator + preflight against testnet (or
 `--prod`), prints each check as JSON, and can optionally print a `--plan-notional`
 order quantity. This is the operator tool for the §11.1 testnet check.
 
+### 21F-e — Executor precision rounding (`app/exchange_adapters/binance.py`)
+`open_order` now rounds qty down to `step_size` and LIMIT price to `tick_size`
+via the pure `enforce_order_precision`, backed by a per-instance `exchangeInfo`
+cache (one extra read-only call per symbol). A qty that rounds below `min_qty`
+is rejected with a clear `AdapterError` instead of an opaque exchange reject. It
+does not auto-bump size to meet min-notional (risk stays as intended).
+
 ---
 
 ## 3. Files changed
@@ -87,22 +94,25 @@ order quantity. This is the operator tool for the §11.1 testnet check.
 New: `app/exchange_vault/binance_preflight.py`,
 `tests/test_binance_preflight.py`, `scripts/binance_testnet_preflight.py`,
 this report. Modified: `app/exchange_vault/permission_validator.py`,
-`app/config.py`, `app/live_trading/service.py`, `app/live_trading/router.py`.
+`app/config.py`, `app/live_trading/service.py`, `app/live_trading/router.py`,
+`app/exchange_adapters/binance.py`.
 
 ---
 
 ## 4. Tests
 
-- **255 passed** (was 233 in Sprint 21; **+22 new** in
+- **259 passed** (was 233 in Sprint 21; **+26 new** in
   `test_binance_preflight.py`), run in an ephemeral container from the
   `futures-signal-bot-bot:latest` image with the repo mounted — the live
   `signals-bot` container was **not** touched.
 - New coverage: clock-skew OK/WARN/FAIL; filter parsing (futures + spot
   min-notional keys, missing symbol); step-down/step-up/price rounding;
   min-notional; order-quantity planning (round, bump-to-min, unknown symbol,
-  non-positive inputs); preflight aggregation (pass, hard-fail, empty); host
-  selection; and the testnet futures-account classifier (canTrade true/false,
-  unreachable, trusted-withdraw rejection).
+  non-positive inputs); executor precision enforcement (round qty/price,
+  market leaves price, below-min reject, no-filter passthrough); preflight
+  aggregation (pass, hard-fail, empty); host selection; and the testnet
+  futures-account classifier (canTrade true/false, unreachable, trusted-withdraw
+  rejection).
 - All pure / offline. The `run_binance_preflight` and `validate_binance` network
   paths remain **not exercised in CI** — run the manual script against testnet
   to exercise them.
@@ -145,9 +155,14 @@ this report. Modified: `app/exchange_vault/permission_validator.py`,
   design; the manual script is the gate.
 - Testnet cannot introspect the **API-key** withdrawal permission (only the prod
   SAPI path can); on testnet it stays `None` + warning.
-- Filters/precision are wired into validation/preflight and `plan_order_quantity`
-  but the live executor's own rounding is unchanged in this sprint (next step:
-  have `open_position` round via `plan_order_quantity`).
+- The live executor now rounds: `BinanceFuturesAdapter.open_order` rounds qty
+  **down** to `step_size` and LIMIT price to `tick_size` via the pure
+  `enforce_order_precision` (per-instance `exchangeInfo` cache), and rejects with
+  a clear error if the rounded qty falls below `min_qty`. It deliberately does
+  **not** auto-bump to min-notional (that would silently increase risk);
+  below-minimum notional is left to surface as a normal exchange rejection
+  (classified by the 21D engine). `plan_order_quantity` remains the
+  preview/planning helper for "risk ~N USDT".
 
 ---
 

@@ -226,6 +226,40 @@ def plan_order_quantity(filters: SymbolFilters, price: float, target_notional: f
                      reason=f"qty={qty} notional≈{notional:.4f} USDT")
 
 
+@dataclass
+class PrecisionResult:
+    ok: bool
+    qty: float
+    price: Optional[float] = None
+    reason: str = ""
+
+
+def enforce_order_precision(
+    filters: SymbolFilters, qty: float, price: Optional[float], order_type: str,
+) -> PrecisionResult:
+    """
+    Round an order to the symbol's valid precision before it is sent.
+
+    Quantity is rounded **DOWN** to ``step_size`` (never silently bumped up — that
+    would increase position size / risk beyond intent). LIMIT prices are rounded
+    to ``tick_size``. A quantity that falls below ``min_qty`` after rounding is a
+    hard ``ok=False`` (the caller should reject rather than let the exchange
+    return an opaque rejection). With no filters available, passes through
+    unchanged so behaviour is never worse than before.
+    """
+    if not filters.found:
+        return PrecisionResult(True, float(qty), price, "no filters available; passthrough")
+    rq = round_step_down(qty, filters.step_size)
+    if rq <= 0 or (filters.min_qty and rq < filters.min_qty):
+        return PrecisionResult(
+            False, rq, price,
+            f"quantity {qty} rounds to {rq}, below minimum {filters.min_qty} for {filters.symbol}")
+    rp = price
+    if order_type.upper() in ("LIMIT", "STOP", "TAKE_PROFIT") and price:
+        rp = round_price(price, filters.tick_size)
+    return PrecisionResult(True, rq, rp, "")
+
+
 # ── preflight aggregation ───────────────────────────────────────────
 
 

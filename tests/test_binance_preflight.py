@@ -15,6 +15,7 @@ from app.exchange_vault.binance_preflight import (
     build_preflight_summary,
     check_min_notional,
     classify_clock_skew,
+    enforce_order_precision,
     fapi_base,
     parse_symbol_filters,
     plan_order_quantity,
@@ -133,6 +134,33 @@ def test_plan_order_quantity_rejects_nonpositive():
     f = parse_symbol_filters(_INFO, "BTCUSDT")
     assert not plan_order_quantity(f, price=0, target_notional=10).ok
     assert not plan_order_quantity(f, price=10, target_notional=0).ok
+
+
+# ── order precision enforcement (executor path) ─────────────────────
+
+def test_enforce_precision_rounds_qty_down_and_price_to_tick():
+    f = parse_symbol_filters(_INFO, "BTCUSDT")
+    r = enforce_order_precision(f, qty=0.12345, price=100.07, order_type="LIMIT")
+    assert r.ok and r.qty == 0.123 and r.price == 100.10
+
+
+def test_enforce_precision_market_leaves_price_none():
+    f = parse_symbol_filters(_INFO, "BTCUSDT")
+    r = enforce_order_precision(f, qty=0.0039, price=None, order_type="MARKET")
+    assert r.ok and r.qty == 0.003 and r.price is None
+
+
+def test_enforce_precision_rejects_below_min_qty():
+    f = parse_symbol_filters(_INFO, "BTCUSDT")
+    # 0.0005 rounds down to 0.000 -> below min_qty 0.001 -> hard reject
+    r = enforce_order_precision(f, qty=0.0005, price=None, order_type="MARKET")
+    assert not r.ok and "below minimum" in r.reason
+
+
+def test_enforce_precision_passthrough_without_filters():
+    f = SymbolFilters(symbol="NEW", found=False)
+    r = enforce_order_precision(f, qty=1.23456, price=9.99, order_type="LIMIT")
+    assert r.ok and r.qty == 1.23456 and r.price == 9.99
 
 
 # ── preflight aggregation ───────────────────────────────────────────

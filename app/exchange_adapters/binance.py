@@ -47,6 +47,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         self._testnet = settings.binance_testnet if testnet is None else testnet
         self._base = _TESTNET_URL if self._testnet else _PROD_URL
         self._session = None  # lazy aiohttp session
+        self._filters: dict = {}  # symbol -> SymbolFilters (per-instance cache)
 
     # ── gate ──────────────────────────────────────────────────────
 
@@ -131,10 +132,29 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             if "4046" not in str(exc):
                 raise
 
+    async def _symbol_filters(self, symbol: str):
+        """Fetch + cache this symbol's trading filters (public exchangeInfo)."""
+        from app.exchange_vault.binance_preflight import parse_symbol_filters
+        symbol = symbol.upper()
+        cached = self._filters.get(symbol)
+        if cached is not None and cached.found:
+            return cached
+        info = await self._request("GET", "/fapi/v1/exchangeInfo", {"symbol": symbol}, signed=False)
+        f = parse_symbol_filters(info if isinstance(info, dict) else {}, symbol)
+        self._filters[symbol] = f
+        return f
+
     async def open_order(
         self, *, symbol: str, side: str, qty: float, order_type: str = "MARKET",
         price: Optional[float] = None, reduce_only: bool = False,
     ) -> OrderResult:
+        # Round to the symbol's valid step/tick precision before sending so a
+        # raw computed quantity never triggers a PRECISION_ERROR / opaque reject.
+        from app.exchange_vault.binance_preflight import enforce_order_precision
+        prec = enforce_order_precision(await self._symbol_filters(symbol), qty, price, order_type)
+        if not prec.ok:
+            raise AdapterError(f"Binance precision: {prec.reason}")
+        qty, price = prec.qty, prec.price
         params: dict[str, Any] = {
             "symbol": symbol, "side": side, "type": order_type, "quantity": qty,
         }
