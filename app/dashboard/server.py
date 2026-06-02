@@ -1335,57 +1335,6 @@ async def api_setup_library():
     return JSONResponse({"setups": _SETUP_LIBRARY, "count": len(_SETUP_LIBRARY)})
 
 
-# ── Sprint 15: Public Watchlist ───────────────────────────────────
-
-@app.get("/api/public/watchlist")
-async def api_public_watchlist(symbols: str = ""):
-    """Return latest signal + status for each requested symbol (localStorage watchlist)."""
-    import re as _re
-    raw = [s.strip().upper() for s in symbols.split(",") if s.strip()][:20]
-    symbol_list = [_re.sub(r"[^A-Z0-9]", "", s)[:20] for s in raw]
-    symbol_list = [s for s in symbol_list if s]
-
-    if not symbol_list:
-        return JSONResponse({"error": "symbols parameter required"}, status_code=400)
-
-    try:
-        prices = ws_health().get("prices", {})
-        rows = []
-
-        async with SessionLocal() as session:
-            for sym in symbol_list:
-                res = await session.execute(
-                    select(Signal)
-                    .where(
-                        Signal.symbol == sym,
-                        Signal.strategy == _MTF_STRATEGY,
-                        Signal.timeframe.in_(_MTF_TIMEFRAMES),
-                    )
-                    .order_by(desc(Signal.created_at))
-                    .limit(1)
-                )
-                sig = res.scalar_one_or_none()
-                rows.append({
-                    "symbol": sym,
-                    "current_price": prices.get(sym),
-                    "status": sig.status if sig else "no_signal",
-                    "latest_signal": {
-                        "side": sig.side,
-                        "confidence": round(float(sig.confidence or 0), 1),
-                        "rr": round(float(sig.risk_reward or 0), 2),
-                        "status": sig.status,
-                        "entry": round(float(sig.entry_low or 0), 6),
-                        "tp1": round(float(sig.tp1 or 0), 6),
-                        "sl": round(float(sig.stop_loss or 0), 6),
-                        "timeframe": sig.timeframe,
-                        "created_at": sig.created_at.isoformat() if sig.created_at else None,
-                    } if sig else None,
-                })
-
-        return JSONResponse({"watchlist": rows, "count": len(rows)})
-    except Exception as exc:
-        return JSONResponse({"error": str(exc)}, status_code=500)
-
 
 # ── Sprint 19A: Market Regime ─────────────────────────────────────
 
@@ -2283,10 +2232,6 @@ async def setup_library_page():
     return HTMLResponse(_setup_library_page_html())
 
 
-@app.get("/watchlist", response_class=HTMLResponse)
-async def watchlist_page():
-    return HTMLResponse(_watchlist_page_html())
-
 
 @app.get("/about", response_class=HTMLResponse)
 async def about_page():
@@ -2466,7 +2411,6 @@ footer{{border-top:1px solid #13263a;padding:26px 24px;text-align:center;color:#
     <a href="/market-radar">Market Radar</a>
     <a href="/performance-center">Performance</a>
     <a href="/setup-library">Setup Library</a>
-    <a href="/watchlist">Watchlist</a>
     <a href="/faq">FAQ</a>
   </div>
 </div>
@@ -4405,134 +4349,6 @@ document.addEventListener('DOMContentLoaded', loadLibrary);
 #  Sprint 15 — Watchlist
 # ══════════════════════════════════════════════════════════════════
 
-def _watchlist_page_html() -> str:
-    css = """
-.wl-title{font-size:26px;font-weight:900;color:#eaf2ff;margin-bottom:4px}
-.wl-sub{font-size:12px;color:#7fa0c8;margin-bottom:20px;letter-spacing:1px}
-.wl-add{display:flex;gap:10px;margin-bottom:18px;flex-wrap:wrap}
-.wl-input{flex:1;min-width:180px;background:#07101a;border:1px solid #17314b;border-radius:9px;color:#eaf2ff;padding:11px 14px;font-size:14px;outline:none;font-family:inherit}
-.wl-input:focus{border-color:#20f0c0}
-.wl-add-btn{background:linear-gradient(90deg,#08a98f,#20f0c0);color:#001b18;border:none;border-radius:9px;font-weight:900;font-size:13px;padding:11px 22px;cursor:pointer;letter-spacing:1px;white-space:nowrap}
-.wl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;margin-bottom:24px}
-.wl-card{background:linear-gradient(180deg,#101827,#0b1320);border:1px solid #17314b;border-radius:13px;padding:18px;position:relative}
-.wl-card-sym{font-size:16px;font-weight:900;color:#eaf2ff;margin-bottom:4px}
-.wl-card-price{font-size:13px;color:#7fa0c8;margin-bottom:12px}
-.wl-card-sig{font-size:12px;margin-bottom:10px}
-.wl-remove{position:absolute;top:14px;right:14px;background:rgba(255,79,97,.1);border:1px solid rgba(255,79,97,.25);border-radius:6px;color:#ff4f61;padding:4px 9px;cursor:pointer;font-size:11px;font-weight:700}
-.wl-remove:hover{background:rgba(255,79,97,.2)}
-.wl-tg-cta{background:rgba(32,230,195,.06);border:1px solid rgba(32,230,195,.2);border-radius:13px;padding:20px;text-align:center;margin-bottom:18px}
-.wl-tg-cta h3{color:#20e6c3;margin-bottom:8px;font-size:16px}
-.wl-tg-cta p{color:#7fa0c8;font-size:13px;margin-bottom:12px}
-.wl-empty{background:#0b1320;border:1px solid #17314b;border-radius:13px;padding:40px;text-align:center;color:#627a99}
-.wl-empty h3{font-size:18px;margin-bottom:8px;color:#8fa8c7}
-.no-sig{color:#627a99;font-size:12px;font-style:italic}
-@media(max-width:480px){.wl-add{flex-direction:column}}
-"""
-    body = """
-<div class="wl-title">MY WATCHLIST</div>
-<div class="wl-sub">TRACK FAVORITE PAIRS &nbsp;·&nbsp; Stored locally in your browser &nbsp;·&nbsp; No login required</div>
-
-<div class="wl-add">
-  <input id="wl-input" class="wl-input" placeholder="Add symbol e.g. BTCUSDT, ETHUSDT" maxlength="30" onkeydown="if(event.key==='Enter')addSymbol()">
-  <button class="wl-add-btn" onclick="addSymbol()">+ Add Symbol</button>
-</div>
-
-<div id="wl-grid" class="wl-grid">
-  <div class="wl-empty"><h3>Your watchlist is empty</h3><p>Add symbols above to track their latest signals.</p></div>
-</div>
-
-<div class="wl-tg-cta">
-  <h3>Get Notified on Telegram</h3>
-  <p>Join our Telegram channel to receive real-time alerts when new signals appear for your watched pairs.</p>
-  <a href="/faq" style="background:linear-gradient(90deg,#08a98f,#20f0c0);color:#001b18;border:none;border-radius:9px;font-weight:900;font-size:13px;padding:10px 22px;display:inline-block">Notify me on Telegram →</a>
-</div>
-"""
-    js = """
-const WL_KEY = 'alpha_radar_watchlist';
-
-function loadWatchlist() {
-  try { return JSON.parse(localStorage.getItem(WL_KEY) || '[]'); }
-  catch(e) { return []; }
-}
-
-function saveWatchlist(list) {
-  localStorage.setItem(WL_KEY, JSON.stringify(list));
-}
-
-function addSymbol() {
-  const raw = document.getElementById('wl-input').value.trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
-  if (!raw || raw.length > 20) return;
-  const list = loadWatchlist();
-  if (list.includes(raw)) { alert(raw + ' is already in your watchlist'); return; }
-  list.push(raw);
-  saveWatchlist(list);
-  document.getElementById('wl-input').value = '';
-  renderAll();
-}
-
-function removeSymbol(sym) {
-  const list = loadWatchlist().filter(s => s !== sym);
-  saveWatchlist(list);
-  renderAll();
-}
-
-function statusBadge(s) {
-  if (!s || s === 'no_signal') return '<span style="color:#627a99;font-size:11px">No signal</span>';
-  if (s === 'OPEN') return '<span class="bopen">OPEN</span>';
-  if (s === 'SL') return '<span class="bsl">SL</span>';
-  if (s === 'EXPIRED') return '<span class="bexp">EXP</span>';
-  return '<span class="btp">' + s + '</span>';
-}
-
-function sideBadge(s) {
-  return '<span class="' + (s==='LONG'?'bl2':'bs2') + '">' + s + '</span>';
-}
-
-async function renderAll() {
-  const list = loadWatchlist();
-  const grid = document.getElementById('wl-grid');
-  if (!list.length) {
-    grid.innerHTML = '<div class="wl-empty"><h3>Your watchlist is empty</h3><p>Add symbols above to track their latest signals.</p></div>';
-    return;
-  }
-  grid.innerHTML = list.map(sym =>
-    '<div class="wl-card" id="wl-' + sym + '">' +
-    '<div class="wl-card-sym">' + sym + '</div>' +
-    '<div class="wl-card-price" id="wlp-' + sym + '">Loading...</div>' +
-    '<div class="wl-card-sig" id="wls-' + sym + '">Loading signal...</div>' +
-    '<button class="wl-remove" onclick="removeSymbol(\'' + sym + '\')">✕ Remove</button>' +
-    '</div>'
-  ).join('');
-
-  try {
-    const r = await fetch('/api/public/watchlist?symbols=' + list.join(','));
-    if (!r.ok) return;
-    const d = await r.json();
-    (d.watchlist || []).forEach(item => {
-      const priceEl = document.getElementById('wlp-' + item.symbol);
-      const sigEl = document.getElementById('wls-' + item.symbol);
-      if (priceEl) {
-        priceEl.textContent = item.current_price ? 'Price: $' + parseFloat(item.current_price).toFixed(4) : 'Price: —';
-      }
-      if (sigEl) {
-        const sig = item.latest_signal;
-        if (!sig) {
-          sigEl.innerHTML = '<span class="no-sig">No signals found</span>';
-        } else {
-          sigEl.innerHTML =
-            sideBadge(sig.side) + ' ' + statusBadge(sig.status) +
-            ' <span style="color:#20e6c3">' + sig.confidence + '%</span>' +
-            ' <span style="color:#ffd84d">1:' + sig.rr + '</span>' +
-            '<div style="font-size:10px;color:#627a99;margin-top:4px">Entry: ' + sig.entry + ' | TP1: ' + sig.tp1 + '</div>';
-        }
-      }
-    });
-  } catch(e) { console.error(e); }
-}
-
-document.addEventListener('DOMContentLoaded', renderAll);
-"""
-    return _page_shell("Watchlist", body, extra_css=css, extra_js=js)
 
 
 def create_app():
@@ -4744,17 +4560,17 @@ a{color:inherit;text-decoration:none}button{font-family:inherit}.container{width
 </style>
 </head>
 <body>
-<nav class="nav"><div class="container nav-in"><a class="brand" href="/"><svg class="logo-svg" viewBox="0 0 100 100" fill="none"><circle cx="50" cy="50" r="44" stroke="#18f28b" stroke-width="5"/><path d="M50 12 84 84H68L58 62H42L32 84H16L50 12Z" fill="url(#g)"/><path d="M37 58 50 31l13 27H37Z" fill="#031020" opacity=".85"/><path d="M25 76c13-10 30-15 50-16" stroke="#08e8d2" stroke-width="5" stroke-linecap="round"/><defs><linearGradient id="g" x1="20" y1="12" x2="82" y2="85"><stop stop-color="#08e8d2"/><stop offset="1" stop-color="#18f28b"/></linearGradient></defs></svg><div class="brand-word">ARGUS <b>QUANT</b></div></a><div class="nav-links"><a href="/signals">Signals</a><a href="/market-radar">Market Radar</a><a href="/performance-center">Performance</a><a href="/setup-library">Setup Library</a><a href="/watchlist">Watchlist</a><a href="/faq">FAQ</a></div>__TG_BTN__<div class="lang-sel"><button class="lang-btn" id="lang-btn" onclick="toggleLangMenu(event)" aria-label="Select language">🌐 <span id="lang-cur">EN</span> ▾</button><div class="lang-menu" id="lang-menu"></div></div></div></nav>
+<nav class="nav"><div class="container nav-in"><a class="brand" href="/"><svg class="logo-svg" viewBox="0 0 100 100" fill="none"><circle cx="50" cy="50" r="44" stroke="#18f28b" stroke-width="5"/><path d="M50 12 84 84H68L58 62H42L32 84H16L50 12Z" fill="url(#g)"/><path d="M37 58 50 31l13 27H37Z" fill="#031020" opacity=".85"/><path d="M25 76c13-10 30-15 50-16" stroke="#08e8d2" stroke-width="5" stroke-linecap="round"/><defs><linearGradient id="g" x1="20" y1="12" x2="82" y2="85"><stop stop-color="#08e8d2"/><stop offset="1" stop-color="#18f28b"/></linearGradient></defs></svg><div class="brand-word">ARGUS <b>QUANT</b></div></a><div class="nav-links"><a href="/signals">Signals</a><a href="/market-radar">Market Radar</a><a href="/performance-center">Performance</a><a href="/setup-library">Setup Library</a><a href="/faq">FAQ</a></div>__TG_BTN__<div class="lang-sel"><button class="lang-btn" id="lang-btn" onclick="toggleLangMenu(event)" aria-label="Select language">🌐 <span id="lang-cur">EN</span> ▾</button><div class="lang-menu" id="lang-menu"></div></div></div></nav>
 <header class="hero"><div class="container"><div class="hero-grid"><div><h1 class="hero-title"><span>AI-POWERED</span><span><b class="futures">FUTURES</b> <b class="signals">SIGNALS</b></span></h1><p class="hero-sub">Multi-Timeframe Analysis • Risk Managed • 24/7 Scanner</p><div class="feature-row"><div class="fitem"><div class="ficon">◎</div><div class="ftxt"><b>High Accuracy</b>AI Validated</div></div><div class="fitem"><div class="ficon">盾</div><div class="ftxt"><b>Risk Managed</b>Smart Entries</div></div><div class="fitem"><div class="ficon">⚡</div><div class="ftxt"><b>24/7 Scanner</b>Never Miss Setup</div></div><div class="fitem"><div class="ficon">▥</div><div class="ftxt"><b>Live Performance</b>Transparent Stats</div></div></div><div class="hero-btns">__HERO_BTNS__</div></div><div class="radar-wrap"><div class="radar"><div class="sweep"></div><div class="dot d1"></div><div class="dot d2"></div><div class="dot d3"></div><div class="dot d4"></div><div class="radar-a"><svg viewBox="0 0 100 100"><path d="M50 14 83 84H66L58 63H42L34 84H17L50 14Z" fill="url(#ra)"/><path d="M38 58 50 32l12 26H38Z" fill="#061329"/><defs><linearGradient id="ra" x1="20" y1="10" x2="80" y2="90"><stop stop-color="#08e8d2"/><stop offset="1" stop-color="#18f28b"/></linearGradient></defs></svg></div></div><div class="chip btc">BTCUSDT<small>LONG</small></div><div class="chip eth">ETHUSDT<small style="color:#ff4564">SHORT</small></div><div class="chip sol">SOLUSDT<small>LONG</small></div></div></div><div class="stats-strip card"><div class="stat"><div class="slbl" data-i18n="stats.total">Total Signals (30D)</div><div id="s-total" class="sval" style="color:var(--cyan)">--</div><div class="spark"></div></div><div class="stat"><div class="slbl" data-i18n="stats.win_rate">Win Rate (30D)</div><div id="s-wr" class="sval">--</div><div class="spark"></div></div><div class="stat"><div class="slbl" data-i18n="stats.avg_rr">Avg RR (30D)</div><div id="s-rr" class="sval">1:2.2</div><div class="spark"></div></div><div class="stat"><div class="slbl" data-i18n="stats.markets">Markets Scanned</div><div id="s-mkts" class="sval">206</div><div class="spark"></div></div><div class="stat"><div class="slbl" data-i18n="stats.positions">Open Positions</div><div id="s-active" class="sval">--</div><div class="spark"></div></div></div></div></header>
 <section class="section" id="exchanges-section"><div class="container"><div class="center-head"><span class="eyebrow">♛ Partners</span><h2 class="section-title" data-i18n="section.exchanges">Trusted Partner Exchanges</h2><p class="section-sub" data-i18n="section.exchanges_sub">Trade on the best platforms with exclusive bonuses</p></div>__AFFILIATES__<p style="text-align:center;color:var(--muted);font-size:12px;margin-top:12px">🛡 We only recommend trusted exchanges. We may earn a commission at no extra cost to you.</p></div></section>
 <section class="section"><div class="container"><div class="tg-cta"><div class="tg-inner"><div class="phone"><div class="phone-frame"><div class="phone-top"></div><div class="msg">🚀 BTCUSDT LONG<br/>Entry: 97,450<br/>TP1: 98,800<br/>RR: 1:2.5</div><div class="msg good">✅ ETHUSDT TP1 hit<br/>+3.2% profit</div><div class="msg">📊 Weekly Summary<br/>Win Rate: 62.4%</div></div></div><div class="tg-copy"><h2>JOIN 12,000+ TRADERS<br/><span>ON TELEGRAM</span></h2><div class="tg-list"><div><b>✓</b> Real-time Signals</div><div><b>✓</b> Market Alerts</div><div><b>✓</b> Weekly Reports</div><div><b>✓</b> Strategy Insights</div><div><b>✓</b> Community Support</div></div></div><div class="tg-action"><a class="tg-big" href="__TG_URL__" target="_blank" rel="noopener">➤ JOIN TELEGRAM NOW</a><div class="tg-hint">No Spam • No Ads • 100% Free</div></div></div></div></div></section>
 <section class="section" id="radar-mini-section"><div class="container"><div class="center-head"><span class="eyebrow">📡 Intelligence</span><h2 class="section-title">TODAY'S MARKET RADAR</h2><p class="section-sub">Live market bias, risk level, and sentiment — updated every 45 seconds</p></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px" id="radar-mini-grid"><div style="background:var(--card);border:1px solid rgba(49,159,208,.22);border-radius:var(--r);padding:18px;text-align:center"><div style="font-size:10px;text-transform:uppercase;letter-spacing:1.8px;color:var(--muted);margin-bottom:8px">BTC Bias</div><div id="rml-btc" style="font-size:20px;font-weight:900;color:var(--yellow)">—</div></div><div style="background:var(--card);border:1px solid rgba(49,159,208,.22);border-radius:var(--r);padding:18px;text-align:center"><div style="font-size:10px;text-transform:uppercase;letter-spacing:1.8px;color:var(--muted);margin-bottom:8px">ETH Bias</div><div id="rml-eth" style="font-size:20px;font-weight:900;color:var(--yellow)">—</div></div><div style="background:var(--card);border:1px solid rgba(49,159,208,.22);border-radius:var(--r);padding:18px;text-align:center"><div style="font-size:10px;text-transform:uppercase;letter-spacing:1.8px;color:var(--muted);margin-bottom:8px">Market Risk</div><div id="rml-risk" style="font-size:20px;font-weight:900;color:var(--yellow)">—</div></div><div style="background:var(--card);border:1px solid rgba(49,159,208,.22);border-radius:var(--r);padding:18px;text-align:center"><div style="font-size:10px;text-transform:uppercase;letter-spacing:1.8px;color:var(--muted);margin-bottom:8px">Sentiment</div><div id="rml-sent" style="font-size:20px;font-weight:900;color:var(--yellow)">—</div></div><div style="background:var(--card);border:1px solid rgba(49,159,208,.22);border-radius:var(--r);padding:18px;text-align:center"><div style="font-size:10px;text-transform:uppercase;letter-spacing:1.8px;color:var(--muted);margin-bottom:8px">Signals 24H</div><div id="rml-24h" style="font-size:20px;font-weight:900;color:var(--cyan)">—</div></div></div><div style="text-align:center;margin-top:18px"><a href="/market-radar" style="color:var(--cyan);font-weight:800">View Full Market Radar →</a></div></div></section>
 <section class="section" id="strategy-section"><div class="container"><div class="center-head"><span class="eyebrow">⚙ Engine</span><h2 class="section-title" data-i18n="section.strategy">LIVE STRATEGY ENGINE</h2><p class="section-sub" data-i18n="section.strategy_sub">Exact strategy logic currently used by the bot — updated from live config</p></div><div class="strat-grid"><div class="strat-card"><div class="strat-title"><span>📈 1D Trend Engine</span><span class="strat-tf">1D</span></div><div class="strat-row"><span class="strat-lbl">EMA200 Direction</span><span class="strat-val sv-pass">Above = Bullish</span></div><div class="strat-row"><span class="strat-lbl">EMA50 vs EMA200</span><span class="strat-val sv-pass">LONG: EMA50 &gt; EMA200</span></div><div class="strat-row"><span class="strat-lbl">Current Trend Bias</span><span class="strat-val sv-pass">EMA cross required</span></div><div class="strat-row"><span class="strat-lbl">Structure Confirm</span><span class="strat-val">BOS / MSS</span></div><div class="strat-row"><span class="strat-lbl">Trend Score Max</span><span class="strat-val">20 pts</span></div></div><div class="strat-card"><div class="strat-title"><span>🏗 4H Market Structure</span><span class="strat-tf">4H</span></div><div class="strat-row"><span class="strat-lbl">BOS / CHoCH</span><span class="strat-val sv-pass">Checked</span></div><div class="strat-row"><span class="strat-lbl">Range / Expansion</span><span class="strat-val sv-pass">Checked</span></div><div class="strat-row"><span class="strat-lbl">Higher High / Lower Low</span><span class="strat-val sv-pass">Checked</span></div><div class="strat-row"><span class="strat-lbl">Order Block + FVG</span><span class="strat-val sv-pass">Checked</span></div><div class="strat-row"><span class="strat-lbl">Min Confluence</span><span class="strat-val sv-warn">2 / 5 required</span></div></div><div class="strat-card"><div class="strat-title"><span>🎯 1H Setup Engine</span><span class="strat-tf">1H</span></div><div class="strat-row"><span class="strat-lbl">Pullback Zone</span><span class="strat-val sv-pass">Checked</span></div><div class="strat-row"><span class="strat-lbl">Fair Value Gap</span><span class="strat-val sv-pass">Checked</span></div><div class="strat-row"><span class="strat-lbl">Order Block</span><span class="strat-val sv-pass">Checked</span></div><div class="strat-row"><span class="strat-lbl">Momentum Confirmation</span><span class="strat-val sv-pass">Checked</span></div><div class="strat-row"><span class="strat-lbl">Min Confluence</span><span class="strat-val sv-warn">3 / 5 required</span></div></div><div class="strat-card"><div class="strat-title"><span>⚡ 15M Entry Timing</span><span class="strat-tf">15M</span></div><div class="strat-row"><span class="strat-lbl">BOS (Break of Structure)</span><span class="strat-val">Factor 1</span></div><div class="strat-row"><span class="strat-lbl">FVG Retest</span><span class="strat-val">Factor 2</span></div><div class="strat-row"><span class="strat-lbl">OB Retest</span><span class="strat-val">Factor 3</span></div><div class="strat-row"><span class="strat-lbl">EMA Pullback</span><span class="strat-val">Factor 4</span></div><div class="strat-row"><span class="strat-lbl">VWAP Reclaim</span><span class="strat-val">Factor 5</span></div><div class="strat-row"><span class="strat-lbl">Entry Pass Score</span><span id="se-entry-score" class="strat-val sv-warn">-- / 5</span></div></div><div class="strat-card"><div class="strat-title"><span>💰 Funding Filter</span><span class="strat-tf">LIVE</span></div><div class="strat-row"><span class="strat-lbl">Current Funding Mode</span><span id="se-funding-mode" class="strat-val sv-pass">Loading…</span></div><div class="strat-row"><span class="strat-lbl">Neutral Zone</span><span class="strat-val sv-pass">|rate| &lt; 0.03%</span></div><div class="strat-row"><span class="strat-lbl">Crowded Long</span><span class="strat-val sv-warn">rate &gt; +0.08%</span></div><div class="strat-row"><span class="strat-lbl">Crowded Short</span><span class="strat-val sv-warn">rate &lt; -0.08%</span></div><div class="strat-row"><span class="strat-lbl">Filter Weight</span><span class="strat-val">10 pts</span></div></div><div class="strat-card"><div class="strat-title"><span>🛡 Risk Filter</span><span class="strat-tf">CONFIG</span></div><div class="strat-row"><span class="strat-lbl">Min Confidence</span><span id="se-min-conf" class="strat-val sv-warn">--</span></div><div class="strat-row"><span class="strat-lbl">Min RR</span><span id="se-min-rr" class="strat-val sv-warn">--</span></div><div class="strat-row"><span class="strat-lbl">Entry Pass Score</span><span id="se-entry-score2" class="strat-val sv-warn">--</span></div><div class="strat-row"><span class="strat-lbl">Max Signals / Hour</span><span id="se-max-sig" class="strat-val sv-warn">--</span></div><div class="strat-row"><span class="strat-lbl">Cooldown</span><span id="se-cooldown" class="strat-val sv-warn">--</span></div></div></div></div></section>
-<section class="section" id="signals-section"><div class="container"><div class="table-card card"><div class="table-head"><h2 style="margin:0" data-i18n="section.signals">Latest Live Signals</h2><span class="live-dot">● Live</span></div><div class="table-wrap"><table><thead><tr><th data-i18n="table.time">Time</th><th data-i18n="table.symbol">Symbol</th><th data-i18n="table.side">Side</th><th data-i18n="table.tf">TF</th><th data-i18n="table.confidence">Confidence</th><th data-i18n="table.rr">RR</th><th data-i18n="table.status">Status</th><th data-i18n="table.pnl">PNL</th><th></th></tr></thead><tbody id="sig-tbl"><tr><td colspan="9">Loading signals...</td></tr></tbody></table></div><div style="text-align:center;margin-top:18px;display:flex;gap:16px;justify-content:center;flex-wrap:wrap"><a href="/signals" style="color:var(--cyan);font-weight:800" data-i18n="section.signals_all">View All Signals →</a><a href="/watchlist" style="color:var(--green);font-weight:800">⭐ Track Favorite Coins →</a></div></div></div></section>
+<section class="section" id="signals-section"><div class="container"><div class="table-card card"><div class="table-head"><h2 style="margin:0" data-i18n="section.signals">Latest Live Signals</h2><span class="live-dot">● Live</span></div><div class="table-wrap"><table><thead><tr><th data-i18n="table.time">Time</th><th data-i18n="table.symbol">Symbol</th><th data-i18n="table.side">Side</th><th data-i18n="table.tf">TF</th><th data-i18n="table.confidence">Confidence</th><th data-i18n="table.rr">RR</th><th data-i18n="table.status">Status</th><th data-i18n="table.pnl">PNL</th><th></th></tr></thead><tbody id="sig-tbl"><tr><td colspan="9">Loading signals...</td></tr></tbody></table></div><div style="text-align:center;margin-top:18px;display:flex;gap:16px;justify-content:center;flex-wrap:wrap"><a href="/signals" style="color:var(--cyan);font-weight:800" data-i18n="section.signals_all">View All Signals →</a></div></div></div></section>
 <section class="section" id="perf-section"><div class="container"><div class="perf-box card"><div class="perf-title"><h3>Performance Summary</h3><p>Transparent. Verified. Real results.</p><div style="margin-top:12px"><a href="/performance-center" style="display:inline-flex;align-items:center;gap:6px;color:var(--cyan);font-size:13px;font-weight:800;border:1px solid rgba(8,232,210,.25);border-radius:8px;padding:6px 14px;background:rgba(8,232,210,.06)">📊 View Full Performance Analytics →</a></div></div><div id="perf-data" class="collecting"><h3>Collecting Verified Performance Data</h3><p>Argus Quant uses real production signals. We only show headline performance when enough verified closed trades are available.</p></div><div class="pmetric perf-live"><div class="plabel">Win Rate (30D)</div><div id="ps-wr" class="pval">--</div></div><div class="pmetric perf-live"><div class="plabel">Profit Factor</div><div id="ps-pf" class="pval">--</div></div><div class="pmetric perf-live"><div class="plabel">Total PNL (30D)</div><div id="ps-pnl" class="pval">--</div></div><div class="pmetric perf-live"><div class="plabel">Avg RR</div><div id="ps-rr" class="pval">--</div></div><div class="equity-mini perf-live"></div></div></div></section>
 <section class="section"><div class="container">__DONATE__</div></section>
 <section class="section"><div class="container"><div class="center-head"><span class="eyebrow">FAQ</span><h2 class="section-title" data-i18n="section.faq">Frequently Asked Questions</h2></div><div><div class="faq-item card" onclick="toggleFaq(this)"><div class="faq-q">What is Argus Quant?<span>⌄</span></div><div class="faq-a">A free AI-powered crypto futures signal platform scanning 200+ Binance USDT perpetual pairs with a multi-timeframe engine.</div></div><div class="faq-item card" onclick="toggleFaq(this)"><div class="faq-q">Is this financial advice?<span>⌄</span></div><div class="faq-a">No. All signals are for educational and informational purposes only. Futures trading is high risk.</div></div><div class="faq-item card" onclick="toggleFaq(this)"><div class="faq-q">Does the bot trade automatically?<span>⌄</span></div><div class="faq-a">No. The public system broadcasts signals only. It does not connect to your exchange account or place real trades.</div></div><div class="faq-item card" onclick="toggleFaq(this)"><div class="faq-q">How are signals generated?<span>⌄</span></div><div class="faq-a">Signals use 1D trend, 4H structure, 1H setup and 15M entry timing with risk/reward filters.</div></div><div class="faq-item card" onclick="toggleFaq(this)"><div class="faq-q">What exchanges are supported?<span>⌄</span></div><div class="faq-a">Signals are calibrated for Binance USDT Perpetual Futures and are compatible with Bybit, OKX and Bitget pairs.</div></div></div><div class="disc"><b>⚠ Risk Disclaimer</b><br/>Signals are for educational purposes only. Trading futures is high risk. Past performance does not guarantee future results.</div></div></section>
-<footer><div class="container"><div class="footer-in"><div><div class="brand"><svg class="logo-svg" viewBox="0 0 100 100" fill="none"><circle cx="50" cy="50" r="44" stroke="#18f28b" stroke-width="5"/><path d="M50 12 84 84H68L58 62H42L32 84H16L50 12Z" fill="#18f28b"/><path d="M25 76c13-10 30-15 50-16" stroke="#08e8d2" stroke-width="5" stroke-linecap="round"/></svg><div class="brand-word">ARGUS <b>QUANT</b></div></div><p class="ftagline" data-i18n="footer.tagline">Quantitative Futures Intelligence</p></div><div><div class="fcol-ttl" data-i18n="footer.links">Links</div><div class="flinks"><a href="/signals">Signals</a><a href="/market-radar">Market Radar</a><a href="/performance-center">Performance</a><a href="/setup-library">Setup Library</a><a href="/watchlist">Watchlist</a><a href="/faq">FAQ</a></div></div><div><div class="fcol-ttl" data-i18n="footer.community">Community</div><div class="flinks">__FOOTER_COMM__</div></div><div><div class="fcol-ttl" data-i18n="footer.legal">Legal</div><div class="flinks"><a href="/terms" data-i18n="footer.terms">Terms of Service</a><a href="/privacy" data-i18n="footer.privacy">Privacy Policy</a><a href="/risk-disclaimer" data-i18n="footer.risk_disc">Risk Disclaimer</a><a href="/admin">Admin</a></div></div></div><div class="fbot"><span class="fcopy">© 2026 ARGUS QUANT. All rights reserved.</span><span class="fcopy"><a href="/signals">Signals</a> · <a href="/performance">Performance</a> · <a href="/stats">Stats</a></span></div></div></footer>
+<footer><div class="container"><div class="footer-in"><div><div class="brand"><svg class="logo-svg" viewBox="0 0 100 100" fill="none"><circle cx="50" cy="50" r="44" stroke="#18f28b" stroke-width="5"/><path d="M50 12 84 84H68L58 62H42L32 84H16L50 12Z" fill="#18f28b"/><path d="M25 76c13-10 30-15 50-16" stroke="#08e8d2" stroke-width="5" stroke-linecap="round"/></svg><div class="brand-word">ARGUS <b>QUANT</b></div></div><p class="ftagline" data-i18n="footer.tagline">Quantitative Futures Intelligence</p></div><div><div class="fcol-ttl" data-i18n="footer.links">Links</div><div class="flinks"><a href="/signals">Signals</a><a href="/market-radar">Market Radar</a><a href="/performance-center">Performance</a><a href="/setup-library">Setup Library</a><a href="/faq">FAQ</a></div></div><div><div class="fcol-ttl" data-i18n="footer.community">Community</div><div class="flinks">__FOOTER_COMM__</div></div><div><div class="fcol-ttl" data-i18n="footer.legal">Legal</div><div class="flinks"><a href="/terms" data-i18n="footer.terms">Terms of Service</a><a href="/privacy" data-i18n="footer.privacy">Privacy Policy</a><a href="/risk-disclaimer" data-i18n="footer.risk_disc">Risk Disclaimer</a><a href="/admin">Admin</a></div></div></div><div class="fbot"><span class="fcopy">© 2026 ARGUS QUANT. All rights reserved.</span><span class="fcopy"><a href="/signals">Signals</a> · <a href="/performance">Performance</a> · <a href="/stats">Stats</a></span></div></div></footer>
 <div id="am-modal" class="am-bg" onclick="if(event.target===this)closeAnalysis()"><div class="am-box"><div class="am-hdr"><div class="am-title">Signal Analysis</div><button class="am-close" onclick="closeAnalysis()">✕ Close</button></div><div id="am-content"><p style="text-align:center;color:var(--muted);padding:40px">Loading…</p></div></div></div>
 <a class="float-tg" href="__TG_URL__" target="_blank" rel="noopener">➤</a><div id="v7-toast" class="toast">Copied!</div><div id="qr-modal" class="modal-bg" onclick="closeQR(event)"><div class="modal-box"><h3 id="qr-ttl">Wallet</h3><div id="qr-net" style="color:var(--muted)"></div><div class="modal-qr"><div id="qr-canvas"></div></div><div id="qr-addr" class="modal-addr"></div><button class="modal-close" onclick="closeQRBtn()">Close</button></div></div>
 <script>
