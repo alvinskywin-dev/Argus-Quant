@@ -343,7 +343,7 @@ function renderLanding(){
   <div class="auth-wrap">
     <div class="auth-hero">
       <img src="/static/brand/argus-quant-logo.png" alt="Argus Quant" style="width:100%;max-width:420px;border-radius:14px;margin-bottom:18px;border:1px solid var(--line,#1b2b40)"/>
-      <div class="tag">PROFESSIONAL CRYPTO FUTURES INTELLIGENCE</div>
+      <div class="tag">QUANTITATIVE FUTURES INTELLIGENCE</div>
       <h1>Trade smarter with<br><span style="color:var(--primary)">Argus Quant</span></h1>
       <p>Multi-timeframe SMC signal engine, market-regime detection, short-protection, paper & demo auto-trading, an encrypted multi-exchange vault, and a hard-gated live layer — one platform.</p>
       <div class="feat">
