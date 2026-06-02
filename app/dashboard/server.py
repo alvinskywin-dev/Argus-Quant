@@ -4648,8 +4648,7 @@ button{width:100%;padding:13px;margin-top:12px;border:0;border-radius:9px;backgr
 </head>
 <body>
 <form class="box" method="post" action="/login">
-<div class="logo">A</div>
-<h1>ARGUS QUANT</h1>
+<img src="/static/brand/argus-quant-logo.png" alt="Argus Quant" style="width:100%;border-radius:12px;margin-bottom:10px;border:1px solid #17314b"/>
 <p>Admin Dashboard Login</p>
 __ERR__
 <input name="username" placeholder="Username" required autocomplete="username">
@@ -4672,7 +4671,10 @@ _PUBLIC_HTML = """\
 <meta property="og:title" content="ARGUS QUANT — AI-Powered Futures Signals"/>
 <meta property="og:description" content="Multi-Timeframe Analysis · Risk Managed · 24/7 Scanner · Free on Telegram"/>
 <meta property="og:type" content="website"/>
+<meta property="og:image" content="/static/brand/argus-quant-logo.png"/>
 <meta name="twitter:card" content="summary_large_image"/>
+<meta name="twitter:image" content="/static/brand/argus-quant-logo.png"/>
+<link rel="icon" type="image/png" href="/static/brand/argus-quant-logo.png"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" crossorigin/>
