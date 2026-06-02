@@ -296,7 +296,7 @@ function renderShell(){
   <div class="scrim" id="scrim"></div>
   <div class="shell">
     <aside class="side" id="side">
-      <div class="brand"><div class="mark">A</div><div><b>ARGUS</b><span>QUANT</span></div></div>
+      <div class="brand"><img src="/static/brand/argus-quant-mark.png" alt="Argus Quant" style="width:40px;height:40px;object-fit:contain;border-radius:9px"/><div><b>ARGUS</b><span>QUANT</span></div></div>
       <nav class="nav">${nav}
         <div class="grp">Links</div>
         <a href="/" ><span class="ic">🌐</span>Public Site</a>
