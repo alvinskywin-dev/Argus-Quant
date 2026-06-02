@@ -111,6 +111,23 @@ async def emergency_close(position_id: int, body: EmergencyCloseIn,
         return _err(exc)
 
 
+@router.post("/binance/preflight", response_model=dict)
+async def binance_preflight(
+    symbol: str = Query("BTCUSDT"),
+    testnet: bool | None = Query(default=None),
+    user: AuthUser = Depends(get_current_user),
+):
+    """Read-only Binance preflight (Sprint 21F). Places no orders; flag-gated."""
+    from app.config import settings
+    if not settings.binance_preflight_enabled:
+        return JSONResponse(status_code=404, content={"detail": "Binance preflight is disabled."})
+    try:
+        async with get_session() as db:
+            return await service.binance_preflight(db, user_id=user.id, testnet=testnet, symbol=symbol)
+    except service.LiveTradingError as exc:
+        return _err(exc)
+
+
 @router.get("/positions", response_model=list[LivePositionOut])
 async def positions(status: str = Query(default=""), user: AuthUser = Depends(get_current_user)):
     async with get_session() as db:

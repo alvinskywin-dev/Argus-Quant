@@ -153,6 +153,12 @@ class Settings(BaseSettings):
     order_failure_breaker_window_sec: int = 300
     tp_sl_retry_max: int = 3                    # TP/SL placement retries before UNSAFE
 
+    # --- Sprint 21F — Binance live/testnet validation (read-only) ---
+    # Gate the admin-only Binance preflight endpoint. The preflight is strictly
+    # read-only (server time, balance, exchangeInfo, positions — never an order),
+    # so it is safe to run before opening the live gate; default OFF regardless.
+    binance_preflight_enabled: bool = False
+
     # --- Tier routing ---
     public_min_confidence: float = 75.0
     vip_min_confidence: float = 85.0

@@ -49,6 +49,11 @@ ALL_STATUSES = (
     STATUS_IP_RESTRICTED, STATUS_VALIDATION_UNAVAILABLE, STATUS_ERROR,
 )
 
+# Binance hosts: SAPI (key-permission introspection) lives on prod only; the
+# futures testnet exposes fapi but no SAPI, so testnet validation uses fapi.
+_PROD_SAPI = "https://api.binance.com"
+_TESTNET_FAPI = "https://testnet.binancefuture.com"
+
 
 @dataclass
 class ExchangePermissionResult:
@@ -146,6 +151,44 @@ def classify_binance(restrictions: dict) -> ExchangePermissionResult:
             "enableReading": can_read, "enableFutures": can_futures,
             "enableSpotAndMarginTrading": can_spot, "enableWithdrawals": can_withdraw,
             "ipRestrict": bool(restrictions.get("ipRestrict", False)),
+        },
+    )
+    return finalize_status(r)
+
+
+def classify_binance_futures_account(
+    account: dict, *, testnet: bool = False, trust_withdraw_flag: bool = False,
+) -> ExchangePermissionResult:
+    """
+    Map a Binance ``GET /fapi/v2/account`` response to a result.
+
+    Used where the SAPI ``apiRestrictions`` endpoint is unavailable — chiefly the
+    futures **testnet** (``testnet.binancefuture.com`` has no SAPI). The futures
+    account body carries ``canTrade`` (genuine trade-permission proof — a
+    read-only key reports ``canTrade=false``) and account-level ``canWithdraw``.
+
+    ``canWithdraw`` here is an *account*-level flag, not the API-key permission the
+    prod SAPI path inspects, so by default it is reported as undetectable
+    (``None`` + warning) rather than trusted — we never silently treat unknown as
+    safe, and never falsely reject a trade-only key on a withdraw-capable account.
+    """
+    reachable = isinstance(account, dict) and ("canTrade" in account or "assets" in account
+                                               or "totalWalletBalance" in account)
+    if not reachable:
+        return ExchangePermissionResult(
+            exchange="binance", ok=False, status=STATUS_PERMISSION_DENIED,
+            error_message="Binance futures account not reachable with this key")
+    can_trade = bool(account.get("canTrade", False))
+    raw_withdraw = bool(account.get("canWithdraw", False))
+    can_withdraw: Optional[bool] = raw_withdraw if trust_withdraw_flag else None
+    perms = ["READ", "FUTURES"] + (["TRADE"] if can_trade else [])
+    r = ExchangePermissionResult(
+        exchange="binance", ok=True, can_read=True, can_trade=can_trade,
+        can_futures=True, can_withdraw=can_withdraw,
+        account_type="futures-testnet" if testnet else "futures", permissions=perms,
+        raw_safe_summary={
+            "source": "fapi_v2_account", "testnet": testnet,
+            "canTrade": can_trade, "canWithdraw_account_level": raw_withdraw,
         },
     )
     return finalize_status(r)
@@ -263,14 +306,49 @@ def _binance_error_status(code: Any, msg: str) -> str:
     return STATUS_ERROR
 
 
-async def validate_binance(api_key: str, api_secret: str) -> ExchangePermissionResult:
+async def validate_binance(
+    api_key: str, api_secret: str, *, testnet: Optional[bool] = None,
+) -> ExchangePermissionResult:
+    """
+    Validate a Binance key with a read-only signed request (never an order).
+
+    * **Production** uses SAPI ``/sapi/v1/account/apiRestrictions`` — the
+      authoritative API-key permission view, including the key-level withdrawal
+      flag we must reject on.
+    * **Testnet** (``testnet.binancefuture.com``) has no SAPI, so we fall back to
+      the futures ``/fapi/v2/account`` endpoint, which still proves ``canTrade``.
+    """
     import time
     from app.exchange_adapters.binance import sign_query
-    params: dict[str, Any] = {"timestamp": int(time.time() * 1000), "recvWindow": 5000}
+    if testnet is None:
+        testnet = settings.binance_testnet
+
+    if testnet:
+        params: dict[str, Any] = {"timestamp": int(time.time() * 1000), "recvWindow": 5000}
+        params["signature"] = sign_query(api_secret, params)
+        try:
+            status, data = await _signed_get_json(
+                f"{_TESTNET_FAPI}/fapi/v2/account",
+                params=params, headers={"X-MBX-APIKEY": api_key})
+        except Exception as exc:  # noqa: BLE001 — network/parse problems are non-fatal
+            logger.warning(f"[validator] binance testnet network error: {exc!s:.120}")
+            return ExchangePermissionResult(
+                exchange="binance", ok=False, status=STATUS_VALIDATION_UNAVAILABLE,
+                error_message="Could not reach Binance testnet to validate the key")
+        if status >= 400 or (isinstance(data, dict) and data.get("code") not in (None, 200)):
+            code = data.get("code") if isinstance(data, dict) else status
+            msg = data.get("msg", "") if isinstance(data, dict) else str(data)
+            return ExchangePermissionResult(
+                exchange="binance", ok=False, status=_binance_error_status(code, msg),
+                error_code=str(code), error_message=str(msg)[:200])
+        return classify_binance_futures_account(
+            data if isinstance(data, dict) else {}, testnet=True)
+
+    params = {"timestamp": int(time.time() * 1000), "recvWindow": 5000}
     params["signature"] = sign_query(api_secret, params)
     try:
         status, data = await _signed_get_json(
-            "https://api.binance.com/sapi/v1/account/apiRestrictions",
+            f"{_PROD_SAPI}/sapi/v1/account/apiRestrictions",
             params=params, headers={"X-MBX-APIKEY": api_key})
     except Exception as exc:  # noqa: BLE001 — network/parse problems are non-fatal
         logger.warning(f"[validator] binance network error: {exc!s:.120}")

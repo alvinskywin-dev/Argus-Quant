@@ -387,6 +387,34 @@ async def get_balance(db: AsyncSession, *, user_id: int, exchange: str) -> dict:
     return {"asset": bal.asset, "balance": bal.balance, "available": bal.available, "mode": bal.mode}
 
 
+# ── Sprint 21F — read-only Binance preflight ────────────────────────
+
+async def binance_preflight(
+    db: AsyncSession, *, user_id: int, testnet: Optional[bool] = None, symbol: str = "BTCUSDT",
+) -> dict:
+    """
+    Run the read-only Binance preflight with the user's vaulted key.
+
+    Places no orders — only signed reads + public data. Used to prove a key works
+    end-to-end (auth, clock, symbol filters, positions) before a real test. Honors
+    the ``binance_testnet`` setting unless ``testnet`` is given explicitly.
+    """
+    from app.config import settings
+    from app.exchange_vault.binance_preflight import run_binance_preflight
+    if testnet is None:
+        testnet = settings.binance_testnet
+    try:
+        creds = await vault.get_decrypted_credentials(db, user_id, "binance")
+    except vault.VaultError as exc:
+        raise LiveTradingError(exc.status_code, exc.detail)
+    result = await run_binance_preflight(
+        creds["api_key"], creds["api_secret"], testnet=bool(testnet), symbol=symbol)
+    await _audit(db, user_id, "binance", symbol, "preflight",
+                 "OK" if result.ok else "FAIL", "LIVE" if not testnet else "MOCK",
+                 detail=f"testnet={testnet} ok={result.ok}")
+    return result.to_public_dict()
+
+
 # ── listings ──────────────────────────────────────────────────────
 
 async def list_positions(db, user_id, status: Optional[str] = None):
