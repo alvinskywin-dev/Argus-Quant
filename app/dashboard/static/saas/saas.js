@@ -179,11 +179,55 @@ const num = (n,d=2)=>{const v=Number(n);return isNaN(v)?"—":v.toLocaleString(u
 const money = (n,d=2)=>{const v=Number(n||0);return (v<0?"-$":"$")+Math.abs(v).toLocaleString(undefined,{maximumFractionDigits:d,minimumFractionDigits:2});};
 const pct = (n)=>{const v=Number(n||0);return (v>=0?"+":"")+v.toFixed(2)+"%";};
 const cls = (n)=>Number(n||0)>=0?"pos":"neg";
-const when = (s)=>{if(!s)return "—";try{return new Date(s).toLocaleString();}catch(_){return s;}};
+const when = (s)=>formatDateTime(s);
 const ago = (s)=>{if(!s)return "—";const d=(Date.now()-new Date(s))/1000;if(d<60)return Math.floor(d)+"s";if(d<3600)return Math.floor(d/60)+"m";if(d<86400)return Math.floor(d/3600)+"h";return Math.floor(d/86400)+"d";};
 const badge=(v,extra="")=>`<span class="badge ${esc(v)} ${extra}">${esc(v)}</span>`;
 const dot=(b)=>`<span class="dot ${b?"on":"off"}"></span>`;
 const maskIp=(ip)=>{ if(!ip)return "—"; if(ip.includes(":")){const p=ip.split(":");return p.slice(0,2).join(":")+":••••";} const p=ip.split("."); return p.length===4?`${p[0]}.${p[1]}.•••.•••`:ip; };
+
+// ── Timezone System V1 — centralized display formatting ────────────
+// DB/API are UTC; these render UTC ISO values into the user's preferred zone.
+// All timestamp rendering MUST go through these (no scattered toLocaleString).
+const SUPPORTED_TIMEZONES = ["UTC","Europe/London","Asia/Phnom_Penh","Asia/Ho_Chi_Minh","America/New_York","America/Los_Angeles"];
+let currentUserTimezone = "UTC";
+let adminTimeMode = localStorage.getItem("adminTimeMode") || "USER";  // USER | UTC (admin platform toggle)
+
+// On the admin platform page the operator can force UTC; everywhere else we use
+// the signed-in user's preference. A per-call override wins over both.
+function getDisplayTimezone(){
+  if (typeof CURRENT_PAGE !== "undefined" && CURRENT_PAGE === "admin" && adminTimeMode === "UTC") return "UTC";
+  return currentUserTimezone || "UTC";
+}
+function _validTz(tz){ return SUPPORTED_TIMEZONES.indexOf(tz) >= 0 ? tz : null; }
+function _parseDate(value){ if(!value) return null; const d = new Date(value); return isNaN(d.getTime()) ? null : d; }
+function _fmt(value, tz, opts){
+  const d = _parseDate(value); if(!d) return null;
+  const zone = _validTz(tz) || getDisplayTimezone();
+  try { return { str: new Intl.DateTimeFormat("en-GB", Object.assign({timeZone:zone, hour12:false}, opts)).format(d).replace(",",""), zone }; }
+  catch(_){ try { return { str: d.toISOString().replace("T"," ").slice(0,19), zone:"UTC" }; } catch(__){ return null; } }
+}
+function formatDateTime(value, tz){
+  const r = _fmt(value, tz, {day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit",second:"2-digit"});
+  return r ? `${r.str} ${r.zone}` : "—";
+}
+function formatShortDateTime(value, tz){
+  const r = _fmt(value, tz, {day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"});
+  return r ? `${r.str} ${r.zone}` : "—";
+}
+function formatDateOnly(value, tz){
+  const r = _fmt(value, tz, {day:"2-digit",month:"short",year:"numeric"});
+  return r ? r.str : "—";
+}
+function formatTimeOnly(value, tz){
+  const r = _fmt(value, tz, {hour:"2-digit",minute:"2-digit",second:"2-digit"});
+  return r ? `${r.str} ${r.zone}` : "—";
+}
+// Relative "Xm ago" with the absolute (tz-aware) time as a hover tooltip.
+function timeAgoWithTooltip(value, tz){
+  if(!value) return "—";
+  return `<span title="${esc(formatDateTime(value, tz))}">${ago(value)} ago</span>`;
+}
+function setUserTimezone(tz){ currentUserTimezone = _validTz(tz) || "UTC"; }
 
 function toast(msg, kind=""){const w=$("#toasts")||document.body.appendChild(h('<div id="toasts"></div>'));const t=h(`<div class="toast ${kind}">${esc(msg)}</div>`);w.appendChild(t);setTimeout(()=>{t.style.opacity="0";t.style.transition=".3s";setTimeout(()=>t.remove(),300);},3200);}
 function modal(title, bodyHtml, opts={}){
@@ -364,7 +408,7 @@ async function logout(){ try{ if(TK.r) await api("/api/auth/logout",{method:"POS
 const PAGES = {};
 
 // dashboard render helpers ─────────────────────────────────────────
-const shortTime=(s)=>{if(!s)return "—";try{return new Date(s).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});}catch(_){return "—";}};
+const shortTime=(s)=>formatShortDateTime(s);
 function confBadge(c){const v=Number(c||0);const t=v>=85?"hi":v>=70?"mid":"lo";return `<span class="conf ${t}">${num(v,0)}</span>`;}
 const regColor=(rg="")=>rg.includes("BULL")||rg.includes("LOW")?"var(--success)":rg.includes("BEAR")||rg.includes("HIGH")?"var(--danger)":"var(--warning)";
 const trendBadge=(t)=>{const u=String(t||"").toUpperCase();const c=u.includes("UP")||u.includes("BULL")?"ok":u.includes("DOWN")||u.includes("BEAR")?"bad":"muted";return `<span class="badge ${c}">${esc(t||"—")}</span>`;}
@@ -489,7 +533,7 @@ PAGES.dashboard = async (v) => {
     const ss=$("#sysstat"); if(ss){const ok=H.status==="ok"&&ws.ok, warn=H.status==="ok";
       ss.innerHTML=`<span class="dot ${ok?"on":warn?"warn":"off"}"></span>${ok?"Operational":warn?"Degraded":"Offline"}`;}
     const ms=$("#mktstat"); if(ms&&r.market_regime) ms.innerHTML=`Market <b style="color:${regColor(r.market_regime)}">${esc(String(r.market_regime).replace(/_/g," "))}</b>`;
-    const lu=$("#lastupd"); if(lu) lu.textContent="Updated "+new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit",second:"2-digit"});
+    const lu=$("#lastupd"); if(lu) lu.textContent="Updated "+formatTimeOnly(new Date().toISOString());
   }
 
   // ── fill the page from aggregate data ────────────────────────────
@@ -623,7 +667,7 @@ PAGES.paper = async (v) => {
       const tr=await tryGet("/api/paper/account/trades");const rows=tr.data||[];
       box.innerHTML=rows.length?`<div class="card">${tableWrap(["Symbol","Side","Entry","Exit","PnL","When"],
         rows.map(r=>`<tr><td><b>${esc(r.symbol)}</b></td><td>${badge(r.side)}</td><td class="num">${num(r.entry_price,4)}</td>
-          <td class="num">${num(r.exit_price,4)}</td><td class="num ${cls(r.pnl_usdt)}">${money(r.pnl_usdt)}</td><td class="num">${ago(r.closed_at)} ago</td></tr>`).join(""))}</div>`
+          <td class="num">${num(r.exit_price,4)}</td><td class="num ${cls(r.pnl_usdt)}">${money(r.pnl_usdt)}</td><td class="num">${timeAgoWithTooltip(r.closed_at)}</td></tr>`).join(""))}</div>`
         :`<div class="card">${empty("📜","No trade history yet","Closed paper trades will be listed here.")}</div>`;
     }
   };
@@ -723,7 +767,7 @@ PAGES.auto = async (v) => {
   $("#save").onclick=()=>save($("#save"),{risk_per_trade_pct:+$("#risk").value,max_positions:+$("#maxp").value,max_leverage:+$("#maxl").value,min_confidence:+$("#minc").value,allowed_coins:$("#coins").value.trim(),use_break_even:$("#be").value==="true",break_even_trigger:$("#bet").value});
   const ex=await tryGet("/api/auto/executions");const rows=ex.data||[];
   $("#exec").innerHTML=rows.length?tableWrap(["When","Symbol","Action","Reason","Detail"],
-    rows.slice(0,50).map(r=>`<tr><td class="num">${ago(r.created_at)} ago</td><td><b>${esc(r.symbol)}</b></td><td>${badge(r.action,"muted")}</td><td>${esc(r.reason)}</td><td class="sub">${esc(r.detail||"")}</td></tr>`).join("")):empty("📭","No executions yet","Auto-trade decisions will be logged here.");
+    rows.slice(0,50).map(r=>`<tr><td class="num">${timeAgoWithTooltip(r.created_at)}</td><td><b>${esc(r.symbol)}</b></td><td>${badge(r.action,"muted")}</td><td>${esc(r.reason)}</td><td class="sub">${esc(r.detail||"")}</td></tr>`).join("")):empty("📭","No executions yet","Auto-trade decisions will be logged here.");
 };
 
 PAGES.safety = async (v) => {
@@ -789,10 +833,10 @@ PAGES.live = async (v) => {
         r.map(x=>`<tr><td>${badge(x.mode)}</td><td>${esc(x.exchange)}</td><td><b>${esc(x.symbol)}</b></td><td>${badge(x.side)}</td><td class="num">${num(x.quantity,4)}</td><td class="num">${num(x.entry_price,4)}</td><td>${x.leverage}x</td><td>${badge(x.status)}</td><td class="num ${cls(x.realized_pnl)}">${money(x.realized_pnl)}</td></tr>`).join("")):empty("📭","No live positions","Positions opened in MOCK or LIVE mode appear here.")}</div>`;
     } else if(t==="ord"){const p=await tryGet("/api/live/orders");const r=p.data||[];
       box.innerHTML=`<div class="card">${r.length?tableWrap(["Mode","Exchange","Symbol","Side","Type","Qty","Status","When"],
-        r.map(x=>`<tr><td>${badge(x.mode)}</td><td>${esc(x.exchange)}</td><td><b>${esc(x.symbol)}</b></td><td>${badge(x.side)}</td><td>${esc(x.order_type)}</td><td class="num">${num(x.quantity,4)}</td><td>${badge(x.status)}</td><td class="num">${ago(x.created_at)} ago</td></tr>`).join("")):empty("📭","No orders","Submitted orders (simulated in MOCK) appear here.")}</div>`;
+        r.map(x=>`<tr><td>${badge(x.mode)}</td><td>${esc(x.exchange)}</td><td><b>${esc(x.symbol)}</b></td><td>${badge(x.side)}</td><td>${esc(x.order_type)}</td><td class="num">${num(x.quantity,4)}</td><td>${badge(x.status)}</td><td class="num">${timeAgoWithTooltip(x.created_at)}</td></tr>`).join("")):empty("📭","No orders","Submitted orders (simulated in MOCK) appear here.")}</div>`;
     } else {const p=await tryGet("/api/live/trades");const r=p.data||[];
       box.innerHTML=`<div class="card">${r.length?tableWrap(["Mode","Symbol","Side","Entry","Exit","PnL","When"],
-        r.map(x=>`<tr><td>${badge(x.mode)}</td><td><b>${esc(x.symbol)}</b></td><td>${badge(x.side)}</td><td class="num">${num(x.entry_price,4)}</td><td class="num">${num(x.exit_price,4)}</td><td class="num ${cls(x.pnl_usdt)}">${money(x.pnl_usdt)}</td><td class="num">${ago(x.closed_at)} ago</td></tr>`).join("")):empty("📭","No trades","Closed live/MOCK trades appear here.")}</div>`;
+        r.map(x=>`<tr><td>${badge(x.mode)}</td><td><b>${esc(x.symbol)}</b></td><td>${badge(x.side)}</td><td class="num">${num(x.entry_price,4)}</td><td class="num">${num(x.exit_price,4)}</td><td class="num ${cls(x.pnl_usdt)}">${money(x.pnl_usdt)}</td><td class="num">${timeAgoWithTooltip(x.closed_at)}</td></tr>`).join("")):empty("📭","No trades","Closed live/MOCK trades appear here.")}</div>`;
     }};
   tabs.forEach(b=>b.onclick=()=>load(b.dataset.t));load("pos");
 };
@@ -809,6 +853,13 @@ PAGES.profile = async (v) => {
       <div class="kv"><span>2FA</span><b>${U.totp_enabled?'<span class="pos">Enabled</span>':'<span class="neg">Disabled</span>'}</b></div>
     </div>
     <div class="card"><div class="card-h"><h3>Active Sessions</h3></div><div id="sess">${skel(3)}</div></div></div>
+    <div class="card mt"><div class="card-h"><h3>Timezone Preferences</h3></div><div class="card-b">
+      <div class="kv"><span>Display timezone</span>
+        <select id="tzSelect" class="input" style="max-width:240px">${SUPPORTED_TIMEZONES.map(t=>`<option value="${t}" ${t===currentUserTimezone?"selected":""}>${t}</option>`).join("")}</select></div>
+      <div class="kv"><span>Current display time</span><b id="tzNow">${formatDateTime(new Date().toISOString())}</b></div>
+      <div class="sub" style="margin-top:6px">All timestamps across the app render in this timezone. Stored data stays UTC.</div>
+      <div style="margin-top:12px"><button class="btn" id="tzSave">Save Timezone</button></div>
+    </div></div>
     <div class="card mt"><div class="card-h"><h3>Security Recommendations</h3></div><div class="card-b">
       <ul class="recs">
         <li><span class="ic">${U.totp_enabled?"✓":"⚠"}</span><div><b>Enable two-factor authentication (2FA).</b> ${U.totp_enabled?"2FA is active on your account.":"Add an authenticator app for an extra layer of protection."}</div></li>
@@ -818,7 +869,22 @@ PAGES.profile = async (v) => {
     </div></div>`;
   const ss=await tryGet("/api/auth/sessions");const rows=ss.data||[];
   $("#sess").innerHTML=rows.length?tableWrap(["Device","IP","Last seen",""],
-    rows.map(r=>`<tr><td class="sub">${esc((r.device||"unknown").slice(0,40))}</td><td class="num">${esc(maskIp(r.ip))}</td><td class="num">${ago(r.last_seen)} ago</td><td>${r.current?badge("ACTIVE"):""}</td></tr>`).join("")):empty("—","No active sessions");
+    rows.map(r=>`<tr><td class="sub">${esc((r.device||"unknown").slice(0,40))}</td><td class="num">${esc(maskIp(r.ip))}</td><td class="num">${timeAgoWithTooltip(r.last_seen)}</td><td>${r.current?badge("ACTIVE"):""}</td></tr>`).join("")):empty("—","No active sessions");
+
+  // Timezone preference — save + live "current display time".
+  const tzSel=$("#tzSelect"), tzBtn=$("#tzSave");
+  if(tzBtn) tzBtn.onclick=async()=>{
+    const tz=tzSel.value;
+    tzBtn.disabled=true;
+    try{
+      const r=await api("/api/auth/timezone",{method:"PUT",body:{timezone:tz}});
+      const applied=(r&&r.timezone)||tz;
+      setUserTimezone(applied); if(ME) ME.timezone=applied;
+      toast("Timezone updated","ok");
+      route();  // re-render the current page's timestamps in the new zone
+    }catch(e){ toast((e&&e.detail)||"Failed to update timezone","bad"); tzBtn.disabled=false; }
+  };
+  REFRESHERS.profile = async ()=>{ const e=$("#tzNow"); if(e) e.textContent=formatDateTime(new Date().toISOString()); };
 };
 
 PAGES.admin = async (v) => {
@@ -837,27 +903,46 @@ PAGES.admin = async (v) => {
       ${stat("Global Kill",O.global_kill?'<span class="neg">ON</span>':'<span class="pos">OFF</span>',"","⛔")}
       ${stat("Live Gate",O.live_gate_open?'<span class="neg">OPEN</span>':'<span class="pos">CLOSED</span>',O.live_gate_open?"real orders possible":"mock only","⚡")}
     </div>
-    <div class="tabs" style="margin-top:16px"><button class="active" data-t="users">Users</button><button data-t="audit">Audit Log</button></div>
+    <div class="row" style="justify-content:space-between;align-items:center;margin-top:16px;gap:12px;flex-wrap:wrap">
+      <div class="tabs" style="margin:0"><button class="active" data-t="users">Users</button><button data-t="audit">Audit Log</button></div>
+      <div class="row" style="gap:8px;align-items:center">
+        <span class="badge muted" id="tzModeBadge">Time Mode: ${adminTimeMode==="UTC"?"UTC":"User Time"}</span>
+        <button class="btn sm ${adminTimeMode==="UTC"?"active":""}" id="tzModeUTC">UTC</button>
+        <button class="btn sm ${adminTimeMode!=="UTC"?"active":""}" id="tzModeUser">User Time</button>
+      </div>
+    </div>
     <div id="atab">${skel(5)}</div>`;
   const tabs=v.querySelectorAll(".tabs button");
+  const setTzMode=(m)=>{
+    adminTimeMode=m; localStorage.setItem("adminTimeMode",m);
+    const b=$("#tzModeBadge"); if(b) b.textContent="Time Mode: "+(m==="UTC"?"UTC":"User Time");
+    const bu=$("#tzModeUTC"), bs=$("#tzModeUser");
+    if(bu) bu.classList.toggle("active",m==="UTC");
+    if(bs) bs.classList.toggle("active",m!=="UTC");
+    const active=[...tabs].find(b=>b.classList.contains("active"));
+    load(active?active.dataset.t:"users");  // re-render rows in the new mode
+  };
+  $("#tzModeUTC") && ($("#tzModeUTC").onclick=()=>setTzMode("UTC"));
+  $("#tzModeUser") && ($("#tzModeUser").onclick=()=>setTzMode("USER"));
   const load=async(t)=>{tabs.forEach(b=>b.classList.toggle("active",b.dataset.t===t));const box=$("#atab");box.innerHTML=`<div class="card">${skel(5)}</div>`;
     if(t==="users"){const u=await tryGet("/api/admin/users?limit=200");const rows=(u.data&&u.data.users)||[];
       box.innerHTML=`<div class="card">${rows.length?tableWrap(["ID","Email","Role","Status","Exch","Auto","Kill","Last login",""],
         rows.map(r=>`<tr><td>${r.id}</td><td>${esc(r.email)}</td><td>${badge(r.role)}</td><td>${badge(r.status)}</td><td class="num">${r.connected_exchanges}</td>
-          <td>${dot(r.auto_trading)}</td><td>${r.kill_switch?'<span class="neg">●</span>':dot(false)}</td><td class="num">${r.last_login_at?ago(r.last_login_at)+" ago":"—"}</td>
+          <td>${dot(r.auto_trading)}</td><td>${r.kill_switch?'<span class="neg">●</span>':dot(false)}</td><td class="num">${r.last_login_at?timeAgoWithTooltip(r.last_login_at, adminTimeMode==="UTC"?"UTC":(r.timezone||"UTC")):"—"}</td>
           <td><button class="btn sm" data-u="${r.id}">View</button> ${r.status==="SUSPENDED"?`<button class="btn sm" data-act="${r.id}">Activate</button>`:`<button class="btn sm danger" data-sus="${r.id}">Suspend</button>`}</td></tr>`).join("")):empty("—","No users")}</div>`;
       box.querySelectorAll("[data-u]").forEach(b=>b.onclick=()=>adminUser(b.dataset.u));
       box.querySelectorAll("[data-sus]").forEach(b=>b.onclick=()=>adminStatus(b.dataset.sus,"SUSPENDED"));
       box.querySelectorAll("[data-act]").forEach(b=>b.onclick=()=>adminStatus(b.dataset.act,"ACTIVE"));
     } else {const a=await tryGet("/api/admin/audit?limit=80");const rows=a.data||[];
       box.innerHTML=`<div class="card">${rows.length?tableWrap(["When","User","Exchange","Symbol","Action","Result","Mode"],
-        rows.map(r=>`<tr><td class="num">${ago(r.created_at)} ago</td><td>${r.user_id??"—"}</td><td>${esc(r.exchange)}</td><td>${esc(r.symbol||"—")}</td><td>${esc(r.action)}</td><td>${badge(r.result)}</td><td>${badge(r.mode)}</td></tr>`).join("")):empty("📭","No audit rows")}</div>`;
+        rows.map(r=>`<tr><td class="num">${timeAgoWithTooltip(r.created_at)}</td><td>${r.user_id??"—"}</td><td>${esc(r.exchange)}</td><td>${esc(r.symbol||"—")}</td><td>${esc(r.action)}</td><td>${badge(r.result)}</td><td>${badge(r.mode)}</td></tr>`).join("")):empty("📭","No audit rows")}</div>`;
     }};
   tabs.forEach(b=>b.onclick=()=>load(b.dataset.t));load("users");
 };
 async function adminUser(id){try{const d=await api("/api/admin/users/"+id);const p=d.profile;
   modal(p.email, `<div class="kv"><span>Role / Status</span><span>${badge(p.role)} ${badge(p.status)}</span></div>
     <div class="kv"><span>Verified / 2FA</span><span>${dot(p.is_verified)} / ${dot(p.totp_enabled)}</span></div>
+    <div class="kv"><span>Timezone</span><b>${esc(p.timezone||"UTC")}</b></div>
     <div class="kv"><span>Created</span><b>${when(p.created_at)}</b></div>
     <h4 style="margin:16px 0 6px">Exchange Accounts</h4>${d.exchange_accounts.length?d.exchange_accounts.map(a=>`<div class="kv"><span>${esc(a.exchange)} ${badge(a.status)}</span><span class="sub">••••${esc(a.api_key_last4||"????")}</span></div>`).join(""):'<div class="sub">None</div>'}
     <h4 style="margin:16px 0 6px">Open Positions (${d.open_positions.length})</h4>${d.open_positions.map(o=>`<div class="kv"><span>${esc(o.symbol)} ${badge(o.side)} ${badge(o.mode)}</span><span class="sub">${num(o.quantity,4)} @ ${num(o.entry_price,4)}</span></div>`).join("")||'<div class="sub">None</div>'}`, {wide:true});
@@ -892,6 +977,7 @@ async function boot(){
   if(!TK.a){ renderLanding(); return; }
   try{ ME = await api("/api/auth/me"); }
   catch(e){ TK.clear(); renderLanding(); return; }
+  setUserTimezone(ME && ME.timezone);
   renderShell();
   if(!location.hash||location.hash==="#") location.hash="#/dashboard";
   route();

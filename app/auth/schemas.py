@@ -69,6 +69,12 @@ class UserOut(BaseModel):
     telegram_user_id: Optional[int]
     created_at: Optional[datetime]
     last_login_at: Optional[datetime]
+    # Timezone System V1 — display preference; always a supported IANA zone.
+    timezone: str = "UTC"
+
+
+class UpdateTimezoneIn(BaseModel):
+    timezone: str = Field(..., min_length=1, max_length=64)
 
 
 class TwoFactorSetupOut(BaseModel):

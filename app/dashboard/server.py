@@ -21,6 +21,7 @@ from app.database.models import FundingRateSnapshot, Signal, AffiliateClick, Ope
 from app.database.repo import get_active_signals_summary, ACTIVE_STATUSES
 from app.market_data import universe
 from app.market_data.ws_engine import ws_health
+from app.utils.timezone import normalize_utc_iso
 
 
 # ── auth ──────────────────────────────────────────────────────────
@@ -164,6 +165,7 @@ async def _get_stats() -> dict:
         return {
             "id": s.id,
             "time": s.created_at.strftime("%m-%d %H:%M") if s.created_at else "-",
+            "time_iso": normalize_utc_iso(s.created_at),
             "symbol": s.symbol, "side": s.side, "tf": s.timeframe,
             "conf": round(float(s.confidence or 0), 1),
             "rr": round(float(s.risk_reward or 0), 2),
@@ -707,6 +709,7 @@ async def api_public_paper():
                 "pnl_pct": round(float(s.pnl_pct or 0), 2),
                 "pnl_usdt": pnl_usdt,
                 "opened": s.created_at.strftime("%m-%d %H:%M") if s.created_at else "-",
+                "opened_iso": normalize_utc_iso(s.created_at),
             })
 
         open_rows = [{
@@ -719,6 +722,7 @@ async def api_public_paper():
             "conf": round(float(s.confidence or 0), 1),
             "rr": round(float(s.risk_reward or 0), 2),
             "opened": s.created_at.strftime("%m-%d %H:%M") if s.created_at else "-",
+            "opened_iso": normalize_utc_iso(s.created_at),
         } for s in open_pos]
 
         wins = [r for r in closed_rows if r["status"] in ("TP1", "TP2", "TP3")]
@@ -1761,6 +1765,7 @@ async def api_oi_status():
                     "price_change":  s.price_change_pct,
                     "oi_score":      s.oi_score,
                     "time":          s.created_at.strftime("%m-%d %H:%M") if s.created_at else "-",
+                    "time_iso":      normalize_utc_iso(s.created_at),
                 }
                 for s in recent
             ],
@@ -1825,6 +1830,7 @@ async def api_funding_status():
                     "funding_pct":    round(s.funding_rate * 100, 5),
                     "classification": s.classification,
                     "time":           s.created_at.strftime("%m-%d %H:%M") if s.created_at else "-",
+                    "time_iso":       normalize_utc_iso(s.created_at),
                 }
                 for s in recent
             ],
@@ -4818,7 +4824,11 @@ button{border:0;border-radius:7px;padding:6px 11px;font-size:12px;font-weight:70
 <body>
 <div class="top">
   <div><h1>SaaS Platform Oversight</h1><div class="sub">Multi-user admin · read-only aggregation · credentials never exposed</div></div>
-  <div><span id="ts" class="muted">loading…</span><a class="lnk" href="/admin">◂ Admin</a><a class="lnk" href="/logout">Logout</a></div>
+  <div>
+    <span id="tzBadge" class="muted" style="margin-right:8px">Time Mode: UTC</span>
+    <button id="tzUTC" class="btn-view" onclick="setTzMode('UTC')">UTC</button>
+    <button id="tzUser" class="btn-view" onclick="setTzMode('USER')">User Time</button>
+    <span id="ts" class="muted" style="margin-left:8px">loading…</span><a class="lnk" href="/admin">◂ Admin</a><a class="lnk" href="/logout">Logout</a></div>
 </div>
 <div class="main">
   <div id="err" class="err"></div>
@@ -4845,7 +4855,22 @@ button{border:0;border-radius:7px;padding:6px 11px;font-size:12px;font-weight:70
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function pill(v){return '<span class="pill '+esc(v)+'">'+esc(v)+'</span>';}
 function dot(b){return '<span class="dot '+(b?'on':'off')+'"></span>';}
-function fmtTs(s){if(!s)return '—';try{return new Date(s).toLocaleString();}catch(e){return s;}}
+// Timezone System V1 — UTC / User Time toggle. Legacy platform admin defaults
+// to UTC; "User Time" renders each user row in that user's timezone and other
+// rows in the admin's timezone (UTC fallback — dashboard session has no zone).
+var SUPPORTED_TZ=["UTC","Europe/London","Asia/Phnom_Penh","Asia/Ho_Chi_Minh","America/New_York","America/Los_Angeles"];
+var TZ_MODE=localStorage.getItem('adminTimeMode')||'UTC';
+var ADMIN_TZ='UTC';
+function _vtz(t){return SUPPORTED_TZ.indexOf(t)>=0?t:null;}
+function fmtTs(s,tz){
+  if(!s)return '—';
+  var d=new Date(s); if(isNaN(d.getTime()))return s;
+  var zone=_vtz(tz)||(TZ_MODE==='UTC'?'UTC':ADMIN_TZ);
+  try{return new Intl.DateTimeFormat('en-GB',{timeZone:zone,hour12:false,day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit'}).format(d).replace(',','')+' '+zone;}
+  catch(e){try{return d.toISOString().replace('T',' ').slice(0,19)+' UTC';}catch(_){return s;}}
+}
+function syncTzUI(){var b=document.getElementById('tzBadge');if(b)b.textContent='Time Mode: '+(TZ_MODE==='UTC'?'UTC':'User Time');var u=document.getElementById('tzUTC'),us=document.getElementById('tzUser');if(u)u.style.opacity=(TZ_MODE==='UTC')?'1':'.45';if(us)us.style.opacity=(TZ_MODE!=='UTC')?'1':'.45';}
+function setTzMode(m){TZ_MODE=m;localStorage.setItem('adminTimeMode',m);syncTzUI();refresh();}
 function showErr(m,kind){var e=document.getElementById('err');e.textContent=m;e.style.display='block';e.style.background=kind==='warn'?'#33240a':'#3a1118';e.style.color=kind==='warn'?'#ffd84d':'#ff7b8a';}
 function clearErr(){var e=document.getElementById('err');e.style.display='none';e.textContent='';}
 
@@ -4916,7 +4941,7 @@ async function loadUsers(){
       : '<button class="btn-sus" onclick="setStatus('+u.id+',\\'SUSPENDED\\')">Suspend</button>';
     return '<tr><td>'+u.id+'</td><td>'+esc(u.email)+'</td><td>'+pill(u.role)+'</td><td>'+pill(u.status)+'</td>'+
       '<td>'+dot(u.is_verified)+'</td><td>'+u.connected_exchanges+'</td><td>'+dot(u.auto_trading)+'</td>'+
-      '<td>'+(u.kill_switch?'<span class="r">●</span>':dot(false))+'</td><td class="muted">'+fmtTs(u.last_login_at)+'</td>'+
+      '<td>'+(u.kill_switch?'<span class="r">●</span>':dot(false))+'</td><td class="muted">'+fmtTs(u.last_login_at, TZ_MODE==='UTC'?'UTC':(u.timezone||'UTC'))+'</td>'+
       '<td><button class="btn-view" onclick="viewUser('+u.id+')">View</button>'+act+'</td></tr>';
   }).join('');
  }catch(e){ tb.innerHTML=errRow(10,e); if(e.status===401||e.status===403)showErr(authMsg(e),'warn'); }
@@ -4941,8 +4966,9 @@ async function viewUser(id){
     h+='<div class="kv"><span>Role</span><span>'+pill(p.role)+'</span></div>';
     h+='<div class="kv"><span>Status</span><span>'+pill(p.status)+'</span></div>';
     h+='<div class="kv"><span>Verified / 2FA</span><span>'+dot(p.is_verified)+' / '+dot(p.totp_enabled)+'</span></div>';
-    h+='<div class="kv"><span>Last login</span><span>'+fmtTs(p.last_login_at)+'</span></div>';
-    h+='<div class="kv"><span>Created</span><span>'+fmtTs(p.created_at)+'</span></div>';
+    h+='<div class="kv"><span>Timezone</span><span>'+esc(p.timezone||'UTC')+'</span></div>';
+    h+='<div class="kv"><span>Last login</span><span>'+fmtTs(p.last_login_at, TZ_MODE==='UTC'?'UTC':(p.timezone||'UTC'))+'</span></div>';
+    h+='<div class="kv"><span>Created</span><span>'+fmtTs(p.created_at, TZ_MODE==='UTC'?'UTC':(p.timezone||'UTC'))+'</span></div>';
     h+='<h2 style="margin:18px 0 8px">Exchange Accounts</h2>';
     h+=(d.exchange_accounts.length?d.exchange_accounts.map(a=>
       '<div class="kv"><span>'+esc(a.exchange)+' / '+esc(a.label)+' '+pill(a.status)+'</span><span class="muted">••••'+esc(a.api_key_last4||'????')+
@@ -4970,6 +4996,7 @@ async function setStatus(id,status){
 
 // each loader handles its own errors, so one failing call never blocks the others
 async function refresh(){clearErr();await Promise.allSettled([loadOverview(),loadUsers(),loadAudit()]);}
+syncTzUI();
 refresh();
 setInterval(loadOverview,30000);
 </script>
@@ -5033,6 +5060,7 @@ th{color:#8fa8c7;font-size:11px;letter-spacing:1px}tr:last-child td{border-botto
   <div class="top">
     <div><h1>ALPHA RADAR SIGNALS</h1><div class="sub">Admin Dashboard</div></div>
     <div style="display:flex;align-items:center;gap:12px">
+      <span style="color:#627a99;font-size:11px;border:1px solid #17314b;border-radius:6px;padding:2px 8px">Time Mode: UTC</span>
       <div id="last-update" style="color:#7fa0c8;font-size:12px">Updating...</div>
       <a href="/app" style="color:#20f0c0;font-size:13px;text-decoration:none;font-weight:700">Portal V12 ▸</a>
       <a href="/" style="color:#8fa8c7;font-size:13px;text-decoration:none">Public Site</a>
@@ -5164,6 +5192,13 @@ th{color:#8fa8c7;font-size:11px;letter-spacing:1px}tr:last-child td{border-botto
 </div>
 
 <script>
+// Timezone System V1 — legacy admin renders in UTC (no SaaS user session here).
+function fmtUTC(s){ if(!s) return '—'; var d=new Date(s); if(isNaN(d.getTime())) return s;
+  try{ return new Intl.DateTimeFormat('en-GB',{timeZone:'UTC',hour12:false,day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit'}).format(d).replace(',','')+' UTC'; }
+  catch(e){ try{ return d.toISOString().replace('T',' ').slice(0,19)+' UTC'; }catch(_){ return s; } } }
+function fmtUTCTime(s){ var d=s?new Date(s):new Date(); if(isNaN(d.getTime()))return '—';
+  try{ return new Intl.DateTimeFormat('en-GB',{timeZone:'UTC',hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'}).format(d)+' UTC'; }
+  catch(e){ return d.toISOString().slice(11,19)+' UTC'; } }
 async function load(){
   const r=await fetch('/api/dashboard');
   if(!r.ok)return;
@@ -5189,7 +5224,7 @@ async function load(){
     '<tr><td>'+x.symbol+'</td><td class="'+(x.avg>=0?'g':'r')+'">'+(x.avg>=0?'+':'')+x.avg+'%</td><td>'+x.count+'</td></tr>'
   ).join('');
   const rows=(d.recent||[]).map(x=>
-    '<tr><td>'+x.time+'</td><td>'+x.symbol+'</td>'+
+    '<tr><td>'+fmtUTC(x.time_iso||x.time)+'</td><td>'+x.symbol+'</td>'+
     '<td class="'+(x.side==='LONG'?'g':'r')+'">'+x.side+'</td>'+
     '<td>'+x.tf+'</td><td>'+x.conf+'%</td><td>1:'+x.rr+'</td>'+
     '<td>'+x.status+'</td><td class="'+(x.pnl>=0?'g':'r')+'">'+x.pnl+'%</td></tr>'
@@ -5221,7 +5256,7 @@ async function loadPx(){
 async function tick(){
   try{
     await load();
-    document.getElementById('last-update').textContent='Updated '+new Date().toLocaleTimeString();
+    document.getElementById('last-update').textContent='Updated '+fmtUTCTime();
   }catch(e){
     document.getElementById('last-update').textContent='Connection issue...';
   }
@@ -5324,7 +5359,7 @@ async function doRebuild(){
       msg.style.color='#ff4f61';
     }else{
       const sc=d.signal_count||{};
-      msg.textContent='✅ Rebuilt '+new Date(d.rebuilt_at).toLocaleTimeString()+
+      msg.textContent='✅ Rebuilt '+fmtUTCTime(d.rebuilt_at)+
         ' — '+sc.closed+' closed signals processed';
       msg.style.color='#20ff80';
       document.getElementById('perf-winrate').textContent=d.win_rate+'%';
@@ -5338,7 +5373,7 @@ async function doRebuild(){
       document.getElementById('perf-losses').textContent=sc.losses??'--';
       document.getElementById('perf-open').textContent=sc.open??'--';
       document.getElementById('perf-rebuilt-at').textContent=
-        'Last rebuilt: '+new Date(d.rebuilt_at).toLocaleString()+
+        'Last rebuilt: '+fmtUTC(d.rebuilt_at)+
         ' · daily_stats: '+d.daily_rows+' rows · weekly_stats: '+d.weekly_rows+' rows';
     }
   }catch(e){

@@ -27,11 +27,13 @@ from app.auth.schemas import (
     SessionOut,
     TokenOut,
     TwoFactorSetupOut,
+    UpdateTimezoneIn,
     UserOut,
     VerifyEmailIn,
 )
 from app.config import settings
 from app.database.models import AuthUser
+from app.utils.timezone import SUPPORTED_TIMEZONES, is_supported_timezone
 from app.database.session import get_session
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -53,6 +55,7 @@ def _user_out(user: AuthUser) -> UserOut:
         telegram_user_id=user.telegram_user_id,
         created_at=user.created_at,
         last_login_at=user.last_login_at,
+        timezone=getattr(user, "timezone", None) or "UTC",
     )
 
 
@@ -121,6 +124,30 @@ async def logout(body: LogoutIn):
 @router.get("/me", response_model=UserOut)
 async def me(user: AuthUser = Depends(get_current_user)):
     return _user_out(user)
+
+
+@router.get("/timezones", response_model=dict)
+async def timezones():
+    """Supported display timezones (public — used to populate the picker)."""
+    return {"timezones": SUPPORTED_TIMEZONES, "default": "UTC"}
+
+
+@router.put("/timezone", response_model=UserOut)
+async def update_timezone(body: UpdateTimezoneIn, user: AuthUser = Depends(get_current_user)):
+    """Set the current user's display timezone. Rejects unsupported zones (400)."""
+    tz = (body.timezone or "").strip()
+    if not is_supported_timezone(tz):
+        return JSONResponse(
+            status_code=400,
+            content={"detail": f"Unsupported timezone. Allowed: {', '.join(SUPPORTED_TIMEZONES)}"})
+    async with get_session() as db:
+        db_user = await db.get(AuthUser, user.id)
+        if db_user is None:
+            return JSONResponse(status_code=404, content={"detail": "User not found"})
+        db_user.timezone = tz
+        await db.commit()
+        await db.refresh(db_user)
+        return _user_out(db_user)
 
 
 # ── email verification ────────────────────────────────────────────

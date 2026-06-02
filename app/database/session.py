@@ -77,6 +77,9 @@ _SCHEMA_UPGRADES: list[str] = [
     "CREATE INDEX IF NOT EXISTS ix_order_failures_final ON order_failures(final_state)",
     "CREATE INDEX IF NOT EXISTS ix_trade_acct_user ON live_trade_accounting(user_id)",
     "CREATE INDEX IF NOT EXISTS ix_daily_pnl_user ON daily_user_pnl(user_id)",
+    # ── Timezone System V1 — per-user display timezone (DB stays UTC) ──
+    "ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS timezone VARCHAR(64) DEFAULT 'UTC'",
+    "UPDATE auth_users SET timezone = 'UTC' WHERE timezone IS NULL",
 ]
 
 engine = create_async_engine(

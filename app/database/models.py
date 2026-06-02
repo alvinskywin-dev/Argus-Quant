@@ -294,6 +294,11 @@ class AuthUser(Base):
     status: Mapped[str] = mapped_column(String(16), default="ACTIVE")   # ACTIVE / SUSPENDED / PENDING
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # Timezone System V1 — display preference only (DB stays UTC). One of the
+    # supported IANA zones; defaults to UTC. Does NOT change the meaning of
+    # created_at / updated_at, which remain UTC.
+    timezone: Mapped[str] = mapped_column(String(64), default="UTC", server_default="UTC")
+
     # 2FA (TOTP)
     totp_secret: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     totp_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
