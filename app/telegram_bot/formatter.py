@@ -57,7 +57,7 @@ def format_signal(sig: dict) -> str:
     funding_line = _funding_line(sig)
 
     body = (
-        "⚡ <b>ALPHA RADAR SIGNALS</b>\n\n"
+        "⚡ <b>ARGUS QUANT</b>\n\n"
 
         f"{side_icon} <code>{sig['symbol']}</code> <b>{side}</b>\n"
         "━━━━━━━━━━━━━━\n\n"

@@ -34,7 +34,7 @@ async def build_report() -> str:
     winrate = round((wins / max(wins + losses, 1)) * 100, 1)
 
     return f"""
-📊 <b>ALPHA RADAR DAILY REPORT</b>
+📊 <b>ARGUS QUANT DAILY REPORT</b>
 
 Signals • <code>{total}</code>
 Wins • <code>{wins}</code>
@@ -43,7 +43,7 @@ Losses • <code>{losses}</code>
 Winrate • <code>{winrate}%</code>
 Avg PnL • <code>{avg_pnl}%</code>
 
-⚡ <b>ALPHA RADAR SIGNALS</b>
+⚡ <b>ARGUS QUANT</b>
 """
 
 

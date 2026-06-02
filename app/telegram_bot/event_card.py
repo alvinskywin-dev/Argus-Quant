@@ -51,7 +51,7 @@ def make_event_card(payload: dict) -> str:
     d.rounded_rectangle((40,40,1060,580), radius=36, outline=main, width=3, fill=(8,12,18))
 
     # header
-    d.text((70,60), "⚡ ALPHA RADAR", font=font(36, True), fill=gold)
+    d.text((70,60), "⚡ ARGUS QUANT", font=font(36, True), fill=gold)
 
     # badge
     badge = "TP1 HIT" if is_win else "STOP LOSS"
@@ -89,7 +89,7 @@ def make_event_card(payload: dict) -> str:
     d.line((790,520,1020,320), fill=main, width=6)
 
     # footer
-    d.text((760,545), "Powered by Alpha Radar AI", font=font(20, True), fill=gold)
+    d.text((760,545), "Powered by Argus Quant AI", font=font(20, True), fill=gold)
 
     out = OUT_DIR / f"event_{symbol}_{event}.png"
     img.convert("RGB").save(out, "PNG")

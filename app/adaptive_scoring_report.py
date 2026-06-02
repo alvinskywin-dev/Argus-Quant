@@ -40,7 +40,7 @@ async def main():
     async with SessionLocal() as session:
         rows = (await session.execute(text(sql), params)).fetchall()
 
-    print("\n🧠 ALPHA RADAR ADAPTIVE SCORING REPORT")
+    print("\n🧠 ARGUS QUANT ADAPTIVE SCORING REPORT")
     print("=" * 70)
 
     if not rows:

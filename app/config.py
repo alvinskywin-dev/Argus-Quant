@@ -190,7 +190,7 @@ class Settings(BaseSettings):
     account_lockout_threshold: int = 5       # failed logins before temporary lock
     account_lockout_minutes: int = 15
     app_base_url: str = "http://localhost:8010"
-    auth_issuer: str = "Alpha Radar Signals"
+    auth_issuer: str = "Argus Quant"
     # SMTP (optional — if smtp_host is blank, emails are logged, never sent)
     smtp_host: str = ""
     smtp_port: int = 587
@@ -293,7 +293,7 @@ def validate_startup(s: "Settings") -> None:
 
     if errors:
         print("=" * 60, file=sys.stderr)
-        print("  ALPHA RADAR SIGNALS — STARTUP CONFIGURATION ERROR", file=sys.stderr)
+        print("  ARGUS QUANT — STARTUP CONFIGURATION ERROR", file=sys.stderr)
         print("=" * 60, file=sys.stderr)
         for err in errors:
             print(f"  ❌  {err}", file=sys.stderr)

@@ -20,7 +20,7 @@ async def main():
 
     if not ok:
         bot = Bot(settings.telegram_bot_token)
-        text = "🚨 <b>ALPHA RADAR UPTIME ALERT</b>\n\n" + "\n".join(
+        text = "🚨 <b>ARGUS QUANT UPTIME ALERT</b>\n\n" + "\n".join(
             f"<code>{x}</code>" for x in errors
         )
 

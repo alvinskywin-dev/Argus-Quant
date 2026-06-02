@@ -86,7 +86,7 @@ async def _lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="ALPHA RADAR SIGNALS", lifespan=_lifespan)
+app = FastAPI(title="ARGUS QUANT", lifespan=_lifespan)
 _boot_time = time.time()
 
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -1674,7 +1674,7 @@ async def api_health():
         "signals_today":   signals_today,
         "errors_today":    0,
         # ── backward-compat (admin dashboard JS reads these) ───────────
-        "brand":           "ALPHA RADAR SIGNALS",
+        "brand":           "ARGUS QUANT",
         "uptime_sec":      uptime,
         "components": {
             "dashboard": {"ok": True, "detail": f"port {settings.dashboard_port}"},
@@ -2190,12 +2190,12 @@ async def index():
     donate_section = (
         '<div class="sh">'
         '<div class="sh-lbl">&#9829; SUPPORT</div>'
-        '<div class="sh-title">Support Alpha Radar Signals &#10084;&#65039;</div>'
-        '<div class="sh-sub">If Alpha Radar Signals helps you, consider supporting development and server costs.</div>'
+        '<div class="sh-title">Support Argus Quant &#10084;&#65039;</div>'
+        '<div class="sh-sub">If Argus Quant helps you, consider supporting development and server costs.</div>'
         '</div>'
         '<div class="don-intro">'
         '<div class="card" style="padding:20px">'
-        '<div style="font-weight:900;font-size:18px;margin-bottom:8px;color:var(--text)">Keep Alpha Radar Free</div>'
+        '<div style="font-weight:900;font-size:18px;margin-bottom:8px;color:var(--text)">Keep Argus Quant Free</div>'
         '<div class="don-copyline">Every donation helps fund data, servers, backtesting, and new features for the trading community.</div>'
         '<div style="margin-top:14px;color:var(--green);font-size:12px;font-weight:800">Thank you for your support! &#128591;</div>'
         '</div>'
@@ -2293,8 +2293,8 @@ async def about_page():
     return HTMLResponse(_info_page(
         "About",
         """
-<h2>About ALPHA RADAR SIGNALS</h2>
-<p>ALPHA RADAR SIGNALS is a free, AI-powered crypto futures signal service. Our multi-timeframe analysis engine scans the market 24/7 and delivers high-quality trade setups directly to Telegram.</p>
+<h2>About ARGUS QUANT</h2>
+<p>ARGUS QUANT is a free, AI-powered crypto futures signal service. Our multi-timeframe analysis engine scans the market 24/7 and delivers high-quality trade setups directly to Telegram.</p>
 <h3>How It Works</h3>
 <ul style="color:#c9d8e8;line-height:2">
   <li><strong>1D Trend Filter</strong> — Identifies the dominant daily trend using EMA and market structure.</li>
@@ -2323,7 +2323,7 @@ async def faq_page():
 <h2>Frequently Asked Questions</h2>
 
 <h3>Are the signals free?</h3>
-<p>Yes. All signals on ALPHA RADAR SIGNALS are 100% free. No subscription or payment required.</p>
+<p>Yes. All signals on ARGUS QUANT are 100% free. No subscription or payment required.</p>
 
 <h3>How do I receive signals?</h3>
 <p>Join our Telegram channel. Signals are posted automatically as soon as the AI engine detects a valid setup.</p>
@@ -2347,7 +2347,7 @@ async def faq_page():
 <p>Auto-trading is on our roadmap but not currently available. All signals require manual execution.</p>
 
 <h3>Who runs this project?</h3>
-<p>ALPHA RADAR SIGNALS is an independent trading tools project. We are not a registered financial institution.</p>
+<p>ARGUS QUANT is an independent trading tools project. We are not a registered financial institution.</p>
 """,
     ))
 
@@ -2360,7 +2360,7 @@ async def terms():
 <h2>Terms of Service</h2>
 <p>Last updated: 2026-05-30</p>
 <h3>1. Acceptance</h3>
-<p>By using ALPHA RADAR SIGNALS ("the Service") you agree to these Terms. If you do not agree, stop using the Service immediately.</p>
+<p>By using ARGUS QUANT ("the Service") you agree to these Terms. If you do not agree, stop using the Service immediately.</p>
 <h3>2. Educational Purpose Only</h3>
 <p>All signals, analysis, and content provided by the Service are for educational and informational purposes only. Nothing on this platform constitutes financial, investment, trading, or legal advice.</p>
 <h3>3. No Guarantees</h3>
@@ -2368,7 +2368,7 @@ async def terms():
 <h3>4. User Responsibility</h3>
 <p>You are solely responsible for your trading decisions. Always conduct your own research and consult a qualified financial advisor before making any investment.</p>
 <h3>5. Limitation of Liability</h3>
-<p>ALPHA RADAR SIGNALS and its operators shall not be liable for any losses, damages, or costs arising from your use of the Service.</p>
+<p>ARGUS QUANT and its operators shall not be liable for any losses, damages, or costs arising from your use of the Service.</p>
 <h3>6. Modifications</h3>
 <p>We reserve the right to modify these Terms at any time. Continued use of the Service constitutes acceptance of the updated Terms.</p>
 """,
@@ -2413,7 +2413,7 @@ async def risk_disclaimer():
   <li>AI-generated signals are probabilistic tools, not certainties.</li>
   <li>Never invest money you cannot afford to lose entirely.</li>
   <li>Diversify your investments and never risk your emergency funds.</li>
-  <li>ALPHA RADAR SIGNALS is not a regulated financial advisor.</li>
+  <li>ARGUS QUANT is not a regulated financial advisor.</li>
 </ul>
 <p>By using this service you acknowledge that you have read, understood, and accepted this risk disclaimer.</p>
 """,
@@ -2426,7 +2426,7 @@ def _page_shell(title: str, body: str, extra_css: str = "", extra_js: str = "") 
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>{_esc(title)} — ALPHA RADAR SIGNALS</title>
+<title>{_esc(title)} — ARGUS QUANT</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{background:#070b12;color:#eaf2ff;font-family:Inter,Arial,sans-serif;line-height:1.6}}
@@ -2460,7 +2460,7 @@ footer{{border-top:1px solid #13263a;padding:26px 24px;text-align:center;color:#
 <body>
 <header>
 <div class="hdr">
-  <div class="brand"><a href="/" style="text-decoration:none;color:#eaf2ff">ALPHA RADAR <em>SIGNALS</em></a></div>
+  <div class="brand"><a href="/" style="text-decoration:none;color:#eaf2ff">ARGUS <em>QUANT</em></a></div>
   <div class="hnav">
     <a href="/signals">Signals</a>
     <a href="/market-radar">Market Radar</a>
@@ -2475,7 +2475,7 @@ footer{{border-top:1px solid #13263a;padding:26px 24px;text-align:center;color:#
 {body}
 </div>
 <footer>
-  <p>ALPHA RADAR SIGNALS &nbsp;·&nbsp; Free AI-powered crypto futures signals</p>
+  <p>ARGUS QUANT &nbsp;·&nbsp; Free AI-powered crypto futures signals</p>
   <p style="margin-top:6px">
     <a href="/terms" style="color:#627a99">Terms</a> &nbsp;·&nbsp;
     <a href="/privacy" style="color:#627a99">Privacy</a> &nbsp;·&nbsp;
@@ -2628,7 +2628,7 @@ def _performance_page_html() -> str:
 """
     body = """
 <div class="pc-header">
-  <div class="pc-title">ALPHA RADAR PERFORMANCE CENTER</div>
+  <div class="pc-title">ARGUS QUANT PERFORMANCE CENTER</div>
   <div class="pc-subtitle">MTF ENGINE ONLY &nbsp;·&nbsp; strategy = MTF_SMC_STRICT &nbsp;·&nbsp; 15m / 1H / 4H / 1D</div>
 </div>
 
@@ -2917,7 +2917,7 @@ def _info_page(title: str, body: str) -> str:
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>{_esc(title)} — ALPHA RADAR SIGNALS</title>
+<title>{_esc(title)} — ARGUS QUANT</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{background:#070b12;color:#eaf2ff;font-family:Inter,Arial,sans-serif;line-height:1.7}}
@@ -2935,7 +2935,7 @@ header{{background:#08111c;border-bottom:1px solid #13263a;padding:13px 24px}}
 </head>
 <body>
 <header>
-  <div class="brand"><a href="/" style="text-decoration:none;color:#eaf2ff">ALPHA RADAR <em>SIGNALS</em></a></div>
+  <div class="brand"><a href="/" style="text-decoration:none;color:#eaf2ff">ARGUS <em>QUANT</em></a></div>
 </header>
 <div class="container">
 {body}
@@ -3254,7 +3254,7 @@ def _health_page_html() -> str:
     body = """
 <div class="hc-header">
   <div class="hc-title">HEALTH CENTER</div>
-  <div class="hc-subtitle">ALPHA RADAR SIGNALS &nbsp;·&nbsp; System Status</div>
+  <div class="hc-subtitle">ARGUS QUANT &nbsp;·&nbsp; System Status</div>
 </div>
 
 <div class="hc-kpi">
@@ -4017,7 +4017,7 @@ def _performance_center_page_html() -> str:
 
 <div id="collect-msg" class="pc2-collect" style="display:none">
   <h3>Collecting Verified Performance Data</h3>
-  <p>Alpha Radar requires at least 30 closed signals before showing headline statistics. Check back as more signals close.</p>
+  <p>Argus Quant requires at least 30 closed signals before showing headline statistics. Check back as more signals close.</p>
 </div>
 
 <div id="main-data">
@@ -4633,7 +4633,7 @@ _LOGIN_HTML = """\
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Admin Login — ALPHA RADAR SIGNALS</title>
+<title>Admin Login — ARGUS QUANT</title>
 <style>
 body{margin:0;min-height:100vh;display:grid;place-items:center;background:#070b12;color:#eaf2ff;font-family:Arial}
 .box{width:360px;background:#0b1320;border:1px solid #17314b;border-radius:18px;padding:28px;box-shadow:0 0 35px #00ffc822}
@@ -4649,7 +4649,7 @@ button{width:100%;padding:13px;margin-top:12px;border:0;border-radius:9px;backgr
 <body>
 <form class="box" method="post" action="/login">
 <div class="logo">A</div>
-<h1>ALPHA RADAR SIGNALS</h1>
+<h1>ARGUS QUANT</h1>
 <p>Admin Dashboard Login</p>
 __ERR__
 <input name="username" placeholder="Username" required autocomplete="username">
@@ -4667,9 +4667,9 @@ _PUBLIC_HTML = """\
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>ALPHA RADAR SIGNALS — AI-Powered Futures Signals</title>
+<title>ARGUS QUANT — AI-Powered Futures Signals</title>
 <meta name="description" content="AI-powered Binance Futures signals with multi-timeframe analysis, risk-managed entries, live stats, Telegram alerts, affiliate exchanges and donation support."/>
-<meta property="og:title" content="ALPHA RADAR SIGNALS — AI-Powered Futures Signals"/>
+<meta property="og:title" content="ARGUS QUANT — AI-Powered Futures Signals"/>
 <meta property="og:description" content="Multi-Timeframe Analysis · Risk Managed · 24/7 Scanner · Free on Telegram"/>
 <meta property="og:type" content="website"/>
 <meta name="twitter:card" content="summary_large_image"/>
@@ -4742,17 +4742,17 @@ a{color:inherit;text-decoration:none}button{font-family:inherit}.container{width
 </style>
 </head>
 <body>
-<nav class="nav"><div class="container nav-in"><a class="brand" href="/"><svg class="logo-svg" viewBox="0 0 100 100" fill="none"><circle cx="50" cy="50" r="44" stroke="#18f28b" stroke-width="5"/><path d="M50 12 84 84H68L58 62H42L32 84H16L50 12Z" fill="url(#g)"/><path d="M37 58 50 31l13 27H37Z" fill="#031020" opacity=".85"/><path d="M25 76c13-10 30-15 50-16" stroke="#08e8d2" stroke-width="5" stroke-linecap="round"/><defs><linearGradient id="g" x1="20" y1="12" x2="82" y2="85"><stop stop-color="#08e8d2"/><stop offset="1" stop-color="#18f28b"/></linearGradient></defs></svg><div class="brand-word">ALPHA RADAR<b>SIGNALS</b></div></a><div class="nav-links"><a href="/signals">Signals</a><a href="/market-radar">Market Radar</a><a href="/performance-center">Performance</a><a href="/setup-library">Setup Library</a><a href="/watchlist">Watchlist</a><a href="/faq">FAQ</a></div>__TG_BTN__<div class="lang-sel"><button class="lang-btn" id="lang-btn" onclick="toggleLangMenu(event)" aria-label="Select language">🌐 <span id="lang-cur">EN</span> ▾</button><div class="lang-menu" id="lang-menu"></div></div></div></nav>
+<nav class="nav"><div class="container nav-in"><a class="brand" href="/"><svg class="logo-svg" viewBox="0 0 100 100" fill="none"><circle cx="50" cy="50" r="44" stroke="#18f28b" stroke-width="5"/><path d="M50 12 84 84H68L58 62H42L32 84H16L50 12Z" fill="url(#g)"/><path d="M37 58 50 31l13 27H37Z" fill="#031020" opacity=".85"/><path d="M25 76c13-10 30-15 50-16" stroke="#08e8d2" stroke-width="5" stroke-linecap="round"/><defs><linearGradient id="g" x1="20" y1="12" x2="82" y2="85"><stop stop-color="#08e8d2"/><stop offset="1" stop-color="#18f28b"/></linearGradient></defs></svg><div class="brand-word">ARGUS <b>QUANT</b></div></a><div class="nav-links"><a href="/signals">Signals</a><a href="/market-radar">Market Radar</a><a href="/performance-center">Performance</a><a href="/setup-library">Setup Library</a><a href="/watchlist">Watchlist</a><a href="/faq">FAQ</a></div>__TG_BTN__<div class="lang-sel"><button class="lang-btn" id="lang-btn" onclick="toggleLangMenu(event)" aria-label="Select language">🌐 <span id="lang-cur">EN</span> ▾</button><div class="lang-menu" id="lang-menu"></div></div></div></nav>
 <header class="hero"><div class="container"><div class="hero-grid"><div><h1 class="hero-title"><span>AI-POWERED</span><span><b class="futures">FUTURES</b> <b class="signals">SIGNALS</b></span></h1><p class="hero-sub">Multi-Timeframe Analysis • Risk Managed • 24/7 Scanner</p><div class="feature-row"><div class="fitem"><div class="ficon">◎</div><div class="ftxt"><b>High Accuracy</b>AI Validated</div></div><div class="fitem"><div class="ficon">盾</div><div class="ftxt"><b>Risk Managed</b>Smart Entries</div></div><div class="fitem"><div class="ficon">⚡</div><div class="ftxt"><b>24/7 Scanner</b>Never Miss Setup</div></div><div class="fitem"><div class="ficon">▥</div><div class="ftxt"><b>Live Performance</b>Transparent Stats</div></div></div><div class="hero-btns">__HERO_BTNS__</div></div><div class="radar-wrap"><div class="radar"><div class="sweep"></div><div class="dot d1"></div><div class="dot d2"></div><div class="dot d3"></div><div class="dot d4"></div><div class="radar-a"><svg viewBox="0 0 100 100"><path d="M50 14 83 84H66L58 63H42L34 84H17L50 14Z" fill="url(#ra)"/><path d="M38 58 50 32l12 26H38Z" fill="#061329"/><defs><linearGradient id="ra" x1="20" y1="10" x2="80" y2="90"><stop stop-color="#08e8d2"/><stop offset="1" stop-color="#18f28b"/></linearGradient></defs></svg></div></div><div class="chip btc">BTCUSDT<small>LONG</small></div><div class="chip eth">ETHUSDT<small style="color:#ff4564">SHORT</small></div><div class="chip sol">SOLUSDT<small>LONG</small></div></div></div><div class="stats-strip card"><div class="stat"><div class="slbl" data-i18n="stats.total">Total Signals (30D)</div><div id="s-total" class="sval" style="color:var(--cyan)">--</div><div class="spark"></div></div><div class="stat"><div class="slbl" data-i18n="stats.win_rate">Win Rate (30D)</div><div id="s-wr" class="sval">--</div><div class="spark"></div></div><div class="stat"><div class="slbl" data-i18n="stats.avg_rr">Avg RR (30D)</div><div id="s-rr" class="sval">1:2.2</div><div class="spark"></div></div><div class="stat"><div class="slbl" data-i18n="stats.markets">Markets Scanned</div><div id="s-mkts" class="sval">206</div><div class="spark"></div></div><div class="stat"><div class="slbl" data-i18n="stats.positions">Open Positions</div><div id="s-active" class="sval">--</div><div class="spark"></div></div></div></div></header>
 <section class="section" id="exchanges-section"><div class="container"><div class="center-head"><span class="eyebrow">♛ Partners</span><h2 class="section-title" data-i18n="section.exchanges">Trusted Partner Exchanges</h2><p class="section-sub" data-i18n="section.exchanges_sub">Trade on the best platforms with exclusive bonuses</p></div>__AFFILIATES__<p style="text-align:center;color:var(--muted);font-size:12px;margin-top:12px">🛡 We only recommend trusted exchanges. We may earn a commission at no extra cost to you.</p></div></section>
 <section class="section"><div class="container"><div class="tg-cta"><div class="tg-inner"><div class="phone"><div class="phone-frame"><div class="phone-top"></div><div class="msg">🚀 BTCUSDT LONG<br/>Entry: 97,450<br/>TP1: 98,800<br/>RR: 1:2.5</div><div class="msg good">✅ ETHUSDT TP1 hit<br/>+3.2% profit</div><div class="msg">📊 Weekly Summary<br/>Win Rate: 62.4%</div></div></div><div class="tg-copy"><h2>JOIN 12,000+ TRADERS<br/><span>ON TELEGRAM</span></h2><div class="tg-list"><div><b>✓</b> Real-time Signals</div><div><b>✓</b> Market Alerts</div><div><b>✓</b> Weekly Reports</div><div><b>✓</b> Strategy Insights</div><div><b>✓</b> Community Support</div></div></div><div class="tg-action"><a class="tg-big" href="__TG_URL__" target="_blank" rel="noopener">➤ JOIN TELEGRAM NOW</a><div class="tg-hint">No Spam • No Ads • 100% Free</div></div></div></div></div></section>
 <section class="section" id="radar-mini-section"><div class="container"><div class="center-head"><span class="eyebrow">📡 Intelligence</span><h2 class="section-title">TODAY'S MARKET RADAR</h2><p class="section-sub">Live market bias, risk level, and sentiment — updated every 45 seconds</p></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px" id="radar-mini-grid"><div style="background:var(--card);border:1px solid rgba(49,159,208,.22);border-radius:var(--r);padding:18px;text-align:center"><div style="font-size:10px;text-transform:uppercase;letter-spacing:1.8px;color:var(--muted);margin-bottom:8px">BTC Bias</div><div id="rml-btc" style="font-size:20px;font-weight:900;color:var(--yellow)">—</div></div><div style="background:var(--card);border:1px solid rgba(49,159,208,.22);border-radius:var(--r);padding:18px;text-align:center"><div style="font-size:10px;text-transform:uppercase;letter-spacing:1.8px;color:var(--muted);margin-bottom:8px">ETH Bias</div><div id="rml-eth" style="font-size:20px;font-weight:900;color:var(--yellow)">—</div></div><div style="background:var(--card);border:1px solid rgba(49,159,208,.22);border-radius:var(--r);padding:18px;text-align:center"><div style="font-size:10px;text-transform:uppercase;letter-spacing:1.8px;color:var(--muted);margin-bottom:8px">Market Risk</div><div id="rml-risk" style="font-size:20px;font-weight:900;color:var(--yellow)">—</div></div><div style="background:var(--card);border:1px solid rgba(49,159,208,.22);border-radius:var(--r);padding:18px;text-align:center"><div style="font-size:10px;text-transform:uppercase;letter-spacing:1.8px;color:var(--muted);margin-bottom:8px">Sentiment</div><div id="rml-sent" style="font-size:20px;font-weight:900;color:var(--yellow)">—</div></div><div style="background:var(--card);border:1px solid rgba(49,159,208,.22);border-radius:var(--r);padding:18px;text-align:center"><div style="font-size:10px;text-transform:uppercase;letter-spacing:1.8px;color:var(--muted);margin-bottom:8px">Signals 24H</div><div id="rml-24h" style="font-size:20px;font-weight:900;color:var(--cyan)">—</div></div></div><div style="text-align:center;margin-top:18px"><a href="/market-radar" style="color:var(--cyan);font-weight:800">View Full Market Radar →</a></div></div></section>
 <section class="section" id="strategy-section"><div class="container"><div class="center-head"><span class="eyebrow">⚙ Engine</span><h2 class="section-title" data-i18n="section.strategy">LIVE STRATEGY ENGINE</h2><p class="section-sub" data-i18n="section.strategy_sub">Exact strategy logic currently used by the bot — updated from live config</p></div><div class="strat-grid"><div class="strat-card"><div class="strat-title"><span>📈 1D Trend Engine</span><span class="strat-tf">1D</span></div><div class="strat-row"><span class="strat-lbl">EMA200 Direction</span><span class="strat-val sv-pass">Above = Bullish</span></div><div class="strat-row"><span class="strat-lbl">EMA50 vs EMA200</span><span class="strat-val sv-pass">LONG: EMA50 &gt; EMA200</span></div><div class="strat-row"><span class="strat-lbl">Current Trend Bias</span><span class="strat-val sv-pass">EMA cross required</span></div><div class="strat-row"><span class="strat-lbl">Structure Confirm</span><span class="strat-val">BOS / MSS</span></div><div class="strat-row"><span class="strat-lbl">Trend Score Max</span><span class="strat-val">20 pts</span></div></div><div class="strat-card"><div class="strat-title"><span>🏗 4H Market Structure</span><span class="strat-tf">4H</span></div><div class="strat-row"><span class="strat-lbl">BOS / CHoCH</span><span class="strat-val sv-pass">Checked</span></div><div class="strat-row"><span class="strat-lbl">Range / Expansion</span><span class="strat-val sv-pass">Checked</span></div><div class="strat-row"><span class="strat-lbl">Higher High / Lower Low</span><span class="strat-val sv-pass">Checked</span></div><div class="strat-row"><span class="strat-lbl">Order Block + FVG</span><span class="strat-val sv-pass">Checked</span></div><div class="strat-row"><span class="strat-lbl">Min Confluence</span><span class="strat-val sv-warn">2 / 5 required</span></div></div><div class="strat-card"><div class="strat-title"><span>🎯 1H Setup Engine</span><span class="strat-tf">1H</span></div><div class="strat-row"><span class="strat-lbl">Pullback Zone</span><span class="strat-val sv-pass">Checked</span></div><div class="strat-row"><span class="strat-lbl">Fair Value Gap</span><span class="strat-val sv-pass">Checked</span></div><div class="strat-row"><span class="strat-lbl">Order Block</span><span class="strat-val sv-pass">Checked</span></div><div class="strat-row"><span class="strat-lbl">Momentum Confirmation</span><span class="strat-val sv-pass">Checked</span></div><div class="strat-row"><span class="strat-lbl">Min Confluence</span><span class="strat-val sv-warn">3 / 5 required</span></div></div><div class="strat-card"><div class="strat-title"><span>⚡ 15M Entry Timing</span><span class="strat-tf">15M</span></div><div class="strat-row"><span class="strat-lbl">BOS (Break of Structure)</span><span class="strat-val">Factor 1</span></div><div class="strat-row"><span class="strat-lbl">FVG Retest</span><span class="strat-val">Factor 2</span></div><div class="strat-row"><span class="strat-lbl">OB Retest</span><span class="strat-val">Factor 3</span></div><div class="strat-row"><span class="strat-lbl">EMA Pullback</span><span class="strat-val">Factor 4</span></div><div class="strat-row"><span class="strat-lbl">VWAP Reclaim</span><span class="strat-val">Factor 5</span></div><div class="strat-row"><span class="strat-lbl">Entry Pass Score</span><span id="se-entry-score" class="strat-val sv-warn">-- / 5</span></div></div><div class="strat-card"><div class="strat-title"><span>💰 Funding Filter</span><span class="strat-tf">LIVE</span></div><div class="strat-row"><span class="strat-lbl">Current Funding Mode</span><span id="se-funding-mode" class="strat-val sv-pass">Loading…</span></div><div class="strat-row"><span class="strat-lbl">Neutral Zone</span><span class="strat-val sv-pass">|rate| &lt; 0.03%</span></div><div class="strat-row"><span class="strat-lbl">Crowded Long</span><span class="strat-val sv-warn">rate &gt; +0.08%</span></div><div class="strat-row"><span class="strat-lbl">Crowded Short</span><span class="strat-val sv-warn">rate &lt; -0.08%</span></div><div class="strat-row"><span class="strat-lbl">Filter Weight</span><span class="strat-val">10 pts</span></div></div><div class="strat-card"><div class="strat-title"><span>🛡 Risk Filter</span><span class="strat-tf">CONFIG</span></div><div class="strat-row"><span class="strat-lbl">Min Confidence</span><span id="se-min-conf" class="strat-val sv-warn">--</span></div><div class="strat-row"><span class="strat-lbl">Min RR</span><span id="se-min-rr" class="strat-val sv-warn">--</span></div><div class="strat-row"><span class="strat-lbl">Entry Pass Score</span><span id="se-entry-score2" class="strat-val sv-warn">--</span></div><div class="strat-row"><span class="strat-lbl">Max Signals / Hour</span><span id="se-max-sig" class="strat-val sv-warn">--</span></div><div class="strat-row"><span class="strat-lbl">Cooldown</span><span id="se-cooldown" class="strat-val sv-warn">--</span></div></div></div></div></section>
 <section class="section" id="signals-section"><div class="container"><div class="table-card card"><div class="table-head"><h2 style="margin:0" data-i18n="section.signals">Latest Live Signals</h2><span class="live-dot">● Live</span></div><div class="table-wrap"><table><thead><tr><th data-i18n="table.time">Time</th><th data-i18n="table.symbol">Symbol</th><th data-i18n="table.side">Side</th><th data-i18n="table.tf">TF</th><th data-i18n="table.confidence">Confidence</th><th data-i18n="table.rr">RR</th><th data-i18n="table.status">Status</th><th data-i18n="table.pnl">PNL</th><th></th></tr></thead><tbody id="sig-tbl"><tr><td colspan="9">Loading signals...</td></tr></tbody></table></div><div style="text-align:center;margin-top:18px;display:flex;gap:16px;justify-content:center;flex-wrap:wrap"><a href="/signals" style="color:var(--cyan);font-weight:800" data-i18n="section.signals_all">View All Signals →</a><a href="/watchlist" style="color:var(--green);font-weight:800">⭐ Track Favorite Coins →</a></div></div></div></section>
-<section class="section" id="perf-section"><div class="container"><div class="perf-box card"><div class="perf-title"><h3>Performance Summary</h3><p>Transparent. Verified. Real results.</p><div style="margin-top:12px"><a href="/performance-center" style="display:inline-flex;align-items:center;gap:6px;color:var(--cyan);font-size:13px;font-weight:800;border:1px solid rgba(8,232,210,.25);border-radius:8px;padding:6px 14px;background:rgba(8,232,210,.06)">📊 View Full Performance Analytics →</a></div></div><div id="perf-data" class="collecting"><h3>Collecting Verified Performance Data</h3><p>Alpha Radar uses real production signals. We only show headline performance when enough verified closed trades are available.</p></div><div class="pmetric perf-live"><div class="plabel">Win Rate (30D)</div><div id="ps-wr" class="pval">--</div></div><div class="pmetric perf-live"><div class="plabel">Profit Factor</div><div id="ps-pf" class="pval">--</div></div><div class="pmetric perf-live"><div class="plabel">Total PNL (30D)</div><div id="ps-pnl" class="pval">--</div></div><div class="pmetric perf-live"><div class="plabel">Avg RR</div><div id="ps-rr" class="pval">--</div></div><div class="equity-mini perf-live"></div></div></div></section>
+<section class="section" id="perf-section"><div class="container"><div class="perf-box card"><div class="perf-title"><h3>Performance Summary</h3><p>Transparent. Verified. Real results.</p><div style="margin-top:12px"><a href="/performance-center" style="display:inline-flex;align-items:center;gap:6px;color:var(--cyan);font-size:13px;font-weight:800;border:1px solid rgba(8,232,210,.25);border-radius:8px;padding:6px 14px;background:rgba(8,232,210,.06)">📊 View Full Performance Analytics →</a></div></div><div id="perf-data" class="collecting"><h3>Collecting Verified Performance Data</h3><p>Argus Quant uses real production signals. We only show headline performance when enough verified closed trades are available.</p></div><div class="pmetric perf-live"><div class="plabel">Win Rate (30D)</div><div id="ps-wr" class="pval">--</div></div><div class="pmetric perf-live"><div class="plabel">Profit Factor</div><div id="ps-pf" class="pval">--</div></div><div class="pmetric perf-live"><div class="plabel">Total PNL (30D)</div><div id="ps-pnl" class="pval">--</div></div><div class="pmetric perf-live"><div class="plabel">Avg RR</div><div id="ps-rr" class="pval">--</div></div><div class="equity-mini perf-live"></div></div></div></section>
 <section class="section"><div class="container">__DONATE__</div></section>
-<section class="section"><div class="container"><div class="center-head"><span class="eyebrow">FAQ</span><h2 class="section-title" data-i18n="section.faq">Frequently Asked Questions</h2></div><div><div class="faq-item card" onclick="toggleFaq(this)"><div class="faq-q">What is Alpha Radar Signals?<span>⌄</span></div><div class="faq-a">A free AI-powered crypto futures signal platform scanning 200+ Binance USDT perpetual pairs with a multi-timeframe engine.</div></div><div class="faq-item card" onclick="toggleFaq(this)"><div class="faq-q">Is this financial advice?<span>⌄</span></div><div class="faq-a">No. All signals are for educational and informational purposes only. Futures trading is high risk.</div></div><div class="faq-item card" onclick="toggleFaq(this)"><div class="faq-q">Does the bot trade automatically?<span>⌄</span></div><div class="faq-a">No. The public system broadcasts signals only. It does not connect to your exchange account or place real trades.</div></div><div class="faq-item card" onclick="toggleFaq(this)"><div class="faq-q">How are signals generated?<span>⌄</span></div><div class="faq-a">Signals use 1D trend, 4H structure, 1H setup and 15M entry timing with risk/reward filters.</div></div><div class="faq-item card" onclick="toggleFaq(this)"><div class="faq-q">What exchanges are supported?<span>⌄</span></div><div class="faq-a">Signals are calibrated for Binance USDT Perpetual Futures and are compatible with Bybit, OKX and Bitget pairs.</div></div></div><div class="disc"><b>⚠ Risk Disclaimer</b><br/>Signals are for educational purposes only. Trading futures is high risk. Past performance does not guarantee future results.</div></div></section>
-<footer><div class="container"><div class="footer-in"><div><div class="brand"><svg class="logo-svg" viewBox="0 0 100 100" fill="none"><circle cx="50" cy="50" r="44" stroke="#18f28b" stroke-width="5"/><path d="M50 12 84 84H68L58 62H42L32 84H16L50 12Z" fill="#18f28b"/><path d="M25 76c13-10 30-15 50-16" stroke="#08e8d2" stroke-width="5" stroke-linecap="round"/></svg><div class="brand-word">ALPHA RADAR<b>SIGNALS</b></div></div><p class="ftagline" data-i18n="footer.tagline">AI-Powered. Data-Driven. Trader-Focused.</p></div><div><div class="fcol-ttl" data-i18n="footer.links">Links</div><div class="flinks"><a href="/signals">Signals</a><a href="/market-radar">Market Radar</a><a href="/performance-center">Performance</a><a href="/setup-library">Setup Library</a><a href="/watchlist">Watchlist</a><a href="/faq">FAQ</a></div></div><div><div class="fcol-ttl" data-i18n="footer.community">Community</div><div class="flinks">__FOOTER_COMM__</div></div><div><div class="fcol-ttl" data-i18n="footer.legal">Legal</div><div class="flinks"><a href="/terms" data-i18n="footer.terms">Terms of Service</a><a href="/privacy" data-i18n="footer.privacy">Privacy Policy</a><a href="/risk-disclaimer" data-i18n="footer.risk_disc">Risk Disclaimer</a><a href="/admin">Admin</a></div></div></div><div class="fbot"><span class="fcopy">© 2026 ALPHA RADAR SIGNALS. All rights reserved.</span><span class="fcopy"><a href="/signals">Signals</a> · <a href="/performance">Performance</a> · <a href="/stats">Stats</a></span></div></div></footer>
+<section class="section"><div class="container"><div class="center-head"><span class="eyebrow">FAQ</span><h2 class="section-title" data-i18n="section.faq">Frequently Asked Questions</h2></div><div><div class="faq-item card" onclick="toggleFaq(this)"><div class="faq-q">What is Argus Quant?<span>⌄</span></div><div class="faq-a">A free AI-powered crypto futures signal platform scanning 200+ Binance USDT perpetual pairs with a multi-timeframe engine.</div></div><div class="faq-item card" onclick="toggleFaq(this)"><div class="faq-q">Is this financial advice?<span>⌄</span></div><div class="faq-a">No. All signals are for educational and informational purposes only. Futures trading is high risk.</div></div><div class="faq-item card" onclick="toggleFaq(this)"><div class="faq-q">Does the bot trade automatically?<span>⌄</span></div><div class="faq-a">No. The public system broadcasts signals only. It does not connect to your exchange account or place real trades.</div></div><div class="faq-item card" onclick="toggleFaq(this)"><div class="faq-q">How are signals generated?<span>⌄</span></div><div class="faq-a">Signals use 1D trend, 4H structure, 1H setup and 15M entry timing with risk/reward filters.</div></div><div class="faq-item card" onclick="toggleFaq(this)"><div class="faq-q">What exchanges are supported?<span>⌄</span></div><div class="faq-a">Signals are calibrated for Binance USDT Perpetual Futures and are compatible with Bybit, OKX and Bitget pairs.</div></div></div><div class="disc"><b>⚠ Risk Disclaimer</b><br/>Signals are for educational purposes only. Trading futures is high risk. Past performance does not guarantee future results.</div></div></section>
+<footer><div class="container"><div class="footer-in"><div><div class="brand"><svg class="logo-svg" viewBox="0 0 100 100" fill="none"><circle cx="50" cy="50" r="44" stroke="#18f28b" stroke-width="5"/><path d="M50 12 84 84H68L58 62H42L32 84H16L50 12Z" fill="#18f28b"/><path d="M25 76c13-10 30-15 50-16" stroke="#08e8d2" stroke-width="5" stroke-linecap="round"/></svg><div class="brand-word">ARGUS <b>QUANT</b></div></div><p class="ftagline" data-i18n="footer.tagline">AI-Powered. Data-Driven. Trader-Focused.</p></div><div><div class="fcol-ttl" data-i18n="footer.links">Links</div><div class="flinks"><a href="/signals">Signals</a><a href="/market-radar">Market Radar</a><a href="/performance-center">Performance</a><a href="/setup-library">Setup Library</a><a href="/watchlist">Watchlist</a><a href="/faq">FAQ</a></div></div><div><div class="fcol-ttl" data-i18n="footer.community">Community</div><div class="flinks">__FOOTER_COMM__</div></div><div><div class="fcol-ttl" data-i18n="footer.legal">Legal</div><div class="flinks"><a href="/terms" data-i18n="footer.terms">Terms of Service</a><a href="/privacy" data-i18n="footer.privacy">Privacy Policy</a><a href="/risk-disclaimer" data-i18n="footer.risk_disc">Risk Disclaimer</a><a href="/admin">Admin</a></div></div></div><div class="fbot"><span class="fcopy">© 2026 ARGUS QUANT. All rights reserved.</span><span class="fcopy"><a href="/signals">Signals</a> · <a href="/performance">Performance</a> · <a href="/stats">Stats</a></span></div></div></footer>
 <div id="am-modal" class="am-bg" onclick="if(event.target===this)closeAnalysis()"><div class="am-box"><div class="am-hdr"><div class="am-title">Signal Analysis</div><button class="am-close" onclick="closeAnalysis()">✕ Close</button></div><div id="am-content"><p style="text-align:center;color:var(--muted);padding:40px">Loading…</p></div></div></div>
 <a class="float-tg" href="__TG_URL__" target="_blank" rel="noopener">➤</a><div id="v7-toast" class="toast">Copied!</div><div id="qr-modal" class="modal-bg" onclick="closeQR(event)"><div class="modal-box"><h3 id="qr-ttl">Wallet</h3><div id="qr-net" style="color:var(--muted)"></div><div class="modal-qr"><div id="qr-canvas"></div></div><div id="qr-addr" class="modal-addr"></div><button class="modal-close" onclick="closeQRBtn()">Close</button></div></div>
 <script>
@@ -4787,7 +4787,7 @@ _PLATFORM_ADMIN_HTML = """\
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>SaaS Platform — ALPHA RADAR SIGNALS</title>
+<title>SaaS Platform — ARGUS QUANT</title>
 <style>
 *{box-sizing:border-box}body{margin:0;background:#070b12;color:#eaf2ff;font-family:Inter,Arial,sans-serif}
 .top{display:flex;justify-content:space-between;align-items:center;padding:20px 28px;border-bottom:1px solid #13263a;background:linear-gradient(180deg,#08111c,#07101a)}
@@ -5011,7 +5011,7 @@ _ADMIN_HTML = """\
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Admin — ALPHA RADAR SIGNALS</title>
+<title>Admin — ARGUS QUANT</title>
 <style>
 *{box-sizing:border-box}body{margin:0;background:#070b12;color:#eaf2ff;font-family:Inter,Arial,sans-serif}
 .wrap{display:grid;grid-template-columns:270px 1fr;min-height:100vh}
@@ -5044,7 +5044,7 @@ th{color:#8fa8c7;font-size:11px;letter-spacing:1px}tr:last-child td{border-botto
 <body>
 <div class="wrap">
 <aside class="side">
-  <div class="logo"><div class="mark">A</div><div class="brand">ALPHA RADAR<span>SIGNALS</span></div></div>
+  <div class="logo"><div class="mark">A</div><div class="brand">ARGUS <span>QUANT</span></div></div>
   <div class="nav">
     <div id="nav-dashboard" class="act" onclick="showTab('dashboard')">Dashboard</div>
     <div id="nav-signals" onclick="showTab('signals')">Signals</div>
@@ -5058,7 +5058,7 @@ th{color:#8fa8c7;font-size:11px;letter-spacing:1px}tr:last-child td{border-botto
 </aside>
 <main class="main">
   <div class="top">
-    <div><h1>ALPHA RADAR SIGNALS</h1><div class="sub">Admin Dashboard</div></div>
+    <div><h1>ARGUS QUANT</h1><div class="sub">Admin Dashboard</div></div>
     <div style="display:flex;align-items:center;gap:12px">
       <span style="color:#627a99;font-size:11px;border:1px solid #17314b;border-radius:6px;padding:2px 8px">Time Mode: UTC</span>
       <div id="last-update" style="color:#7fa0c8;font-size:12px">Updating...</div>
@@ -5102,7 +5102,7 @@ th{color:#8fa8c7;font-size:11px;letter-spacing:1px}tr:last-child td{border-botto
       <div class="card"><h2>LEADERBOARD</h2><div id="dash-lb">Loading...</div></div>
       <div class="card"><h2>PERFORMANCE (7D)</h2><div class="spark"></div><div id="perf-sum" style="margin-top:10px;color:#8fa8c7;font-size:13px"></div></div>
     </div>
-    <div class="footer">© 2026 ALPHA RADAR SIGNALS</div>
+    <div class="footer">© 2026 ARGUS QUANT</div>
   </div>
 
   <div id="tab-signals" data-tab>

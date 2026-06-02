@@ -1,4 +1,4 @@
-/* ALPHA RADAR SIGNALS — V12 SaaS portal (vanilla JS, hash-router SPA). */
+/* ARGUS QUANT — V12 SaaS portal (vanilla JS, hash-router SPA). */
 (() => {
 "use strict";
 
@@ -296,7 +296,7 @@ function renderShell(){
   <div class="scrim" id="scrim"></div>
   <div class="shell">
     <aside class="side" id="side">
-      <div class="brand"><div class="mark">A</div><div><b>ALPHA RADAR</b><span>SIGNALS</span></div></div>
+      <div class="brand"><div class="mark">A</div><div><b>ARGUS</b><span>QUANT</span></div></div>
       <nav class="nav">${nav}
         <div class="grp">Links</div>
         <a href="/" ><span class="ic">🌐</span>Public Site</a>
@@ -343,7 +343,7 @@ function renderLanding(){
   <div class="auth-wrap">
     <div class="auth-hero">
       <div class="tag">PROFESSIONAL CRYPTO FUTURES INTELLIGENCE</div>
-      <h1>Trade smarter with<br><span style="color:var(--primary)">Alpha Radar Signals</span></h1>
+      <h1>Trade smarter with<br><span style="color:var(--primary)">Argus Quant</span></h1>
       <p>Multi-timeframe SMC signal engine, market-regime detection, short-protection, paper & demo auto-trading, an encrypted multi-exchange vault, and a hard-gated live layer — one platform.</p>
       <div class="feat">
         <div><b>Market Regime</b>Bull / bear / volatility classification on every signal.</div>
@@ -863,7 +863,7 @@ PAGES.profile = async (v) => {
     <div class="card mt"><div class="card-h"><h3>Security Recommendations</h3></div><div class="card-b">
       <ul class="recs">
         <li><span class="ic">${U.totp_enabled?"✓":"⚠"}</span><div><b>Enable two-factor authentication (2FA).</b> ${U.totp_enabled?"2FA is active on your account.":"Add an authenticator app for an extra layer of protection."}</div></li>
-        <li><span class="ic">🔑</span><div><b>Never share your API keys.</b> Alpha Radar staff will never ask for exchange keys or passwords.</div></li>
+        <li><span class="ic">🔑</span><div><b>Never share your API keys.</b> Argus Quant staff will never ask for exchange keys or passwords.</div></li>
         <li><span class="ic">🚫</span><div><b>Use exchange keys without withdrawal permission.</b> Trade + futures only — withdrawal-enabled keys are rejected by the vault.</div></li>
       </ul>
     </div></div>`;

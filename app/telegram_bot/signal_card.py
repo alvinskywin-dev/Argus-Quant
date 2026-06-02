@@ -42,7 +42,7 @@ def make_signal_card(sig: dict) -> str:
     d = ImageDraw.Draw(img)
     d.rounded_rectangle((40,40,1060,580), radius=36, outline=main, width=3, fill=(8,12,18))
 
-    d.text((70,60), "⚡ ALPHA RADAR SIGNALS", font=font(36, True), fill=gold)
+    d.text((70,60), "⚡ ARGUS QUANT", font=font(36, True), fill=gold)
 
     badge = side
     d.rounded_rectangle((70,120,360,210), radius=20, fill=(12,18,25), outline=main, width=2)
@@ -76,7 +76,7 @@ def make_signal_card(sig: dict) -> str:
     else:
         d.line((790,320,1020,520), fill=main, width=6)
 
-    d.text((735,545), "Powered by Alpha Radar AI", font=font(20, True), fill=gold)
+    d.text((735,545), "Powered by Argus Quant AI", font=font(20, True), fill=gold)
 
     out = OUT_DIR / f"signal_{symbol}_{side}.png"
     img.convert("RGB").save(out, "PNG")

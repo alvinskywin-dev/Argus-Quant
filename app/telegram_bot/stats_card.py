@@ -43,7 +43,7 @@ def make_stats_card(data: dict) -> str:
     d = ImageDraw.Draw(img)
     d.rounded_rectangle((40,40,1060,580), radius=36, outline=main, width=3, fill=(8,12,18))
 
-    d.text((70,65), "⚡ ALPHA RADAR SIGNALS", font=font(38, True), fill=gold)
+    d.text((70,65), "⚡ ARGUS QUANT", font=font(38, True), fill=gold)
     d.text((70,130), "DAILY PERFORMANCE", font=font(56, True), fill=white)
 
     d.text((70,235), "SIGNALS", font=font(24, True), fill=gray)
@@ -61,7 +61,7 @@ def make_stats_card(data: dict) -> str:
     d.text((560,410), "TOTAL PNL", font=font(26, True), fill=gray)
     d.text((560,450), f"{pnl:+.2f}%", font=font(80, True), fill=main if pnl >= 0 else (255,72,72))
 
-    d.text((720,545), "Powered by Alpha Radar AI", font=font(22, True), fill=gold)
+    d.text((720,545), "Powered by Argus Quant AI", font=font(22, True), fill=gold)
 
     out = OUT_DIR / "daily_stats.png"
     img.convert("RGB").save(out, "PNG")

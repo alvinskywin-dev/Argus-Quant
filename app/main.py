@@ -97,7 +97,7 @@ async def _check_telegram(bot: TelegramBot) -> bool:
 async def _startup_report(bot: TelegramBot) -> None:
     """Print startup summary and fail loudly on critical errors."""
     logger.info("=" * 60)
-    logger.info("  ALPHA RADAR SIGNALS — STARTUP DIAGNOSTICS")
+    logger.info("  ARGUS QUANT — STARTUP DIAGNOSTICS")
     logger.info("=" * 60)
 
     binance_ok = await _check_binance()

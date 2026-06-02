@@ -242,7 +242,7 @@ async def _archive(dry_run: bool = False) -> tuple[int, int]:
 
 async def run_migration(dry_run: bool = False) -> None:
     print()
-    _h("ALPHA RADAR SIGNALS — SPRINT 1 LEGACY CLEANUP MIGRATION")
+    _h("ARGUS QUANT — SPRINT 1 LEGACY CLEANUP MIGRATION")
 
     # Ensure all tables exist before we start
     async with engine.begin() as conn:

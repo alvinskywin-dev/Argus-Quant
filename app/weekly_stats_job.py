@@ -40,13 +40,13 @@ async def main():
     card = make_stats_card(data)
 
     caption = (
-        "📊 <b>ALPHA RADAR SIGNALS</b>\n\n"
+        "📊 <b>ARGUS QUANT</b>\n\n"
         "7D Performance\n"
         f"Signals • <code>{total}</code>\n"
         f"Wins • <code>{wins}</code> | Losses • <code>{losses}</code>\n"
         f"Winrate • <code>{winrate:.1f}%</code>\n"
         f"PnL • <code>{pnl:+.2f}%</code>\n\n"
-        "⚡ Powered by Alpha Radar AI"
+        "⚡ Powered by Argus Quant AI"
     )
 
     bot = Bot(settings.telegram_bot_token)

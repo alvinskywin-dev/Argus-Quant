@@ -44,20 +44,20 @@ async def _send(to: str, subject: str, body: str) -> None:
 async def send_verification_email(to: str, token: str) -> None:
     link = f"{settings.app_base_url.rstrip('/')}/api/auth/verify-email?token={token}"
     body = (
-        "Welcome to Alpha Radar Signals.\n\n"
+        "Welcome to Argus Quant.\n\n"
         "Please verify your email address by visiting:\n"
         f"{link}\n\n"
         "If you did not create this account, you can ignore this message."
     )
-    await _send(to, "Verify your Alpha Radar account", body)
+    await _send(to, "Verify your Argus Quant account", body)
 
 
 async def send_password_reset_email(to: str, token: str) -> None:
     link = f"{settings.app_base_url.rstrip('/')}/reset-password?token={token}"
     body = (
-        "A password reset was requested for your Alpha Radar Signals account.\n\n"
+        "A password reset was requested for your Argus Quant account.\n\n"
         "Reset your password here:\n"
         f"{link}\n\n"
         "This link expires in 1 hour. If you did not request this, ignore it."
     )
-    await _send(to, "Reset your Alpha Radar password", body)
+    await _send(to, "Reset your Argus Quant password", body)

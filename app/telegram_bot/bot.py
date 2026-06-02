@@ -509,7 +509,7 @@ class TelegramBot:
         if self.app is None:
             return
         text = (
-            "🚨 <b>ALPHA RADAR ALERT</b>\n\n"
+            "🚨 <b>ARGUS QUANT ALERT</b>\n\n"
             f"<b>{title}</b>\n"
             f"<code>{message[:1200]}</code>"
         )
@@ -572,8 +572,8 @@ class TelegramBot:
             "HIGH_PRIORITY": "🚨 <b>HIGH PRIORITY ELITE SIGNAL</b>",
             "ELITE":         "🔥 <b>ELITE SIGNAL</b>",
             "VIP":           "💎 <b>VIP SIGNAL</b>",
-            "PUBLIC":        "⚡ <b>ALPHA RADAR SIGNALS</b>",
-        }.get(tier, "⚡ <b>ALPHA RADAR SIGNALS</b>")
+            "PUBLIC":        "⚡ <b>ARGUS QUANT</b>",
+        }.get(tier, "⚡ <b>ARGUS QUANT</b>")
 
         caption = (
             f"{tier_title}\n\n"
@@ -678,7 +678,7 @@ class TelegramBot:
         text = (
             f"{title}\n\n"
             f"{'🔻' if is_sl else '🔥'} <code>{pnl:+.2f}%</code> {label}\n"
-            f"⚡ ALPHA RADAR SIGNALS"
+            f"⚡ ARGUS QUANT"
         )
 
         targets = []

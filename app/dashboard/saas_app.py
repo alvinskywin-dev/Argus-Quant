@@ -22,13 +22,13 @@ _SHELL = """\
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=5"/>
 <meta name="theme-color" content="#070b12"/>
-<title>Alpha Radar Signals — Portal</title>
+<title>Argus Quant — Portal</title>
 <link rel="preconnect" href="https://cdn.jsdelivr.net"/>
 <link rel="stylesheet" href="/static/saas/saas.css?v=14"/>
 <style>#boot{min-height:100vh;display:grid;place-items:center;color:#8fa8c7;font-family:Inter,Arial,sans-serif}</style>
 </head>
 <body>
-<div id="boot">Loading Alpha Radar…</div>
+<div id="boot">Loading Argus Quant…</div>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
 <script src="/static/saas/saas.js?v=14" defer></script>
 </body>
