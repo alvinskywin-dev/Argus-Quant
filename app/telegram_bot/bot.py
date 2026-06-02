@@ -2,7 +2,7 @@
 Telegram bot.
 
 - Commands: /start /help /scan /toplong /topshort /market /gainers /losers
-  /watch /unwatch /watchlist /signalhistory /stats /leaderboard /settings
+  /signalhistory /stats /leaderboard /settings
   /pause /resume /status /health
 - Auto publishes new signals to the configured channel/group.
 - Edits the signal message in-place when TP/SL events occur.
@@ -159,8 +159,7 @@ def _main_keyboard() -> InlineKeyboardMarkup:
          InlineKeyboardButton("📊 Market", callback_data="market")],
         [InlineKeyboardButton("🚀 Top Longs", callback_data="toplong"),
          InlineKeyboardButton("🔻 Top Shorts", callback_data="topshort")],
-        [InlineKeyboardButton("⭐ Watchlist", callback_data="watchlist"),
-         InlineKeyboardButton("📈 Stats", callback_data="stats")],
+        [InlineKeyboardButton("📈 Stats", callback_data="stats")],
         [InlineKeyboardButton("⏸ Pause", callback_data="pause"),
          InlineKeyboardButton("▶️ Resume", callback_data="resume")],
     ]
@@ -217,9 +216,6 @@ class TelegramBot:
         h(CommandHandler("market", self.cmd_market))
         h(CommandHandler("gainers", self.cmd_gainers))
         h(CommandHandler("losers", self.cmd_losers))
-        h(CommandHandler("watch", self.cmd_watch))
-        h(CommandHandler("unwatch", self.cmd_unwatch))
-        h(CommandHandler("watchlist", self.cmd_watchlist))
         h(CommandHandler("signalhistory", self.cmd_signal_history))
         h(CommandHandler("stats", self.cmd_stats))
         h(CommandHandler("leaderboard", self.cmd_leaderboard))
@@ -258,9 +254,6 @@ class TelegramBot:
             "/topshort — top short setups\n"
             "/gainers — 24h gainers\n"
             "/losers — 24h losers\n"
-            "/watch SYMBOL — add to watchlist\n"
-            "/unwatch SYMBOL — remove from watchlist\n"
-            "/watchlist — your watchlist\n"
             "/signalhistory — last 10 signals\n"
             "/stats — performance (7d)\n"
             "/leaderboard — best pairs\n"
@@ -320,38 +313,6 @@ class TelegramBot:
         for g in items:
             lines.append(f"• <code>{g['symbol']}</code>  {g['change_pct']:.2f}%  vol ${g['quote_volume']/1e6:.0f}M")
         await update.effective_message.reply_text("\n".join(lines), parse_mode=constants.ParseMode.HTML)
-
-    async def cmd_watch(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-        if not ctx.args:
-            await update.effective_message.reply_text("Usage: /watch BTCUSDT")
-            return
-        symbol = ctx.args[0].upper()
-        added = await repo.add_watch(update.effective_user.id, symbol)
-        await update.effective_message.reply_text(
-            f"⭐ Added <code>{symbol}</code>" if added else f"<code>{symbol}</code> already on your watchlist.",
-            parse_mode=constants.ParseMode.HTML,
-        )
-
-    async def cmd_unwatch(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-        if not ctx.args:
-            await update.effective_message.reply_text("Usage: /unwatch BTCUSDT")
-            return
-        symbol = ctx.args[0].upper()
-        removed = await repo.remove_watch(update.effective_user.id, symbol)
-        await update.effective_message.reply_text(
-            f"Removed <code>{symbol}</code>" if removed else f"<code>{symbol}</code> was not on your watchlist.",
-            parse_mode=constants.ParseMode.HTML,
-        )
-
-    async def cmd_watchlist(self, update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
-        items = await repo.list_watch(update.effective_user.id)
-        if not items:
-            await update.effective_message.reply_text("Your watchlist is empty. /watch BTCUSDT to add.")
-            return
-        await update.effective_message.reply_text(
-            "⭐ <b>Your watchlist</b>\n\n" + "\n".join(f"• <code>{s}</code>" for s in items),
-            parse_mode=constants.ParseMode.HTML,
-        )
 
     async def cmd_signal_history(self, update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         sigs = await repo.get_recent_signals(10)
@@ -491,8 +452,6 @@ class TelegramBot:
             return await self.cmd_toplong(update, ctx)
         if data == "topshort":
             return await self.cmd_topshort(update, ctx)
-        if data == "watchlist":
-            return await self.cmd_watchlist(update, ctx)
         if data == "stats":
             return await self.cmd_stats(update, ctx)
         if data == "pause":
