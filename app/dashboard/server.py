@@ -4135,8 +4135,33 @@ def _market_radar_page_html() -> str:
 .mr-sentiment-bar{height:10px;background:#0b1320;border-radius:999px;overflow:hidden;margin:8px 0}
 .mr-sentiment-fill{height:100%;background:linear-gradient(90deg,#ff4f61,#ffd84d,#20ff80);border-radius:999px;transition:width .4s}
 .mr-3col{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px}
-.mr-setup-row{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid #0e1e2e;font-size:13px}
-.mr-setup-row:last-child{border-bottom:none}
+/* Strongest Setups — aligned grid table (header + body share one grid) */
+.setup-table{width:100%}
+.setup-row{display:grid;grid-template-columns:minmax(180px,2fr) 120px 120px 120px 120px;align-items:center;gap:16px;padding:14px 0;border-bottom:1px solid rgba(80,140,200,.18);font-size:13px}
+.setup-row:last-child{border-bottom:none}
+.setup-row>div{min-width:0}
+.setup-head{font-size:10px;font-weight:900;letter-spacing:1.5px;text-transform:uppercase;color:#7fa0c8}
+.setup-head>div:nth-child(3),.setup-head>div:nth-child(4),.setup-head>div:nth-child(5){text-align:right}
+.setup-row .symbol{font-weight:800;white-space:nowrap;color:#eaf2ff;overflow:hidden;text-overflow:ellipsis}
+.setup-row .symbol span{color:#8ab4e6;font-size:12px;margin-left:4px}
+.setup-row .conf,.setup-row .rr,.setup-row .status{text-align:right;font-weight:800}
+.setup-row .conf{color:#20e6c3}
+.setup-row .rr{color:#ffd84d}
+.setup-row .status.sl{color:#ff4f61}
+.setup-row .status.tp{color:#20ff80}
+.setup-row .status.open{color:#20ffc8}
+.setup-row .badge{display:inline-flex;justify-content:center;align-items:center;min-width:56px;padding:3px 10px;border-radius:6px;font-size:11px;font-weight:800}
+.setup-row .badge.long{background:#0a3a1f44;color:#20ff80;border:1px solid #20ff8033}
+.setup-row .badge.short{background:#3a0a1244;color:#ff4f61;border:1px solid #ff4f6133}
+/* Mobile: collapse each row into a compact label/value card (no overflow) */
+@media(max-width:700px){
+  .setup-head{display:none}
+  .setup-row{grid-template-columns:1fr;gap:9px;padding:14px;margin-bottom:10px;background:#0a111a;border:1px solid #17314b;border-radius:10px}
+  .setup-row:last-child{border-bottom:1px solid #17314b}
+  .setup-row>div{display:flex;justify-content:space-between;align-items:center;gap:12px;text-align:right}
+  .setup-row>div::before{content:attr(data-label);color:#7fa0c8;font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase}
+  .setup-row .symbol{justify-content:space-between}
+}
 .mr-24h{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px}
 .mr-24h-card{background:linear-gradient(180deg,#101827,#0b1320);border:1px solid #17314b;border-radius:12px;padding:14px;text-align:center}
 .mr-24h-lbl{font-size:9px;color:#7fa0c8;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px}
@@ -4244,15 +4269,21 @@ async function loadRadar() {
     if (!setups.length) {
       sEl.innerHTML = '<div style="color:#627a99;padding:16px;text-align:center">No signals in last 24 hours</div>';
     } else {
-      sEl.innerHTML = setups.map(s =>
-        '<div class="mr-setup-row">' +
-        '<span><b>' + s.symbol + '</b> <span style="color:#7fa0c8;font-size:11px">' + s.tf + '</span></span>' +
-        '<span><span class="' + (s.side==='LONG'?'bl2':'bs2') + '">' + s.side + '</span></span>' +
-        '<span style="color:#20e6c3">' + s.confidence + '%</span>' +
-        '<span style="color:#ffd84d">1:' + s.rr + '</span>' +
-        '<span class="' + (s.status==='OPEN'?'bopen':s.status==='SL'?'bsl':'btp') + '">' + s.status + '</span>' +
-        '</div>'
-      ).join('');
+      sEl.innerHTML = '<div class="setup-table">' +
+        '<div class="setup-row setup-head">' +
+          '<div>Symbol</div><div>Side</div><div>Confidence</div><div>RR</div><div>Status</div>' +
+        '</div>' +
+        setups.map(s => {
+          const sideCls = s.side === 'LONG' ? 'long' : 'short';
+          const stCls = s.status === 'SL' ? 'sl' : (s.status === 'OPEN' ? 'open' : 'tp');
+          return '<div class="setup-row">' +
+            '<div class="symbol" data-label="Symbol">' + s.symbol + ' <span>' + s.tf + '</span></div>' +
+            '<div data-label="Side"><span class="badge ' + sideCls + '">' + s.side + '</span></div>' +
+            '<div class="conf" data-label="Confidence">' + s.confidence + '%</div>' +
+            '<div class="rr" data-label="RR">1:' + s.rr + '</div>' +
+            '<div class="status ' + stCls + '" data-label="Status">' + s.status + '</div>' +
+          '</div>';
+        }).join('') + '</div>';
     }
 
     const sectors = d.sector_radar || [];
