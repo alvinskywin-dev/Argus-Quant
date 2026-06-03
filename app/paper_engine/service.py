@@ -39,14 +39,43 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def mark_price(symbol: str, fallback: float = 0.0) -> float:
-    """Latest realtime price from the websocket cache, else `fallback`."""
+def mark_price(symbol: str) -> float:
+    """
+    Latest realtime mark price from the price cache, or 0.0 if unavailable.
+
+    It NEVER falls back to entry_price — doing so would make every position
+    read 0% ROE / $0 PnL while looking "live". Callers must treat 0.0 as
+    "no mark yet" (display "—", contribute nothing to PnL) and should call
+    `ensure_marks(...)` first so the cache is populated.
+    """
     try:
         from app.market_data.ws_engine import latest_prices
 
-        return float(latest_prices.get(symbol, fallback) or fallback)
+        return float(latest_prices.get(symbol, 0.0) or 0.0)
     except Exception:
-        return fallback
+        return 0.0
+
+
+def mark_price_info(symbol: str) -> tuple[float, str, Optional[float]]:
+    """(price, source, age_seconds) for diagnostics. source ∈ live|none."""
+    try:
+        from app.market_data import ws_engine
+
+        px = float(ws_engine.latest_prices.get(symbol, 0.0) or 0.0)
+        age = ws_engine.price_age(symbol)
+        return (px, "live" if px > 0 else "none", age)
+    except Exception:
+        return (0.0, "none", None)
+
+
+async def ensure_marks(symbols) -> None:
+    """Populate the price cache with fresh live marks for `symbols`."""
+    try:
+        from app.market_data.ws_engine import ensure_prices
+
+        await ensure_prices(symbols)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(f"[paper] ensure_marks skipped: {exc}")
 
 
 # ── account lifecycle ─────────────────────────────────────────────
@@ -178,6 +207,13 @@ async def open_position(
     db.add(pos)
     await db.flush()
     order.position_id = pos.id
+    # Start polling this symbol's live price so its mark/ROE/PnL updates.
+    try:
+        from app.market_data.ws_engine import register_symbols
+
+        register_symbols([symbol])
+    except Exception:  # noqa: BLE001
+        pass
     logger.info(
         f"[paper] open acc={account.id} {side} {symbol} "
         f"notional={notional_usdt:.2f} lev={leverage}x margin={margin:.2f}"
@@ -289,7 +325,13 @@ async def close_position(
     if pos.status != OPEN_STATUS:
         raise PaperError(409, "Position already closed")
 
-    exit_price = float(mark if mark and mark > 0 else mark_price(pos.symbol, pos.entry_price))
+    if mark and mark > 0:
+        exit_price = float(mark)
+    else:
+        # Pull a fresh live mark before closing; only as an absolute last resort
+        # (price feed unreachable) do we settle at entry to avoid a phantom PnL.
+        await ensure_marks([pos.symbol])
+        exit_price = mark_price(pos.symbol) or float(pos.entry_price)
     gross = pmath.unrealized_pnl(pos.side, pos.entry_price, exit_price, pos.notional_usdt)
     funding = pmath.funding_cost(pos.side, pos.notional_usdt, funding_rate, intervals)
     realized = gross - funding
@@ -350,8 +392,10 @@ async def close_position(
 async def check_liquidations(db: AsyncSession, account: PaperAccount) -> list[int]:
     """Close any open positions whose mark price has crossed liquidation."""
     closed: list[int] = []
-    for pos in await _open_positions(db, account.id):
-        px = mark_price(pos.symbol, 0.0)
+    open_pos = await _open_positions(db, account.id)
+    await ensure_marks([p.symbol for p in open_pos])
+    for pos in open_pos:
+        px = mark_price(pos.symbol)
         if px > 0 and pmath.is_liquidated(pos.side, px, pos.liquidation_price):
             await close_position(db, account, pos.id, mark=px, reason="LIQUIDATION")
             closed.append(pos.id)
@@ -363,10 +407,12 @@ async def check_liquidations(db: AsyncSession, account: PaperAccount) -> list[in
 async def account_summary(db: AsyncSession, account: PaperAccount) -> dict:
     open_pos = await _open_positions(db, account.id)
     used_margin = sum(p.margin_usdt for p in open_pos)
+    await ensure_marks([p.symbol for p in open_pos])
     unrealized = 0.0
     for p in open_pos:
-        px = mark_price(p.symbol, p.entry_price)
-        unrealized += pmath.unrealized_pnl(p.side, p.entry_price, px, p.notional_usdt)
+        px = mark_price(p.symbol)
+        if px > 0:  # no live mark yet → contribute nothing, never mark at entry
+            unrealized += pmath.unrealized_pnl(p.side, p.entry_price, px, p.notional_usdt)
 
     trades = await list_trades(db, account.id, limit=100_000)
     wins = sum(1 for t in trades if t.pnl_usdt > 0)

@@ -8,11 +8,97 @@ import aiohttp
 from app.utils.logger import logger
 
 
-latest_prices = {}
-price_history = {}
+# Latest realtime mark price per symbol (USDT-M futures, last trade price).
+latest_prices: dict[str, float] = {}
+# Wall-clock epoch seconds of the last successful update for each symbol.
+price_updated_at: dict[str, float] = {}
+price_history: dict[str, list[tuple[float, float]]] = {}
 last_ws_update = 0.0
 
-SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+# Default symbols that are always polled (drive the market-bias widget). Any
+# symbol with an open position is registered on top of these at runtime so the
+# paper/live engines always have a live mark — never a stale or entry fallback.
+DEFAULT_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+_tracked: set[str] = set(DEFAULT_SYMBOLS)
+
+# A cached price older than this is considered stale and refetched on demand.
+STALE_AFTER_SEC = 5.0
+
+PRICE_URL = "https://fapi.binance.com/fapi/v1/ticker/price"
+
+
+def register_symbols(symbols) -> None:
+    """Add symbols to the polled set so the loop keeps their price fresh."""
+    for s in symbols:
+        if s:
+            _tracked.add(s.upper())
+
+
+def price_age(symbol: str) -> float | None:
+    """Seconds since `symbol`'s price was last refreshed, or None if never."""
+    ts = price_updated_at.get(symbol)
+    return (time.time() - ts) if ts else None
+
+
+def _store(symbol: str, price: float) -> None:
+    now = time.time()
+    latest_prices[symbol] = price
+    price_updated_at[symbol] = now
+    hist = price_history.setdefault(symbol, [])
+    hist.append((now, price))
+    cutoff = now - 300
+    price_history[symbol] = [(t, p) for t, p in hist if t >= cutoff]
+
+
+async def _fetch(session: aiohttp.ClientSession, symbol: str) -> float | None:
+    async with session.get(PRICE_URL, params={"symbol": symbol}, timeout=10) as r:
+        data = await r.json()
+    if isinstance(data, dict) and "price" in data:
+        return float(data["price"])
+    return None
+
+
+async def fetch_price(symbol: str) -> float | None:
+    """Fetch one symbol's live price now, cache it, and start tracking it."""
+    symbol = symbol.upper()
+    register_symbols([symbol])
+    try:
+        async with aiohttp.ClientSession() as session:
+            price = await _fetch(session, symbol)
+        if price and price > 0:
+            _store(symbol, price)
+            return price
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"on-demand price fetch failed {symbol}: {exc}")
+    return None
+
+
+async def ensure_prices(symbols) -> None:
+    """
+    Guarantee a fresh cached price for each symbol. Registers them for ongoing
+    polling and synchronously fetches any that are missing or stale, so callers
+    never have to fall back to entry price for a mark.
+    """
+    wanted = {s.upper() for s in symbols if s}
+    if not wanted:
+        return
+    register_symbols(wanted)
+    missing = [
+        s for s in wanted
+        if s not in latest_prices or (price_age(s) or 1e9) > STALE_AFTER_SEC
+    ]
+    if not missing:
+        return
+    try:
+        async with aiohttp.ClientSession() as session:
+            results = await asyncio.gather(
+                *(_fetch(session, s) for s in missing), return_exceptions=True
+            )
+        for s, price in zip(missing, results):
+            if isinstance(price, (int, float)) and price and price > 0:
+                _store(s, float(price))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"ensure_prices failed for {missing}: {exc}")
 
 
 async def ws_price_loop() -> None:
@@ -20,26 +106,19 @@ async def ws_price_loop() -> None:
 
     while True:
         try:
+            symbols = sorted(_tracked)
             async with aiohttp.ClientSession() as session:
-                for symbol in SYMBOLS:
-                    url = f"https://fapi.binance.com/fapi/v1/ticker/price?symbol={symbol}"
-
-                    async with session.get(url, timeout=10) as r:
-                        data = await r.json()
-
-                    if "price" in data:
-                        price = float(data["price"])
-                        latest_prices[symbol] = price
-
-                        hist = price_history.setdefault(symbol, [])
-                        hist.append((time.time(), price))
-
-                        cutoff = time.time() - 300
-                        price_history[symbol] = [(t, p) for t, p in hist if t >= cutoff]
-
+                for symbol in symbols:
+                    try:
+                        price = await _fetch(session, symbol)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug(f"price poll miss {symbol}: {exc}")
+                        continue
+                    if price and price > 0:
+                        _store(symbol, price)
                         last_ws_update = time.time()
 
-            logger.info(f"realtime price cache updated: {latest_prices}")
+            logger.info(f"realtime price cache updated: {len(latest_prices)} symbols")
 
         except Exception as exc:
             logger.warning(f"price cache error: {exc}")
@@ -53,6 +132,7 @@ def ws_health() -> dict:
     return {
         "ok": bool(last_ws_update and age is not None and age < 10),
         "last_update_age_sec": round(age, 2) if age is not None else None,
+        "tracked_symbols": len(_tracked),
         "prices": latest_prices,
         "market_bias": market_bias(),
     }

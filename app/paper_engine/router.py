@@ -31,19 +31,29 @@ from app.paper_engine.schemas import (
 
 router = APIRouter(prefix="/api/paper/account", tags=["paper"])
 
+# Diagnostics router (no prefix) — surfaces the exact mark/ROE/PnL inputs so a
+# "0% ROE" report can be traced to its price source in one call.
+debug_router = APIRouter(prefix="/api/debug", tags=["paper-debug"])
+
+
+def _now_iso() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()
+
 
 def _err(exc: service.PaperError) -> JSONResponse:
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
 def _position_out(p: PaperAccountPosition, with_mark: bool = True) -> PositionOut:
-    mark = pmath_mark = None
+    mark = None
     upnl = roe = None
     if with_mark and p.status == "OPEN":
-        pmath_mark = service.mark_price(p.symbol, p.entry_price)
-        upnl = round(pmath.unrealized_pnl(p.side, p.entry_price, pmath_mark, p.notional_usdt), 2)
-        roe = round(pmath.roe_pct(upnl, p.margin_usdt), 2)
-        mark = round(pmath_mark, 8)
+        live = service.mark_price(p.symbol)  # 0.0 if no live mark — never entry
+        if live > 0:
+            upnl = round(pmath.unrealized_pnl(p.side, p.entry_price, live, p.notional_usdt), 2)
+            roe = round(pmath.roe_pct(upnl, p.margin_usdt), 2)
+            mark = round(live, 8)
     return PositionOut(
         id=p.id,
         symbol=p.symbol,
@@ -114,6 +124,7 @@ async def open_position(body: OpenPositionIn, user: AuthUser = Depends(get_curre
                 tp1=body.tp1, tp2=body.tp2, tp3=body.tp3,
                 order_type=body.order_type,
             )
+            await service.ensure_marks([pos.symbol])
             return _position_out(pos)
     except service.PaperError as exc:
         return _err(exc)
@@ -128,6 +139,7 @@ async def copy_signal(body: FromSignalIn, user: AuthUser = Depends(get_current_u
                 raise service.PaperError(404, "Signal not found")
             acc = await service.get_or_create_account(db, user.id)
             pos = await service.copy_signal(db, acc, sig, leverage=body.leverage)
+            await service.ensure_marks([pos.symbol])
             return _position_out(pos)
     except service.PaperError as exc:
         return _err(exc)
@@ -179,7 +191,46 @@ async def positions(
     async with get_session() as db:
         acc = await service.get_or_create_account(db, user.id)
         rows = await service.list_positions(db, acc.id, status=status or None)
+        await service.ensure_marks([p.symbol for p in rows if p.status == "OPEN"])
         return [_position_out(p) for p in rows]
+
+
+@debug_router.get("/paper-positions")
+async def debug_paper_positions(user: AuthUser = Depends(get_current_user)):
+    """Per-open-position mark/ROE/PnL with its live price source — for debugging."""
+    async with get_session() as db:
+        acc = await service.get_or_create_account(db, user.id)
+        rows = await service.list_positions(db, acc.id, status="open")
+        await service.ensure_marks([p.symbol for p in rows])
+        out = []
+        for p in rows:
+            mark, source, age = service.mark_price_info(p.symbol)
+            if mark > 0:
+                pnl = round(pmath.unrealized_pnl(p.side, p.entry_price, mark, p.notional_usdt), 4)
+                roe = round(pmath.roe_pct(pnl, p.margin_usdt), 4)
+            else:
+                pnl = roe = None
+            out.append({
+                "id": p.id,
+                "symbol": p.symbol,
+                "side": p.side,
+                "entry_price": p.entry_price,
+                "mark_price": round(mark, 8) if mark > 0 else None,
+                "qty": round(p.quantity, 8),
+                "leverage": p.leverage,
+                "notional_usdt": round(p.notional_usdt, 4),
+                "margin_usdt": round(p.margin_usdt, 4),
+                "roe": roe,
+                "pnl": pnl,
+                "price_source": source,
+                "last_price_update": round(age, 3) if age is not None else None,
+            })
+        return {
+            "account_id": acc.id,
+            "open_positions": len(out),
+            "server_time": _now_iso(),
+            "positions": out,
+        }
 
 
 @router.get("/orders", response_model=list[OrderOut])

@@ -94,13 +94,16 @@ function destroyCharts(){ for(const k in CHARTS){try{CHARTS[k].chart.destroy();}
 
 // ── V13 perf: ONE global timer for the whole app (Task 3) ──────────
 let activeTimer = null;
+let fastTimer = null;                      // sub-15s poller (e.g. paper marks @1s)
 let CURRENT_PAGE = null;
 const REFRESHERS = {};                    // page -> in-place update fn
 function startPageTimer(page){
   clearInterval(activeTimer);
   activeTimer = setInterval(()=>refreshCurrentPage(page), 15000);
 }
-function stopPageTimer(){ clearInterval(activeTimer); activeTimer=null; }
+function stopPageTimer(){ clearInterval(activeTimer); activeTimer=null; stopFastTimer(); }
+function startFastTimer(fn, ms){ stopFastTimer(); fastTimer = setInterval(fn, ms||1000); }
+function stopFastTimer(){ if(fastTimer){ clearInterval(fastTimer); fastTimer=null; } }
 async function refreshCurrentPage(page){
   if(page!==CURRENT_PAGE || document.hidden) return;   // stale-tick / hidden-tab guard
   const fn = REFRESHERS[page];
@@ -645,26 +648,49 @@ PAGES.paper = async (v) => {
   $("#af").onchange=async e=>{try{await api("/api/paper/account/auto-follow",{method:"POST",body:{enabled:e.target.checked}});toast("Auto-follow "+(e.target.checked?"enabled":"disabled"),"ok");}catch(err){toast(err.detail,"bad");}};
   $("#reset").onclick=()=>confirmModal({title:"Reset paper account",body:`<div class="alert warn">This resets your demo account to its initial balance of ${money(A.initial_balance)} and closes all paper positions.</div>`,confirmText:"Reset Account",danger:true,onConfirm:async()=>{await api("/api/paper/account/reset",{method:"POST"});toast("Account reset","ok");refresh();}});
   const tabs=v.querySelectorAll(".tabs button");
+  let openRows=[];   // latest open-position snapshot (kept fresh by the 1s poll)
+  const pcard=(r)=>`<div class="pcard" data-card="${r.id}">
+        <div class="ph"><b>${esc(r.symbol)}</b><span>${badge(r.side)} <span class="badge muted">${r.leverage}x</span></span></div>
+        <div class="pg">
+          <div><div class="k">Entry</div><div class="num">${num(r.entry_price,4)}</div></div>
+          <div><div class="k">Mark</div><div class="num" data-f="mark">${r.mark_price?num(r.mark_price,4):"—"}</div></div>
+          <div><div class="k">Qty</div><div class="num">${num(r.quantity,4)}</div></div>
+          <div><div class="k">ROE</div><div class="num ${cls(r.roe_pct)}" data-f="roe">${r.roe_pct!=null?pct(r.roe_pct):"—"}</div></div>
+        </div>
+        <div class="pnl ${cls(r.unrealized_pnl)}" data-f="pnl">${r.unrealized_pnl!=null?money(r.unrealized_pnl):"—"}</div>
+        <button class="btn sm" data-pos="${r.id}" style="margin-top:10px;width:100%">View Detail</button>
+      </div>`;
+  // In-place update of Mark/ROE/PnL so the cards refresh every second without
+  // a full re-render (no flicker, scroll position preserved).
+  const patchCards=(box,rows)=>{
+    for(const r of rows){
+      const c=box.querySelector(`[data-card="${r.id}"]`); if(!c)continue;
+      const mk=c.querySelector('[data-f="mark"]'); if(mk) mk.textContent=r.mark_price?num(r.mark_price,4):"—";
+      const ro=c.querySelector('[data-f="roe"]'); if(ro){ ro.textContent=r.roe_pct!=null?pct(r.roe_pct):"—"; ro.className="num "+cls(r.roe_pct); }
+      const pn=c.querySelector('[data-f="pnl"]'); if(pn){ pn.textContent=r.unrealized_pnl!=null?money(r.unrealized_pnl):"—"; pn.className="pnl "+cls(r.unrealized_pnl); }
+    }
+  };
+  const sameIds=(a,b)=>a.length===b.length&&a.every((r,i)=>r.id===b[i].id);
+  const pollOpen=async()=>{
+    if(document.hidden||CURRENT_PAGE!=="paper")return;
+    const p=await tryGet("/api/paper/account/positions?status=open"); if(p.error||p.disabled)return;
+    const rows=p.data||[]; const box=$("#ptab"); if(!box)return;
+    const cards=box.querySelector(".pcards");
+    if(cards && sameIds(openRows,rows)){ patchCards(box,rows); openRows=rows; return; }
+    openRows=rows;
+    if(!rows.length){ box.innerHTML=`<div class="card">${empty("📭","No open positions","Copy a signal or open a position to start.")}</div>`; return; }
+    box.innerHTML=`<div class="pcards">${rows.map(pcard).join("")}</div>`;
+    box.querySelectorAll("[data-pos]").forEach(b=>b.onclick=()=>posDetail(openRows.find(x=>x.id==b.dataset.pos)));
+  };
   const loadTab=async(t)=>{
     tabs.forEach(b=>b.classList.toggle("active",b.dataset.t===t));
     const box=$("#ptab"); box.innerHTML=`<div class="card">${skel(4)}</div>`;
     if(t==="open"){
-      const p=await tryGet("/api/paper/account/positions?status=open");const rows=p.data||[];
-      if(!rows.length){ box.innerHTML=`<div class="card">${empty("📭","No open positions","Copy a signal or open a position to start.")}</div>`; return; }
-      // premium position cards (responsive — also works for mobile/tablet)
-      box.innerHTML=`<div class="pcards">${rows.map(r=>`<div class="pcard">
-        <div class="ph"><b>${esc(r.symbol)}</b><span>${badge(r.side)} <span class="badge muted">${r.leverage}x</span></span></div>
-        <div class="pg">
-          <div><div class="k">Entry</div><div class="num">${num(r.entry_price,4)}</div></div>
-          <div><div class="k">Mark</div><div class="num">${r.mark_price?num(r.mark_price,4):"—"}</div></div>
-          <div><div class="k">Qty</div><div class="num">${num(r.quantity,4)}</div></div>
-          <div><div class="k">ROE</div><div class="num ${cls(r.roe_pct)}">${r.roe_pct!=null?pct(r.roe_pct):"—"}</div></div>
-        </div>
-        <div class="pnl ${cls(r.unrealized_pnl)}">${r.unrealized_pnl!=null?money(r.unrealized_pnl):"—"}</div>
-        <button class="btn sm" data-pos="${r.id}" style="margin-top:10px;width:100%">View Detail</button>
-      </div>`).join("")}</div>`;
-      box.querySelectorAll("[data-pos]").forEach(b=>b.onclick=()=>posDetail(rows.find(x=>x.id==b.dataset.pos)));
+      stopFastTimer();
+      await pollOpen();
+      startFastTimer(pollOpen, 1000);   // realtime Mark/ROE/PnL, no page reload
     } else {
+      stopFastTimer();
       const tr=await tryGet("/api/paper/account/trades");const rows=tr.data||[];
       box.innerHTML=rows.length?`<div class="card">${tableWrap(["Symbol","Side","Entry","Exit","PnL","When"],
         rows.map(r=>`<tr><td><b>${esc(r.symbol)}</b></td><td>${badge(r.side)}</td><td class="num">${num(r.entry_price,4)}</td>
