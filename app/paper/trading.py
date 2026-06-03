@@ -31,8 +31,6 @@ Balance curve uses only TP3/SL closed positions.
 """
 from __future__ import annotations
 
-import math
-from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
 

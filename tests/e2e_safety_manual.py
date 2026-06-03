@@ -38,6 +38,7 @@ async def _register(c, email):
 async def _promote(email):
     """Force ADMIN role (role is read from the DB per request)."""
     from sqlalchemy import select
+
     from app.database.models import AuthUser
     async with get_session() as db:
         u = (await db.execute(
@@ -57,6 +58,7 @@ async def _has_skip(c, h, needle: str) -> bool:
 
 async def _purge(emails) -> None:
     from sqlalchemy import delete, select
+
     from app.database.models import AuthUser, Signal, SystemSetting
     async with get_session() as db:
         for email in emails:

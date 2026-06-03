@@ -25,7 +25,6 @@ from app.exchange_adapters.base import (
     PositionInfo,
     opposite_side,
 )
-from app.utils.logger import logger
 
 _PROD_URL = "https://fapi.binance.com"
 _TESTNET_URL = "https://testnet.binancefuture.com"

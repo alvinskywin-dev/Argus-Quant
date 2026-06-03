@@ -319,6 +319,7 @@ async def validate_binance(
       the futures ``/fapi/v2/account`` endpoint, which still proves ``canTrade``.
     """
     import time
+
     from app.exchange_adapters.binance import sign_query
     if testnet is None:
         testnet = settings.binance_testnet
@@ -391,8 +392,9 @@ async def validate_okx(api_key: str, api_secret: str, passphrase: str) -> Exchan
 
 
 async def validate_bybit(api_key: str, api_secret: str) -> ExchangePermissionResult:
-    from app.exchange_adapters.bybit import _RECV_WINDOW, sign_bybit
     import time
+
+    from app.exchange_adapters.bybit import _RECV_WINDOW, sign_bybit
     path = "/v5/user/query-api"
     ts = str(int(time.time() * 1000))
     headers = {
@@ -418,8 +420,9 @@ async def validate_bybit(api_key: str, api_secret: str) -> ExchangePermissionRes
 
 
 async def validate_bitget(api_key: str, api_secret: str, passphrase: str) -> ExchangePermissionResult:
-    from app.exchange_adapters.bitget import _PRODUCT, sign_bitget
     import time
+
+    from app.exchange_adapters.bitget import _PRODUCT, sign_bitget
     path = f"/api/v2/mix/account/accounts?productType={_PRODUCT}"
     ts = str(int(time.time() * 1000))
     headers = {

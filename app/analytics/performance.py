@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
-from sqlalchemy import select, desc
+from sqlalchemy import desc, select
 
 from app.database.models import Signal
 from app.database.session import SessionLocal

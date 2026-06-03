@@ -15,9 +15,7 @@ Score rules (applied to adjusted_confidence):
 """
 from __future__ import annotations
 
-import asyncio
 import os
-import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
@@ -202,8 +200,6 @@ async def fetch_funding_rate(symbol: str) -> Optional[FundingData]:
     Tries the batch cache first to avoid redundant API calls.
     Falls back to a direct single-symbol request on miss.
     """
-    ttl = _cache_ttl()
-
     cached = await cache_get(_BATCH_CACHE_KEY)
     if cached:
         entry = cached.get(symbol)

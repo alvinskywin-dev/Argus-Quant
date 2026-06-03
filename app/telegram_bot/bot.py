@@ -16,24 +16,31 @@ from typing import Optional
 
 import psutil
 from telegram import (
-    InlineKeyboardButton, InlineKeyboardMarkup, Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
     constants,
 )
-from telegram.error import RetryAfter, TimedOut, NetworkError
+from telegram.error import NetworkError, RetryAfter, TimedOut
 from telegram.ext import (
-    Application, CallbackQueryHandler, CommandHandler,
-    ContextTypes, MessageHandler, filters,
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
 )
 
 from app.config import settings
 from app.database import repo
 from app.market_data import universe
 from app.risk import rate_limiter
-from app.telegram_bot.formatter import format_event, format_market_overview, format_signal
-from app.telegram_bot.event_card import make_event_card
+from app.telegram_bot.formatter import (
+    format_market_overview,
+    format_signal,
+)
 from app.telegram_bot.signal_card import make_signal_card
 from app.utils.logger import logger
-
 
 # ---------- constants ----------
 

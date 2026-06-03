@@ -33,8 +33,8 @@ from app.auth.schemas import (
 )
 from app.config import settings
 from app.database.models import AuthUser
-from app.utils.timezone import SUPPORTED_TIMEZONES, is_supported_timezone
 from app.database.session import get_session
+from app.utils.timezone import SUPPORTED_TIMEZONES, is_supported_timezone
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 

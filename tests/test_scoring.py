@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from app.ai_scoring import aggregate, score_side
 from app.strategies import build_snapshot

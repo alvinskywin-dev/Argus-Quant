@@ -1,5 +1,6 @@
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from pathlib import Path
+
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 OUT_DIR = Path("/tmp/cards")
 OUT_DIR.mkdir(parents=True, exist_ok=True)

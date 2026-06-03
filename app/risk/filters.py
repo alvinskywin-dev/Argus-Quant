@@ -6,16 +6,16 @@ These keep the signal stream clean — no spam, no chop, no duplicates.
 from __future__ import annotations
 
 import asyncio
-from collections import defaultdict, deque
+from collections import deque
 from datetime import datetime, timedelta, timezone
 from typing import Deque, Dict, Tuple
 
 from app.ai_scoring import MTFDecision
 from app.config import settings
 from app.database import repo
+from app.market_data.ws_engine import latest_prices, market_bias
 from app.strategies.features import FeatureSnapshot
 from app.utils.logger import logger
-from app.market_data.ws_engine import latest_prices, market_bias
 
 
 # ---------- in-memory cooldown / dedup ----------

@@ -28,7 +28,7 @@ from typing import Awaitable, Callable, Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from app.ai_scoring import MTFDecision, MTFRejection, evaluate_pipeline
+from app.ai_scoring import evaluate_pipeline
 from app.config import settings
 from app.database.models import OpenInterestSnapshot
 from app.database.repo import has_active_signal, in_post_close_cooldown
@@ -174,7 +174,10 @@ class MarketScanner:
             liquidity_score = 0
             if settings.enable_liquidity_engine and "15m" in dfs:
                 try:
-                    from app.indicators.liquidity import analyze_liquidity, liquidity_score_for_side
+                    from app.indicators.liquidity import (
+                        analyze_liquidity,
+                        liquidity_score_for_side,
+                    )
                     liq_signal = analyze_liquidity(dfs["15m"])
                     liquidity_score = liquidity_score_for_side(liq_signal, decision.side)
                     if liquidity_score > 0:

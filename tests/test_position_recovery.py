@@ -11,13 +11,13 @@ pure building blocks the engine uses, so the safety semantics are pinned:
 """
 from __future__ import annotations
 
-from app.recovery import tp_sl
 from app.reconciliation.engine import (
     DB_POSITION_MISSING_ON_EXCHANGE,
     EXCHANGE_POSITION_MISSING_IN_DB,
     SEV_CRITICAL,
     reconcile_symbol,
 )
+from app.recovery import tp_sl
 
 
 def _pos(side="LONG", qty=1.0, entry=100.0, lev=5, margin="isolated", status="OPEN"):

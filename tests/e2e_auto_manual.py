@@ -34,6 +34,7 @@ async def _seed_signal(symbol: str) -> int:
 async def _purge() -> None:
     """Idempotent cleanup so the e2e is repeatable on the shared dev DB."""
     from sqlalchemy import delete, select
+
     from app.database.models import AuthUser
     async with get_session() as db:
         u = (await db.execute(

@@ -8,7 +8,6 @@ import pytest
 
 from app.auth import security
 
-
 # ── password hashing ──────────────────────────────────────────────
 
 def test_password_hash_roundtrip():

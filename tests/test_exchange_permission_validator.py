@@ -11,15 +11,14 @@ from app.exchange_vault.permission_validator import (
     STATUS_CONNECTED,
     STATUS_INVALID,
     STATUS_PERMISSION_DENIED,
+    ExchangePermissionResult,
     classify_binance,
     classify_bitget,
     classify_bybit,
     classify_okx,
     finalize_status,
     from_mock_permissions,
-    ExchangePermissionResult,
 )
-
 
 # ── Binance classifier ─────────────────────────────────────────────
 

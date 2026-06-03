@@ -16,7 +16,7 @@ liquidity_score_for_side: 0-20 directional (only counts patterns favoring side).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd

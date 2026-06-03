@@ -13,7 +13,8 @@ from app.auth.deps import get_current_user
 from app.config import settings
 from app.database.models import AuthUser
 from app.database.session import get_session
-from app.recovery import engine, status as rstatus
+from app.recovery import engine
+from app.recovery import status as rstatus
 
 router = APIRouter(prefix="/api/recovery", tags=["recovery"])
 

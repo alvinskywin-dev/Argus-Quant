@@ -10,9 +10,7 @@ the app orchestrator (main.py) on new signals and on tracker TP/SL events.
 """
 from __future__ import annotations
 
-from typing import Optional
-
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auto_engine import service

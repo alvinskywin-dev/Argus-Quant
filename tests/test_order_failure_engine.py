@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from app.order_failures import policy as p
 
-
 # ── classification ─────────────────────────────────────────────────
 
 def test_classify_insufficient_balance():

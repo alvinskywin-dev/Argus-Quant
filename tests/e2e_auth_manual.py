@@ -7,8 +7,8 @@ import asyncio
 
 import httpx
 
-from app.database.session import init_db
 from app.dashboard import create_app
+from app.database.session import init_db
 
 
 async def main() -> None:

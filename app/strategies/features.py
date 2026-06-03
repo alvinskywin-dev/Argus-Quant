@@ -13,8 +13,16 @@ import numpy as np
 import pandas as pd
 
 from app.indicators import (
-    adx, atr, bollinger, ema, macd, rsi, stoch_rsi,
-    supertrend, volume_spike_pct, vwap,
+    adx,
+    atr,
+    bollinger,
+    ema,
+    macd,
+    rsi,
+    stoch_rsi,
+    supertrend,
+    volume_spike_pct,
+    vwap,
 )
 from app.indicators.smc import StructureSignal, analyze_structure
 

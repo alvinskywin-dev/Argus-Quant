@@ -19,7 +19,6 @@ from app.exchange_adapters.base import (
     PositionInfo,
     opposite_side,
 )
-from app.paper_engine import math as pmath
 
 _order_seq = itertools.count(1)
 

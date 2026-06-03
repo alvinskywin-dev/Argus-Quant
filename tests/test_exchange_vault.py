@@ -11,7 +11,6 @@ from app.exchange_vault.adapters import (
     get_validator,
 )
 
-
 # ── AES-256-GCM crypto ────────────────────────────────────────────
 
 def test_encrypt_decrypt_roundtrip():

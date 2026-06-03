@@ -3,10 +3,7 @@ Tests for the Sprint 11A Open Interest Engine.
 """
 from __future__ import annotations
 
-import pytest
-
 from app.market_data.open_interest import OISnapshot, compute_oi_score
-
 
 # ── compute_oi_score ──────────────────────────────────────────────────────────
 

@@ -14,7 +14,7 @@ Total: 0-100 quality points.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 from app.ai_scoring.mtf import MTFDecision
 from app.strategies.features import FeatureSnapshot
@@ -101,7 +101,7 @@ class SignalQualityScorer:
             if hits >= 3:
                 reasons.append(f"Strong 4H structure ({hits}/5 confluences)")
             elif hits == 2:
-                reasons.append(f"Adequate 4H structure (2/5 confluences)")
+                reasons.append("Adequate 4H structure (2/5 confluences)")
             else:
                 warnings.append("Weak 4H structure")
 
@@ -176,8 +176,6 @@ class SignalQualityScorer:
 
         # ── Risk Score (0-20) — quality of risk/reward profile ──────────
         # Perfect score at RR >= 4, minimum at RR < 2
-        from app.config import settings
-        from app.ai_scoring.mtf import _fake_breakout_prob
         risk_score = 0.0
         if m15:
             rr_score = min(12.0, max(0.0, (decision.fake_breakout_prob * -20.0 + 12.0)))

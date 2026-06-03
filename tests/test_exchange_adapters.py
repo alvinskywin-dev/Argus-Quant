@@ -7,16 +7,15 @@ return a real (LIVE) adapter unless the live-trading gate is fully open.
 from __future__ import annotations
 
 import asyncio
-
-import pytest
-
 import base64
 import hashlib
 import hmac
 
+import pytest
+
 from app.config import settings
 from app.exchange_adapters import live_gate_open, resolve_adapter
-from app.exchange_adapters.base import AdapterError, MODE_LIVE, MODE_MOCK
+from app.exchange_adapters.base import MODE_LIVE, MODE_MOCK, AdapterError
 from app.exchange_adapters.binance import BinanceFuturesAdapter, sign_query
 from app.exchange_adapters.bitget import BitgetAdapter, sign_bitget
 from app.exchange_adapters.bybit import BybitAdapter, sign_bybit

@@ -9,7 +9,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from app.risk.levels import compute_prev_1d_stop, _extract_prev_1d
+from app.risk.levels import _extract_prev_1d, compute_prev_1d_stop
 
 # Common guard config for the pure function.
 CFG = dict(min_pct=2.0, max_pct=10.0, too_close_action="widen")

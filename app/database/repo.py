@@ -4,11 +4,18 @@ Repository helpers — typed, async, transaction-safe.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Iterable, List, Optional
+from typing import Any, List, Optional
 
 from sqlalchemy import and_, delete, desc, func, select, update
 
-from app.database.models import DailyStat, FundingRateSnapshot, Signal, SignalMessage, SystemSetting, User, Watchlist
+from app.database.models import (
+    FundingRateSnapshot,
+    Signal,
+    SignalMessage,
+    SystemSetting,
+    User,
+    Watchlist,
+)
 from app.database.session import get_session
 
 # Statuses that mean a signal is still active (position is open)

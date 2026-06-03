@@ -168,9 +168,9 @@ def _simulate_exit(
     end = min(i_start + _MAX_HOLD, n)
     for j in range(i_start, end):
         h = high_arr[j]
-        l = low_arr[j]
+        lo = low_arr[j]
         if side == "LONG":
-            if l <= sl:
+            if lo <= sl:
                 return j, "SL", sl
             if h >= tp3:
                 return j, "TP3", tp3
@@ -181,11 +181,11 @@ def _simulate_exit(
         else:  # SHORT
             if h >= sl:
                 return j, "SL", sl
-            if l <= tp3:
+            if lo <= tp3:
                 return j, "TP3", tp3
-            if l <= tp2:
+            if lo <= tp2:
                 return j, "TP2", tp2
-            if l <= tp1:
+            if lo <= tp1:
                 return j, "TP1", tp1
     # Neither TP nor SL hit within MAX_HOLD → expired
     exp_i = min(end, n - 1)

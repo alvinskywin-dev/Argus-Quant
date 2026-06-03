@@ -16,7 +16,8 @@ def setup_paper(app: FastAPI) -> None:
         return
 
     from app.auth.service import AuthError
-    from app.paper_engine.router import debug_router, router as paper_router
+    from app.paper_engine.router import debug_router
+    from app.paper_engine.router import router as paper_router
     from app.paper_engine.service import PaperError
 
     async def _paper_error_handler(_request: Request, exc: PaperError) -> JSONResponse:

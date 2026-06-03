@@ -29,7 +29,6 @@ from app.exchange_vault.permission_validator import (
     classify_binance_futures_account,
 )
 
-
 # ── clock skew ──────────────────────────────────────────────────────
 
 def test_clock_skew_within_tolerance_is_ok():

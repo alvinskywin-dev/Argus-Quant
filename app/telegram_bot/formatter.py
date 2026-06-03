@@ -6,10 +6,7 @@ premium commercial signal product.
 """
 from __future__ import annotations
 
-from typing import Iterable
-
-from app.utils.helpers import fmt_pct, fmt_price, iso
-
+from app.utils.helpers import fmt_pct, fmt_price
 
 _SIDE_EMOJI = {"LONG": "🚀", "SHORT": "🔻"}
 _RISK_EMOJI = {"LOW": "🟢", "MEDIUM": "🟡", "HIGH": "🟠"}
@@ -114,8 +111,8 @@ def format_market_overview(data: dict) -> str:
         lines.append("")
     if losers:
         lines.append("*Top Losers (24h):*")
-        for l in losers:
-            lines.append(f"• `{l['symbol']}` {fmt_pct(l['change_pct'])}")
+        for row in losers:
+            lines.append(f"• `{row['symbol']}` {fmt_pct(row['change_pct'])}")
         lines.append("")
     if wr:
         lines.append("*Signal Stats (7d):*")

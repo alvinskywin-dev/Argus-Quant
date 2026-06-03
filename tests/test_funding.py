@@ -9,11 +9,9 @@ import pytest
 
 from app.market_data.funding import (
     FundingData,
-    FundingScore,
     classify_funding,
     score_funding_for_side,
 )
-
 
 # ── classify_funding ──────────────────────────────────────────────────────────
 

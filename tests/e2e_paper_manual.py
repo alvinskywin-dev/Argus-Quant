@@ -7,9 +7,9 @@ import asyncio
 
 import httpx
 
-from app.database.session import init_db, get_session
-from app.database.models import Signal
 from app.dashboard import create_app
+from app.database.models import Signal
+from app.database.session import get_session, init_db
 
 
 async def _seed_signal() -> int:

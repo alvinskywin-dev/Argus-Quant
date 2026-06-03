@@ -21,7 +21,6 @@ from app.paper_engine import math as pm
 from app.paper_engine import service
 from app.paper_engine.router import _position_out
 
-
 # ── canonical formulas (the spec) ──────────────────────────────────
 # LONG : roe = (mark-entry)/entry * lev * 100 ; pnl = (mark-entry) * qty
 # SHORT: roe = (entry-mark)/entry * lev * 100 ; pnl = (entry-mark) * qty

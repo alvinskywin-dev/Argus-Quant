@@ -16,15 +16,12 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-import sys
 from datetime import datetime, timezone
 
 from sqlalchemy import select
 
-from app.database.models import ArchivedSignal, Signal
+from app.database.models import ArchivedSignal, Base, Signal
 from app.database.session import SessionLocal, engine
-from app.database.models import Base
-
 
 LEGACY_TF = "5m"
 NEW_STRATEGY = "MTF_SMC_STRICT"
@@ -108,7 +105,7 @@ async def run_migration() -> None:
     print()
     print("Summary:")
     print(f"  Archived: {len(archived_ids)}")
-    print(f"  Remaining in production: see signals table")
+    print("  Remaining in production: see signals table")
     print()
     print("Dashboard will now only show 15m/1h/4h/1d signals from MTF_SMC_STRICT engine.")
 

@@ -10,10 +10,9 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
-from sqlalchemy import select, desc
+from sqlalchemy import desc, select
 
-from app.config import settings
-from app.database.models import Signal, DailyStat
+from app.database.models import Signal
 from app.database.session import SessionLocal
 from app.utils.logger import logger
 
@@ -124,7 +123,7 @@ class WeeklyReport:
         week_str = f"{since.strftime('%b %d')} – {(until - timedelta(days=1)).strftime('%b %d, %Y')}"
 
         lines = [
-            f"📈 <b>WEEKLY REPORT</b>",
+            "📈 <b>WEEKLY REPORT</b>",
             f"<i>{week_str}</i>",
             "",
             f"Total Signals: <b>{st['total']}</b>",

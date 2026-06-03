@@ -1,4 +1,5 @@
 import asyncio
+
 from sqlalchemy import text
 
 from app.database.session import SessionLocal
@@ -31,7 +32,7 @@ async def main():
             ORDER BY timeframe, total DESC;
         """,
         "WORST SYMBOLS": """
-            SELECT symbol, COUNT(*) total, 
+            SELECT symbol, COUNT(*) total,
                    SUM(CASE WHEN status='SL' THEN 1 ELSE 0 END) losses,
                    ROUND(AVG(pnl_pct)::numeric, 2) avg_pnl
             FROM signals
@@ -42,7 +43,7 @@ async def main():
             LIMIT 15;
         """,
         "BEST SYMBOLS": """
-            SELECT symbol, COUNT(*) total, 
+            SELECT symbol, COUNT(*) total,
                    SUM(CASE WHEN status IN ('TP1','TP2','TP3') THEN 1 ELSE 0 END) wins,
                    ROUND(AVG(pnl_pct)::numeric, 2) avg_pnl
             FROM signals

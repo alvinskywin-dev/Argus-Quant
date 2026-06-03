@@ -20,7 +20,6 @@ from typing import Dict, List, Optional, Tuple
 
 from app.strategies.features import FeatureSnapshot
 
-
 # Weights sum to roughly 1.0 — tunable.
 WEIGHTS: Dict[str, float] = {
     "trend_quality": 0.20,

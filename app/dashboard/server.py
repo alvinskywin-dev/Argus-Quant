@@ -4,25 +4,35 @@ import html as html_lib
 import os
 import re
 import time
-from pathlib import Path
-from urllib.parse import urlparse
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from urllib.parse import urlparse
 
-from fastapi import FastAPI, Request, Form
+from fastapi import FastAPI, Form, Request
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+)
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import desc, select
+from sqlalchemy import func as _sqlfunc
 from starlette.middleware.base import BaseHTTPMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, PlainTextResponse
-from sqlalchemy import func as _sqlfunc, select, desc
 
 from app.config import settings
+from app.database.models import (
+    AffiliateClick,
+    FundingRateSnapshot,
+    OpenInterestSnapshot,
+    Signal,
+)
+from app.database.repo import get_active_signals_summary
 from app.database.session import SessionLocal, get_session
-from app.database.models import FundingRateSnapshot, Signal, AffiliateClick, OpenInterestSnapshot, PaperPosition
-from app.database.repo import get_active_signals_summary, ACTIVE_STATUSES
 from app.market_data import universe
 from app.market_data.ws_engine import ws_health
 from app.utils.timezone import normalize_utc_iso
-
 
 # ── auth ──────────────────────────────────────────────────────────
 
@@ -866,13 +876,13 @@ async def api_backtest_run(
     from app.backtesting.historical import HistoricalBacktestEngine
 
     # ── input sanitisation ────────────────────────────────────────
-    import re
     symbol = re.sub(r"[^A-Za-z0-9]", "", symbol).upper()[:20]
     if not symbol:
         return JSONResponse({"error": "symbol is required"}, status_code=400)
 
     # Default date range: last 90 days
-    from datetime import datetime, timedelta, timezone as _tz
+    from datetime import datetime, timedelta
+    from datetime import timezone as _tz
     _today = datetime.now(_tz.utc).date()
     if not end:
         end = str(_today - timedelta(days=1))
@@ -1088,13 +1098,10 @@ async def api_market_radar():
     if cached is not None:
         return JSONResponse(cached)
 
-    from collections import defaultdict as _dd
 
     now = datetime.now(timezone.utc)
     cutoff_24h = now - timedelta(hours=24)
     cutoff_2h  = now - timedelta(hours=2)
-
-    WIN_ST = ("TP1", "TP2", "TP3")
 
     try:
         async with SessionLocal() as session:
@@ -1411,7 +1418,6 @@ async def affiliate_stats(request: Request):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     try:
         from sqlalchemy import func as sqlfunc
-        from sqlalchemy import text
         async with SessionLocal() as session:
             res = await session.execute(
                 select(AffiliateClick.exchange, sqlfunc.count(AffiliateClick.id).label("clicks"))
@@ -2161,7 +2167,7 @@ async def index():
         ("OKX", okx_aff, "#1a82ff", "okx", "Leading Altcoins", "Advanced trading tools and deep altcoin markets."),
         ("Bitget", bitget_aff, "#00e6b3", "bitget", "Best Copy Trading", "Follow top traders automatically with copy trading."),
     ]
-    for name, url, color, logo, tag, desc in exchanges:
+    for name, url, color, logo, tag, descr in exchanges:
         safe_name = _esc(name)
         if url:
             btn = (
@@ -2177,7 +2183,7 @@ async def index():
             f'<div class="exch-ico"><img src="/static/exchanges/{logo}.svg" alt="{safe_name}" class="exch-logo-img"></div>'
             f'<div class="exch-name" style="color:{color}">{safe_name}</div>'
             f'<div class="exch-tag">{tag}</div>'
-            f'<div class="exch-desc">{desc}</div>'
+            f'<div class="exch-desc">{descr}</div>'
             f'{btn}'
             f'</div>'
         )

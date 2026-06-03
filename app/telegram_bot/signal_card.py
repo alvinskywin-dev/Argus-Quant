@@ -1,5 +1,7 @@
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from pathlib import Path
+
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
+
 from app.utils.helpers import fmt_price
 
 OUT_DIR = Path("/tmp/cards")

@@ -1,12 +1,14 @@
 import asyncio
 from datetime import datetime, timezone
+
 from sqlalchemy import select
 from telegram import Bot, constants
 
 from app.config import settings
-from app.database.session import SessionLocal
 from app.database.models import Signal
+from app.database.session import SessionLocal
 from app.telegram_bot.stats_card import make_stats_card
+
 
 async def main():
     today = datetime.now(timezone.utc).date()

@@ -23,8 +23,7 @@ import uvloop
 
 from app.config import settings, validate_startup
 from app.dashboard import create_app
-from app.database import init_db, shutdown_db
-from app.database import repo
+from app.database import init_db, repo, shutdown_db
 from app.market_data import (
     shutdown_client,
     universe,
@@ -37,7 +36,6 @@ from app.scanner import MarketScanner, SignalTracker
 from app.telegram_bot import TelegramBot
 from app.utils.helpers import run_forever
 from app.utils.logger import logger
-
 
 # ---------- startup diagnostics ----------
 

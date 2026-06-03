@@ -16,8 +16,8 @@ from app.reconciliation.engine import (
     SEV_CRITICAL,
     SIDE_MISMATCH,
     SIZE_MISMATCH,
-    TP_SL_MISSING_ON_EXCHANGE,
     TP_SL_MISSING_IN_DB,
+    TP_SL_MISSING_ON_EXCHANGE,
     reconcile_symbol,
 )
 

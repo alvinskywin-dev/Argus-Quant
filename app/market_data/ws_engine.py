@@ -7,7 +7,6 @@ import aiohttp
 
 from app.utils.logger import logger
 
-
 # Latest realtime mark price per symbol (USDT-M futures, last trade price).
 latest_prices: dict[str, float] = {}
 # Wall-clock epoch seconds of the last successful update for each symbol.

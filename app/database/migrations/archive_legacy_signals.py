@@ -31,12 +31,11 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from collections import defaultdict
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select
 
-from app.database.models import ArchivedSignal, Base, DailyStat, Signal, WeeklyStat
+from app.database.models import ArchivedSignal, Base, Signal
 from app.database.session import SessionLocal, engine
 
 MTF_STRATEGY   = "MTF_SMC_STRICT"

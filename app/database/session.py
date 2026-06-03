@@ -109,9 +109,9 @@ async def init_db() -> None:
     # create_all builds their tables. Imported here (not at module load) to
     # avoid import cycles with app.database.models.
     try:
-        import app.reconciliation.models  # noqa: F401
+        import app.accounting.models  # noqa: F401
         import app.order_failures.models  # noqa: F401
-        import app.accounting.models      # noqa: F401
+        import app.reconciliation.models  # noqa: F401
     except Exception as exc:  # noqa: BLE001 — missing optional module is non-fatal
         logger.warning(f"sprint21 model import skipped: {exc!s:.160}")
 
