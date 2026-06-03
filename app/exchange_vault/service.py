@@ -192,7 +192,7 @@ async def test_connection(
         acc.status = "ERROR"
         acc.last_error = "decrypt failed"
         await _audit(db, user_id, exchange, "TEST", "FAIL", str(exc), ip)
-        raise VaultError(500, "Stored credentials could not be decrypted")
+        raise VaultError(500, "Stored credentials could not be decrypted") from exc
 
     result = await validate_permissions(exchange, api_key, api_secret, passphrase)
     acc.last_test = _now()

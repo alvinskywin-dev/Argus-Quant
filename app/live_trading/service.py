@@ -140,7 +140,7 @@ async def open_position(
         adapter = await _adapter_for(db, user_id, exchange)
     except vault.VaultError as exc:
         await _audit(db, user_id, exchange, symbol, "OPEN", "REJECTED", mode, exc.detail)
-        raise LiveTradingError(exc.status_code, exc.detail)
+        raise LiveTradingError(exc.status_code, exc.detail) from exc
 
     # Resolve quantity.
     px = float(entry_price or pmath_mark(symbol))
@@ -178,7 +178,7 @@ async def open_position(
         )
         await _audit(db, user_id, exchange, symbol, "ERROR", "FAIL", mode, str(exc))
         await adapter.close()
-        raise LiveTradingError(502, f"Exchange error: {exc}")
+        raise LiveTradingError(502, f"Exchange error: {exc}") from exc
 
     # Entry filled — persist the order + position FIRST so a real fill is never
     # lost even if protection placement fails below.
@@ -303,7 +303,7 @@ async def close_position(
     try:
         adapter = await _adapter_for(db, user_id, pos.exchange)
     except vault.VaultError as exc:
-        raise LiveTradingError(exc.status_code, exc.detail)
+        raise LiveTradingError(exc.status_code, exc.detail) from exc
 
     try:
         order = await adapter.close_order(
@@ -311,7 +311,7 @@ async def close_position(
         )
     except AdapterError as exc:
         await _audit(db, user_id, pos.exchange, pos.symbol, "ERROR", "FAIL", mode, str(exc))
-        raise LiveTradingError(502, f"Exchange error: {exc}")
+        raise LiveTradingError(502, f"Exchange error: {exc}") from exc
     finally:
         await adapter.close()
 
@@ -436,7 +436,7 @@ async def emergency_close_position(
     try:
         adapter = await _adapter_for(db, pos.user_id, pos.exchange)
     except vault.VaultError as exc:
-        raise LiveTradingError(exc.status_code, exc.detail)
+        raise LiveTradingError(exc.status_code, exc.detail) from exc
 
     try:
         # 2) Reconcile against the exchange — close the ACTUAL size if known.
@@ -515,7 +515,7 @@ async def emergency_close_position(
             await _audit(
                 db, pos.user_id, pos.exchange, pos.symbol, "EMERGENCY_CLOSE", "FAIL", mode, str(exc)
             )
-            raise LiveTradingError(502, f"Emergency close failed: {exc}")
+            raise LiveTradingError(502, f"Emergency close failed: {exc}") from exc
     finally:
         await adapter.close()
 
@@ -607,11 +607,11 @@ async def set_leverage(
     try:
         adapter = await _adapter_for(db, user_id, exchange.lower())
     except vault.VaultError as exc:
-        raise LiveTradingError(exc.status_code, exc.detail)
+        raise LiveTradingError(exc.status_code, exc.detail) from exc
     try:
         await adapter.set_leverage(symbol.upper(), leverage)
     except AdapterError as exc:
-        raise LiveTradingError(502, f"Exchange error: {exc}")
+        raise LiveTradingError(502, f"Exchange error: {exc}") from exc
     finally:
         await adapter.close()
     mode = "LIVE" if live_gate_open() else "MOCK"
@@ -623,11 +623,11 @@ async def get_balance(db: AsyncSession, *, user_id: int, exchange: str) -> dict:
     try:
         adapter = await _adapter_for(db, user_id, exchange.lower())
     except vault.VaultError as exc:
-        raise LiveTradingError(exc.status_code, exc.detail)
+        raise LiveTradingError(exc.status_code, exc.detail) from exc
     try:
         bal = await adapter.get_balance()
     except AdapterError as exc:
-        raise LiveTradingError(502, f"Exchange error: {exc}")
+        raise LiveTradingError(502, f"Exchange error: {exc}") from exc
     finally:
         await adapter.close()
     return {
@@ -663,7 +663,7 @@ async def binance_preflight(
     try:
         creds = await vault.get_decrypted_credentials(db, user_id, "binance")
     except vault.VaultError as exc:
-        raise LiveTradingError(exc.status_code, exc.detail)
+        raise LiveTradingError(exc.status_code, exc.detail) from exc
     result = await run_binance_preflight(
         creds["api_key"], creds["api_secret"], testnet=bool(testnet), symbol=symbol
     )

@@ -12,10 +12,11 @@ extend-exclude = [
 ]
 
 [tool.ruff.lint]
-# Pragmatic, high-signal set. E501 is delegated to Black; broader stylistic /
-# pyupgrade rewrites (UP/B) are deliberately deferred to avoid churning the
-# trading engine in one pass — they can be ratcheted in later (Phase 12).
-select = ["E", "F", "W", "I"]
+# Pragmatic, high-signal set. E501 is delegated to Black. Phase 12 ratcheted in
+# B (flake8-bugbear) for its real-bug coverage (exception chaining, zip-strict).
+# Broad stylistic/pyupgrade rewrites (UP) stay deferred to avoid churning the
+# trading engine in one pass — ratchet later.
+select = ["E", "F", "W", "I", "B"]
 ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
@@ -24,6 +25,23 @@ ignore = ["E501"]
 "app/market_data/market_regime.py" = ["E701"]
 "**/__init__.py" = ["F401"]
 "tests/*" = ["F401", "F811"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency-injection markers are the documented idiom in argument
+# defaults; they are not the mutable-default-argument bug B008 targets.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Body",
+    "fastapi.Form",
+    "fastapi.File",
+    "fastapi.Path",
+    "fastapi.Header",
+    "fastapi.Cookie",
+    "fastapi.Security",
+    # App dependency-factory: returns a FastAPI dependency, called inside Depends().
+    "app.auth.deps.require_role",
+]
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]

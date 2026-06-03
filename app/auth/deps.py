@@ -35,7 +35,9 @@ async def get_current_user(
     try:
         payload = security.decode_access_token(credentials.credentials)
     except security.TokenError:
-        raise service.AuthError(401, "Invalid or expired token")
+        # Expected auth-failure path; suppress chaining so token internals
+        # never surface in the traceback context.
+        raise service.AuthError(401, "Invalid or expired token") from None
 
     sub = payload.get("sub")
     if not sub:

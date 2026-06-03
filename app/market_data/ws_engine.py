@@ -97,7 +97,7 @@ async def ensure_prices(symbols) -> None:
             results = await asyncio.gather(
                 *(_fetch(session, s) for s in missing), return_exceptions=True
             )
-        for s, price in zip(missing, results):
+        for s, price in zip(missing, results, strict=True):
             if isinstance(price, (int, float)) and price and price > 0:
                 _store(s, float(price))
     except Exception as exc:  # noqa: BLE001
