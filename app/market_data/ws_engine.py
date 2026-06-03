@@ -136,8 +136,19 @@ async def ws_price_loop() -> None:
             # exponentially with a cap so we neither hammer Binance nor stop
             # retrying during a prolonged outage.
             logger.warning(f"price cache error: {exc} — retrying in {backoff:.0f}s")
+            _record_reconnect()
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, BACKOFF_MAX_SEC)
+
+
+def _record_reconnect() -> None:
+    """Best-effort metric bump for a loop-level price-feed reconnect."""
+    try:
+        from app.utils.observability import METRICS
+
+        METRICS.inc_ws_reconnect()
+    except Exception:  # noqa: BLE001 — metrics must never break the loop
+        pass
 
 
 def ws_health() -> dict:

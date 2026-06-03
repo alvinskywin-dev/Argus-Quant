@@ -41,6 +41,15 @@ class _Metrics:
         self.http_request_duration_sum = 0.0
         self.http_request_duration_count = 0
         self.http_requests_in_flight = 0
+        # Background-loop counters (incremented from outside the request path).
+        self.ws_reconnects_total = 0
+        self.telegram_send_failures_total = 0
+
+    def inc_ws_reconnect(self) -> None:
+        self.ws_reconnects_total += 1
+
+    def inc_telegram_failure(self) -> None:
+        self.telegram_send_failures_total += 1
 
     def observe_request(self, status_code: int, duration_s: float) -> None:
         bucket = f"{status_code // 100}xx"
@@ -60,6 +69,8 @@ class _Metrics:
             "http_request_duration_sum": round(self.http_request_duration_sum, 6),
             "http_request_duration_count": count,
             "http_request_duration_avg_ms": round(avg * 1000, 3),
+            "ws_reconnects_total": self.ws_reconnects_total,
+            "telegram_send_failures_total": self.telegram_send_failures_total,
         }
 
 

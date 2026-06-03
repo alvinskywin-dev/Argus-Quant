@@ -1,0 +1,68 @@
+# ARGUS QUANT — production monitoring stack (Prometheus + Grafana + node-exporter).
+#
+# Opt-in overlay: it does NOT start with the default `docker compose up`. Run it
+# alongside the app so they share the project network:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d \
+#       prometheus grafana node-exporter
+#
+# Security: Grafana admin password comes from GRAFANA_ADMIN_PASSWORD in .env
+# (defaults to a placeholder). Do NOT expose Grafana publicly without a reverse
+# proxy + auth (see docs/deployment/cloudflare-nginx-ssl.md). Bind to localhost.
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: signals-prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=15d"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    networks:
+      - signals-net
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: signals-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me-in-env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - signals-net
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: signals-node-exporter
+    restart: unless-stopped
+    command:
+      - "--path.rootfs=/host"
+    volumes:
+      - /:/host:ro,rslave
+    ports:
+      - "127.0.0.1:9100:9100"
+    networks:
+      - signals-net
+
+volumes:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  signals-net:
+    external: false

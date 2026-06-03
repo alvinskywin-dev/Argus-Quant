@@ -246,3 +246,17 @@ def test_live_status_json(client):
     r = client.get("/api/live/status")
     assert r.status_code == 200
     assert "mode" in r.json()
+
+
+def test_metrics_exposes_monitoring_families(client):
+    # Prometheus monitoring families that are always present (no DB needed).
+    text = client.get("/metrics").text
+    for name in (
+        "alpha_radar_http_requests_total",
+        "alpha_radar_live_gate_open",
+        "alpha_radar_ws_reconnects_total",
+        "alpha_radar_telegram_send_failures_total",
+        "alpha_radar_db_up",
+        "alpha_radar_redis_up",
+    ):
+        assert name in text, f"missing metric {name}"

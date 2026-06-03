@@ -13,6 +13,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from sqlalchemy import desc, select
 from sqlalchemy import func as _sqlfunc
+from sqlalchemy import text as _text
 
 from app.config import settings
 from app.dashboard.server import (
@@ -25,6 +26,7 @@ from app.dashboard.server import (
 )
 from app.database.models import FundingRateSnapshot, OpenInterestSnapshot, Signal
 from app.database.session import SessionLocal
+from app.exchange_adapters import live_gate_open
 from app.market_data import universe
 from app.market_data.ws_engine import ws_health
 from app.utils.observability import METRICS
@@ -408,8 +410,99 @@ async def metrics():
         "# HELP alpha_radar_http_request_duration_seconds_count Completed requests",
         "# TYPE alpha_radar_http_request_duration_seconds_count counter",
         f"alpha_radar_http_request_duration_seconds_count {m['http_request_duration_count']}",
+        "# HELP alpha_radar_ws_reconnects_total Price-feed reconnect attempts",
+        "# TYPE alpha_radar_ws_reconnects_total counter",
+        f"alpha_radar_ws_reconnects_total {m['ws_reconnects_total']}",
+        "# HELP alpha_radar_telegram_send_failures_total Telegram sends that exhausted retries",
+        "# TYPE alpha_radar_telegram_send_failures_total counter",
+        f"alpha_radar_telegram_send_failures_total {m['telegram_send_failures_total']}",
+        "# HELP alpha_radar_live_gate_open Live execution gate (1=open/real,0=mock)",
+        "# TYPE alpha_radar_live_gate_open gauge",
+        f"alpha_radar_live_gate_open {1 if live_gate_open() else 0}",
     ]
+    lines += await _business_metric_lines()
     return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
+
+
+# Each entry: (metric, help, type, SQL). Run best-effort at scrape time; a
+# failing query is skipped so /metrics never errors on a transient DB issue.
+_BUSINESS_QUERIES = [
+    (
+        "alpha_radar_live_positions_open",
+        "Open live positions",
+        "gauge",
+        "SELECT count(*) FROM live_positions WHERE status='OPEN'",
+    ),
+    (
+        "alpha_radar_unsafe_positions",
+        "Live positions needing review",
+        "gauge",
+        "SELECT count(*) FROM live_positions WHERE requires_review = true",
+    ),
+    (
+        "alpha_radar_paper_positions_open",
+        "Open paper positions",
+        "gauge",
+        "SELECT count(*) FROM paper_account_positions WHERE status='OPEN'",
+    ),
+    (
+        "alpha_radar_reconciliation_issues_unresolved",
+        "Unresolved reconciliation issues",
+        "gauge",
+        "SELECT count(*) FROM reconciliation_issues WHERE resolved = false",
+    ),
+    (
+        "alpha_radar_order_failures_pending",
+        "Order failures pending resolution",
+        "gauge",
+        "SELECT count(*) FROM order_failures WHERE final_state='PENDING'",
+    ),
+    (
+        "alpha_radar_signals_total",
+        "Total MTF signals recorded",
+        "counter",
+        "SELECT count(*) FROM signals WHERE strategy='MTF_SMC_STRICT'",
+    ),
+]
+
+
+async def _business_metric_lines() -> list[str]:
+    out: list[str] = []
+    # DB + per-metric COUNTs (best-effort; share one session).
+    db_up = 0
+    try:
+        async with SessionLocal() as session:
+            await session.execute(_text("SELECT 1"))  # real connectivity probe
+            db_up = 1
+            for name, help_text, mtype, sql in _BUSINESS_QUERIES:
+                try:
+                    val = int((await session.execute(_text(sql))).scalar() or 0)
+                    out += [f"# HELP {name} {help_text}", f"# TYPE {name} {mtype}", f"{name} {val}"]
+                except Exception:  # noqa: BLE001 — skip a single failing metric
+                    continue
+    except Exception:  # noqa: BLE001 — DB unreachable
+        db_up = 0
+    out += [
+        "# HELP alpha_radar_db_up Database reachable (1/0)",
+        "# TYPE alpha_radar_db_up gauge",
+        f"alpha_radar_db_up {db_up}",
+    ]
+
+    # Redis connectivity (best-effort ping).
+    redis_up = 0
+    try:
+        from app.market_data.cache import get_redis
+
+        r = await get_redis()
+        redis_up = 1 if await r.ping() else 0
+    except Exception:  # noqa: BLE001
+        redis_up = 0
+    out += [
+        "# HELP alpha_radar_redis_up Redis reachable (1/0)",
+        "# TYPE alpha_radar_redis_up gauge",
+        f"alpha_radar_redis_up {redis_up}",
+    ]
+    return out
 
 
 @router.get("/api/system/metrics")

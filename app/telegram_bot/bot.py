@@ -155,6 +155,7 @@ async def _tg_send_with_retry(coro_factory, *, max_attempts: int = 4) -> any:
             await asyncio.sleep(wait)
         except (TimedOut, NetworkError) as exc:
             if attempt == max_attempts:
+                _record_tg_failure()
                 raise
             logger.warning(
                 f"telegram transient error ({exc}), retry in {delay:.1f}s (attempt {attempt})"
@@ -162,8 +163,19 @@ async def _tg_send_with_retry(coro_factory, *, max_attempts: int = 4) -> any:
             await asyncio.sleep(delay)
             delay = min(delay * 2, 30)
         except Exception:
+            _record_tg_failure()
             raise
     return None
+
+
+def _record_tg_failure() -> None:
+    """Best-effort metric bump when a Telegram send exhausts its retries."""
+    try:
+        from app.utils.observability import METRICS
+
+        METRICS.inc_telegram_failure()
+    except Exception:  # noqa: BLE001 — metrics must never break the bot
+        pass
 
 
 def _main_keyboard() -> InlineKeyboardMarkup:

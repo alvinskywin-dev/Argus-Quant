@@ -1,0 +1,22 @@
+# Prometheus scrape config for the ARGUS QUANT monitoring stack.
+# Run with: docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+
+scrape_configs:
+  # The bot exposes Prometheus text metrics at /metrics (port 8010 in-network).
+  - job_name: argus-quant-bot
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["bot:8010"]
+
+  # Host/container resource metrics.
+  - job_name: node
+    static_configs:
+      - targets: ["node-exporter:9100"]
+
+  # Prometheus self-monitoring.
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
