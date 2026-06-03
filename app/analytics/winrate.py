@@ -35,6 +35,17 @@ _RR_BUCKETS = [
 
 _TF_BUCKETS = ["15m", "1h", "4h", "1d"]
 
+# Stop-Loss Engine V2 — winrate by SL distance and SL method.
+_SL_DIST_BUCKETS = [
+    ("0-2%",  0.0,  2.0),
+    ("2-4%",  2.0,  4.0),
+    ("4-6%",  4.0,  6.0),
+    ("6-10%", 6.0,  10.0),
+    ("10%+",  10.0, 1e9),
+]
+# Methods we surface explicitly (1D support stop / ATR stop / structure stop).
+_SL_METHODS = ["PREV_1D_SUPPORT", "atr", "structure", "liquidity"]
+
 
 def _wr(sigs: List) -> Optional[float]:
     if not sigs:
@@ -100,6 +111,10 @@ async def compute_winrate_analysis(limit: int = 500) -> Dict[str, Any]:
     oi_rising_sigs:   List = []
     oi_falling_sigs:  List = []
 
+    # Stop-Loss Engine V2 — group closed signals by SL method and SL distance.
+    sl_method_groups: Dict[str, List] = {m: [] for m in _SL_METHODS}
+    sl_dist_groups: Dict[str, List] = {label: [] for label, _, _ in _SL_DIST_BUCKETS}
+
     for s in closed:
         if not s.diagnostics:
             continue
@@ -117,6 +132,23 @@ async def compute_winrate_analysis(limit: int = 500) -> Dict[str, Any]:
             oi_rising_sigs.append(s)
         elif oi_sc < 0:
             oi_falling_sigs.append(s)
+
+        # SL method (falls back to the legacy rr_method-style label when absent)
+        sl_method = diag.get("stoploss_method")
+        if sl_method in sl_method_groups:
+            sl_method_groups[sl_method].append(s)
+
+        # SL distance bucket — prefer the stored diagnostic, else derive from levels
+        sl_dist = diag.get("sl_distance_percent")
+        if sl_dist is None and s.stop_loss and s.entry_low and s.entry_high:
+            mid = (s.entry_low + s.entry_high) / 2.0
+            if mid:
+                sl_dist = abs(mid - s.stop_loss) / mid * 100.0
+        if sl_dist is not None:
+            for label, lo, hi in _SL_DIST_BUCKETS:
+                if lo <= float(sl_dist) < hi:
+                    sl_dist_groups[label].append(s)
+                    break
 
     # ── Best in each category ─────────────────────────────────────────────
     def _best(stats: List[Dict]) -> Optional[str]:
@@ -137,4 +169,12 @@ async def compute_winrate_analysis(limit: int = 500) -> Dict[str, Any]:
         "confidence_buckets":     conf_stats,
         "rr_buckets":             rr_stats,
         "timeframe_buckets":      tf_stats,
+        # Stop-Loss Engine V2 analytics
+        "sl_method_buckets":      [_bucket_stats(sl_method_groups[m], m) for m in _SL_METHODS],
+        "sl_distance_buckets":    [
+            _bucket_stats(sl_dist_groups[label], label) for label, _, _ in _SL_DIST_BUCKETS
+        ],
+        "best_sl_method":         _best([
+            _bucket_stats(sl_method_groups[m], m) for m in _SL_METHODS
+        ]),
     }

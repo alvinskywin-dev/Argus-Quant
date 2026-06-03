@@ -21,6 +21,10 @@ from typing import List, Optional, Tuple
 
 from app.config import settings
 from app.strategies.features import FeatureSnapshot
+from app.utils.logger import logger
+
+LONG = "LONG"
+SHORT = "SHORT"
 
 
 @dataclass
@@ -33,6 +37,7 @@ class TradeLevels:
     tp3: float
     risk_reward: float  # RR to TP2
     rr_method: str = "atr"  # "atr" | "structure" | "liquidity"
+    sl_diag: dict = field(default_factory=dict)  # stop-loss diagnostics (V2)
 
 
 # ---------- helpers ----------
@@ -111,10 +116,129 @@ def _candidates_short(
     return results
 
 
+# ---------- Stop-Loss Engine V2 (previous-1D support/resistance) ----------
+
+def compute_prev_1d_stop(
+    side: str,
+    entry_price: float,
+    prev_1d_low: float,
+    prev_1d_high: float,
+    atr_1d: float,
+    *,
+    buffer_mult: float,
+    min_pct: float,
+    max_pct: float,
+    too_close_action: str = "widen",
+) -> dict:
+    """
+    Pure SL computation from the previous completed 1D candle.
+
+    LONG : stop_loss = prev_1d_low  - buffer   (must be < entry_price)
+    SHORT: stop_loss = prev_1d_high + buffer   (must be > entry_price)
+    buffer = buffer_mult * ATR(1D).
+
+    Safety: reject if on the wrong side or farther than max_pct; if closer than
+    min_pct either widen to the floor (default) or reject. Returns a diagnostics
+    dict — never raises.
+    """
+    buffer = max(0.0, float(buffer_mult) * max(0.0, float(atr_1d)))
+    diag = {
+        "stoploss_method": "PREV_1D_SUPPORT",
+        "prev_1d_low": round(float(prev_1d_low), 8),
+        "prev_1d_high": round(float(prev_1d_high), 8),
+        "sl_buffer": round(buffer, 8),
+        "base_sl": None,
+        "stop_loss": None,
+        "sl_distance_percent": None,
+        "sl_valid": False,
+        "sl_reject_reason": None,
+    }
+
+    if entry_price <= 0:
+        diag["sl_reject_reason"] = "invalid_entry_price"
+        return diag
+
+    if side == LONG:
+        base_sl = float(prev_1d_low)
+        sl = base_sl - buffer
+        diag["base_sl"] = round(base_sl, 8)
+        if sl >= entry_price:
+            diag["sl_reject_reason"] = "support_not_below_entry"
+            diag["stop_loss"] = round(sl, 8)
+            return diag
+        dist = (entry_price - sl) / entry_price * 100.0
+    else:  # SHORT
+        base_sl = float(prev_1d_high)
+        sl = base_sl + buffer
+        diag["base_sl"] = round(base_sl, 8)
+        if sl <= entry_price:
+            diag["sl_reject_reason"] = "resistance_not_above_entry"
+            diag["stop_loss"] = round(sl, 8)
+            return diag
+        dist = (sl - entry_price) / entry_price * 100.0
+
+    # Safety rule #2 — too far → reject
+    if dist > max_pct:
+        diag["stop_loss"] = round(sl, 8)
+        diag["sl_distance_percent"] = round(dist, 4)
+        diag["sl_reject_reason"] = "sl_too_far"
+        return diag
+
+    # Safety rule #3 — too close → widen to floor (preferred) or reject
+    if dist < min_pct:
+        if too_close_action == "reject":
+            diag["stop_loss"] = round(sl, 8)
+            diag["sl_distance_percent"] = round(dist, 4)
+            diag["sl_reject_reason"] = "sl_too_close"
+            return diag
+        # widen using the minimum distance floor
+        if side == LONG:
+            sl = entry_price * (1.0 - min_pct / 100.0)
+        else:
+            sl = entry_price * (1.0 + min_pct / 100.0)
+        dist = min_pct
+        diag["sl_widened"] = True
+
+    diag["stop_loss"] = round(sl, 8)
+    diag["sl_distance_percent"] = round(dist, 4)
+    diag["sl_valid"] = True
+    return diag
+
+
+def _extract_prev_1d(df_1d) -> Optional[dict]:
+    """
+    Previous completed daily candle OHLC + ATR(1D) from a 1D kline DataFrame.
+
+    Binance returns the in-progress candle as the last row, so the previous
+    *completed* candle is iloc[-2]. Returns None if data is insufficient.
+    """
+    if df_1d is None or len(df_1d) < 16:
+        return None
+    try:
+        from app.indicators import atr as _atr
+
+        prev = df_1d.iloc[-2]
+        atr_series = _atr(df_1d, 14).dropna()
+        atr_1d = float(atr_series.iloc[-1]) if len(atr_series) else 0.0
+        ot = df_1d["open_time"].iloc[-2]
+        return {
+            "low": float(prev["low"]),
+            "high": float(prev["high"]),
+            "open": float(prev["open"]),
+            "close": float(prev["close"]),
+            "time": ot.isoformat() if hasattr(ot, "isoformat") else str(ot),
+            "atr_1d": atr_1d,
+        }
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(f"prev-1D extract failed: {exc}")
+        return None
+
+
 def build_levels(
     snap: FeatureSnapshot,
     side: str,
     liq_signal=None,  # Optional[LiquiditySignal]
+    df_1d=None,       # Optional[pd.DataFrame] — 1D klines for the V2 SL engine
 ) -> Optional[TradeLevels]:
     """
     Compute trade levels with dynamic RR selection.
@@ -128,10 +252,45 @@ def build_levels(
     entry_low = price - entry_pad
     entry_high = price + entry_pad
 
+    # ── Stop-Loss Engine V2: previous-1D support/resistance stop ──────
+    sl_diag: dict = {}
+    v2_sl: Optional[float] = None
+    if settings.stoploss_engine_v2_enabled and settings.stoploss_method == "PREV_1D_SUPPORT":
+        prev = _extract_prev_1d(df_1d)
+        if prev is not None:
+            res = compute_prev_1d_stop(
+                side, price, prev["low"], prev["high"], prev["atr_1d"],
+                buffer_mult=settings.stoploss_1d_buffer_atr_mult,
+                min_pct=settings.min_sl_distance_percent,
+                max_pct=settings.max_sl_distance_percent,
+                too_close_action=settings.stoploss_too_close_action,
+            )
+            res["prev_1d_time"] = prev["time"]
+            sl_diag = res
+            if not res["sl_valid"]:
+                logger.info(
+                    f"⛔ {snap.symbol} {side} — SL V2 reject: "
+                    f"{res['sl_reject_reason']} (dist={res.get('sl_distance_percent')}%)"
+                )
+                return None
+            v2_sl = float(res["stop_loss"])
+        else:
+            # No usable 1D data → fall back to the legacy stop (do not reject).
+            sl_diag = {
+                "stoploss_method": "PREV_1D_SUPPORT",
+                "sl_valid": False,
+                "sl_reject_reason": "no_1d_data",
+                "fallback": "legacy",
+            }
+
     if side == "LONG":
-        swing_sl = snap.recent_low - 0.2 * atr
-        atr_sl = price - 1.8 * atr
-        sl = min(swing_sl, atr_sl)
+        if v2_sl is not None:
+            sl = v2_sl
+        else:
+            swing_sl = snap.recent_low - 0.2 * atr
+            atr_sl = price - 1.8 * atr
+            sl = min(swing_sl, atr_sl)
+            sl_diag.setdefault("stoploss_method", "structure" if sl == swing_sl else "atr")
         risk = price - sl
         if risk <= 0:
             return None
@@ -146,9 +305,13 @@ def build_levels(
         tp3 = price + 3.5 * risk
 
     else:  # SHORT
-        swing_sl = snap.recent_high + 0.2 * atr
-        atr_sl = price + 1.8 * atr
-        sl = max(swing_sl, atr_sl)
+        if v2_sl is not None:
+            sl = v2_sl
+        else:
+            swing_sl = snap.recent_high + 0.2 * atr
+            atr_sl = price + 1.8 * atr
+            sl = max(swing_sl, atr_sl)
+            sl_diag.setdefault("stoploss_method", "structure" if sl == swing_sl else "atr")
         risk = sl - price
         if risk <= 0:
             return None
@@ -162,6 +325,12 @@ def build_levels(
         tp1 = price - 1.2 * risk
         tp3 = price - 3.5 * risk
 
+    # Finalize SL diagnostics (legacy path or V2 with derived distance).
+    sl_diag.setdefault("stop_loss", round(sl, 8))
+    if sl_diag.get("sl_distance_percent") is None:
+        sl_diag["sl_distance_percent"] = round(abs(price - sl) / price * 100.0, 4)
+    sl_diag.setdefault("sl_valid", True)
+
     return TradeLevels(
         entry_low=min(entry_low, entry_high),
         entry_high=max(entry_low, entry_high),
@@ -171,4 +340,5 @@ def build_levels(
         tp3=tp3,
         risk_reward=round(rr, 2),
         rr_method=rr_method,
+        sl_diag=sl_diag,
     )

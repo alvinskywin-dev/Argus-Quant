@@ -188,7 +188,7 @@ class MarketScanner:
                     logger.debug(f"liquidity engine failed for {symbol}: {exc}")
 
             # ── Sprint 16C: Dynamic RR ────────────────────────────────────
-            levels = build_levels(primary_snap, decision.side, liq_signal)
+            levels = build_levels(primary_snap, decision.side, liq_signal, df_1d=dfs.get("1d"))
             if levels is None:
                 if settings.log_rejection_detail:
                     logger.info(
@@ -420,6 +420,8 @@ class MarketScanner:
                 # Sprint 19B
                 "short_protection_pass":    short_protection.passed,
                 "short_rejection_reason":   short_protection.rejection_reason,
+                # Stop-Loss Engine V2 — SL placement diagnostics
+                **levels.sl_diag,
             })
 
             return {

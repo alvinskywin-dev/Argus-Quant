@@ -153,6 +153,20 @@ class Settings(BaseSettings):
     order_failure_breaker_window_sec: int = 300
     tp_sl_retry_max: int = 3                    # TP/SL placement retries before UNSAFE
 
+    # --- Stop-Loss Engine V2 (previous-1D support/resistance stop) ---
+    # When enabled and STOPLOSS_METHOD=PREV_1D_SUPPORT, the LONG stop is placed
+    # below the previous completed 1D candle low (SHORT: above the prev 1D high)
+    # plus an ATR buffer, with min/max distance guards. Disabled by default →
+    # falls back to the legacy 15m ATR/structure stop. Only affects SL + TP/RR
+    # derived from risk; signal/scanner/entry decisions are unchanged.
+    stoploss_engine_v2_enabled: bool = False
+    stoploss_method: str = "PREV_1D_SUPPORT"     # PREV_1D_SUPPORT | LEGACY
+    stoploss_1d_buffer_atr_mult: float = 0.15    # buffer = mult * ATR(1D)
+    min_sl_distance_percent: float = 2.0         # widen (or reject) if SL closer than this
+    max_sl_distance_percent: float = 10.0        # reject signal if SL farther than this
+    # When the 1D stop is closer than the min floor: "widen" to the floor, or "reject".
+    stoploss_too_close_action: str = "widen"     # widen | reject
+
     # --- Sprint 21F — Binance live/testnet validation (read-only) ---
     # Gate the admin-only Binance preflight endpoint. The preflight is strictly
     # read-only (server time, balance, exchangeInfo, positions — never an order),
