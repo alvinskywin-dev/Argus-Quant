@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 from urllib.parse import urlencode
 
-from app.config import settings
+from app.exchange_adapters import live_gate_open
 from app.exchange_adapters.base import (
     MODE_LIVE,
     AdapterError,
@@ -66,7 +66,9 @@ class OKXAdapter(ExchangeAdapter):
 
     @staticmethod
     def _guard() -> None:
-        if not settings.live_trading_enabled or settings.mock_exchange_mode:
+        # Defense-in-depth: re-check the single canonical gate at the network
+        # chokepoint, even though resolve_adapter already gated construction.
+        if not live_gate_open():
             raise AdapterError("Live-trading gate is closed; refusing real OKX order.")
 
     async def _client(self):

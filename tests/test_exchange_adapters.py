@@ -114,6 +114,58 @@ def test_binance_guard_passes_when_gate_open(gate):
     BinanceFuturesAdapter._guard()  # should not raise
 
 
+# ── live-safety audit V2: every live adapter guards identically ────
+# All four guards must delegate to the single canonical live_gate_open() so
+# they can never drift from the gate definition. Exercised across the full
+# flag matrix; only (live=True, mock=False) may pass.
+
+_GUARDS = [
+    BinanceFuturesAdapter._guard,
+    OKXAdapter._guard,
+    BybitAdapter._guard,
+    BitgetAdapter._guard,
+]
+
+_CLOSED_STATES = [
+    (False, True),  # default
+    (True, True),  # live on but mock also on -> closed
+    (False, False),  # live off -> closed
+]
+
+
+@pytest.mark.parametrize("guard", _GUARDS, ids=["binance", "okx", "bybit", "bitget"])
+@pytest.mark.parametrize("live_on,mock_on", _CLOSED_STATES)
+def test_all_adapter_guards_refuse_when_gate_closed(gate, guard, live_on, mock_on):
+    gate.live_trading_enabled = live_on
+    gate.mock_exchange_mode = mock_on
+    assert not live_gate_open()
+    with pytest.raises(AdapterError):
+        guard()
+
+
+@pytest.mark.parametrize("guard", _GUARDS, ids=["binance", "okx", "bybit", "bitget"])
+def test_all_adapter_guards_pass_only_when_gate_open(gate, guard):
+    gate.live_trading_enabled = True
+    gate.mock_exchange_mode = False
+    assert live_gate_open()
+    guard()  # must not raise
+
+
+@pytest.mark.parametrize("guard", _GUARDS, ids=["binance", "okx", "bybit", "bitget"])
+def test_guards_track_canonical_gate_definition(gate, guard, monkeypatch):
+    """A guard must follow live_gate_open(), not a divergent inline copy.
+
+    If the canonical gate is forced closed, the guard must refuse even while
+    the raw flags read 'open' — proving delegation to the single source."""
+    gate.live_trading_enabled = True
+    gate.mock_exchange_mode = False
+    # Each adapter imports live_gate_open into its own module namespace, so
+    # patch it there (guard.__module__ == 'app.exchange_adapters.<exchange>').
+    monkeypatch.setattr(f"{guard.__module__}.live_gate_open", lambda: False)
+    with pytest.raises(AdapterError):
+        guard()
+
+
 # ── mock adapter behaviour ────────────────────────────────────────
 
 
