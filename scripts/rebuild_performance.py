@@ -25,6 +25,7 @@ Usage:
     python scripts/rebuild_performance.py
     docker compose exec bot python scripts/rebuild_performance.py
 """
+
 from __future__ import annotations
 
 import asyncio
