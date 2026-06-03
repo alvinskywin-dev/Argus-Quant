@@ -102,6 +102,11 @@ def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+def constant_time_equals(a: str, b: str) -> bool:
+    """Timing-safe string comparison (e.g. for OAuth CSRF state)."""
+    return secrets.compare_digest(str(a), str(b))
+
+
 # ── TOTP 2FA ──────────────────────────────────────────────────────
 
 

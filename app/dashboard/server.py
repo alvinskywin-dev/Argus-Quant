@@ -117,7 +117,7 @@ CONTENT_SECURITY_POLICY = "; ".join(
         "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com",
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
         "font-src 'self' https://fonts.gstatic.com",
-        "img-src 'self' data:",
+        "img-src 'self' data: https://*.googleusercontent.com",
         "connect-src 'self'",
         "object-src 'none'",
         "base-uri 'self'",

@@ -206,6 +206,14 @@ class Settings(BaseSettings):
     account_lockout_minutes: int = 15
     app_base_url: str = "http://localhost:8010"
     auth_issuer: str = "Argus Quant"
+
+    # ── P11 — Google OAuth (feature-flagged; default OFF, no secrets in code) ──
+    google_oauth_enabled: bool = False
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_redirect_uri: str = ""
+    oauth_success_redirect: str = "/app#/dashboard"
+    oauth_failure_redirect: str = "/login?error=oauth_failed"
     # SMTP (optional — if smtp_host is blank, emails are logged, never sent)
     smtp_host: str = ""
     smtp_port: int = 587

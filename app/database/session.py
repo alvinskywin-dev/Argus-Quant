@@ -81,6 +81,12 @@ _SCHEMA_UPGRADES: list[str] = [
     # ── Timezone System V1 — per-user display timezone (DB stays UTC) ──
     "ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS timezone VARCHAR(64) DEFAULT 'UTC'",
     "UPDATE auth_users SET timezone = 'UTC' WHERE timezone IS NULL",
+    # ── P11 — Google OAuth identity columns on auth_users ──
+    "ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS provider VARCHAR(16) DEFAULT 'email'",
+    "ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS provider_user_id VARCHAR(64)",
+    "ALTER TABLE auth_users ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(512)",
+    "UPDATE auth_users SET provider = 'email' WHERE provider IS NULL",
+    "CREATE INDEX IF NOT EXISTS ix_auth_users_provider_uid ON auth_users(provider_user_id)",
 ]
 
 engine = create_async_engine(

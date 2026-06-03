@@ -72,6 +72,11 @@ class UserOut(BaseModel):
     last_login_at: Optional[datetime]
     # Timezone System V1 — display preference; always a supported IANA zone.
     timezone: str = "UTC"
+    # P11 — identity provider ("email" or "google"), optional avatar, and a
+    # convenience login-method label for the profile UI.
+    provider: str = "email"
+    avatar_url: Optional[str] = None
+    login_method: str = "Email"
 
 
 class UpdateTimezoneIn(BaseModel):

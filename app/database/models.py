@@ -300,6 +300,13 @@ class AuthUser(Base):
     )  # ACTIVE / SUSPENDED / PENDING
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # P11 — identity provider. "email" (password) or "google". provider_user_id
+    # is the provider's stable subject id (Google `sub`); unique when present so
+    # the same Google account can never spawn two rows. avatar_url is optional.
+    provider: Mapped[str] = mapped_column(String(16), default="email", server_default="email")
+    provider_user_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    avatar_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+
     # Timezone System V1 — display preference only (DB stays UTC). One of the
     # supported IANA zones; defaults to UTC. Does NOT change the meaning of
     # created_at / updated_at, which remain UTC.

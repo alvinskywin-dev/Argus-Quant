@@ -359,6 +359,7 @@ function renderLanding(){
     <div class="auth-card"><div class="auth-box">
       <h3>Sign in</h3><div class="mut">Access your trading portal.</div>
       <div id="autherr"></div>
+      <div id="googlebox"></div>
       <div class="field"><label>Email</label><input id="email" type="email" placeholder="you@example.com" autocomplete="username"></div>
       <div class="field"><label>Password</label><input id="pw" type="password" placeholder="••••••••" autocomplete="current-password"></div>
       <div class="field hide" id="totpf"><label>2FA Code</label><input id="totp" inputmode="numeric" placeholder="123456"></div>
@@ -383,6 +384,21 @@ function renderLanding(){
   $("#loginbtn").onclick=doLogin;
   $("#pw").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();});
   $("#showreg").onclick=renderRegister;
+  renderGoogleButton();
+}
+// P11: show "Continue with Google" only when the provider is configured, else a
+// quiet "not configured" note. Full-page navigation (not fetch) starts the flow.
+async function renderGoogleButton(){
+  const box=$("#googlebox"); if(!box) return;
+  let on=false;
+  try{ const r=await api("/api/auth/google/status",{auth:false}); on=(r&&r.message==="enabled"); }catch(_){}
+  if(on){
+    box.innerHTML=`<a class="btn" id="gbtn" href="/api/auth/google/login" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:6px">
+      <span style="font-weight:700;color:#4285F4">G</span> Continue with Google</a>
+      <div class="mut" style="text-align:center;margin:6px 0 12px">or use email</div>`;
+  } else {
+    box.innerHTML=`<div class="mut" style="text-align:center;margin:2px 0 12px">Google Login not configured</div>`;
+  }
 }
 function renderRegister(){
   $("#autherr") && ($("#autherr").innerHTML="");
@@ -872,9 +888,11 @@ PAGES.profile = async (v) => {
   const me=await tryGet("/api/auth/me"); if(me.data)ME=me.data;
   const U=ME;
   v.innerHTML=`<div class="grid g2">
-    <div class="card pad"><div class="row" style="align-items:center;gap:16px"><div class="avatar" style="width:56px;height:56px;font-size:22px">${esc((U.email||"?")[0].toUpperCase())}</div>
+    <div class="card pad"><div class="row" style="align-items:center;gap:16px">${U.avatar_url?`<img class="avatar" src="${esc(U.avatar_url)}" alt="" referrerpolicy="no-referrer" style="width:56px;height:56px;object-fit:cover"/>`:`<div class="avatar" style="width:56px;height:56px;font-size:22px">${esc((U.email||"?")[0].toUpperCase())}</div>`}
       <div><div style="font-size:18px;font-weight:800">${esc(U.username||U.email.split("@")[0])}</div><div class="sub">${esc(U.email)}</div><div style="margin-top:6px">${badge(U.role)} ${U.is_verified?badge("OK"):badge("PENDING")}</div></div></div>
       <div class="kv" style="margin-top:16px"><span>Account ID</span><b>#${U.id}</b></div>
+      <div class="kv"><span>Login method</span><b>${esc(U.login_method||(U.provider==="google"?"Google":"Email"))}</b></div>
+      <div class="kv"><span>Email verified</span><b>${U.is_verified?'<span class="pos">Yes</span>':'<span class="neg">No</span>'}</b></div>
       <div class="kv"><span>Member since</span><b>${when(U.created_at)}</b></div>
       <div class="kv"><span>Last login</span><b>${when(U.last_login_at)}</b></div>
       <div class="kv"><span>2FA</span><b>${U.totp_enabled?'<span class="pos">Enabled</span>':'<span class="neg">Disabled</span>'}</b></div>
@@ -1000,7 +1018,21 @@ let HASH_T=null;
 window.addEventListener("hashchange", ()=>{ clearTimeout(HASH_T); HASH_T=setTimeout(route, 30); });
 
 // ── boot ───────────────────────────────────────────────────────────
+// P11: consume a Google OAuth token handoff (?oauth_at=&oauth_rt=) placed on
+// the URL by /api/auth/google/callback, then strip it from the address bar so
+// tokens never linger in history or get shared.
+function consumeOAuthHandoff(){
+  const q = new URLSearchParams(location.search);
+  const at = q.get("oauth_at"), rt = q.get("oauth_rt");
+  if(!at) return;
+  TK.set(at, rt);
+  q.delete("oauth_at"); q.delete("oauth_rt");
+  const qs = q.toString();
+  history.replaceState(null, "", location.pathname + (qs?"?"+qs:"") + location.hash);
+}
+
 async function boot(){
+  consumeOAuthHandoff();
   if(!TK.a){ renderLanding(); return; }
   try{ ME = await api("/api/auth/me"); }
   catch(e){ TK.clear(); renderLanding(); return; }

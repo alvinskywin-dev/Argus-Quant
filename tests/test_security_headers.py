@@ -41,8 +41,9 @@ def test_csp_allows_every_origin_the_ui_loads():
     assert "https://fonts.gstatic.com" in csp
     # Inline server-rendered blocks/handlers require unsafe-inline.
     assert "'unsafe-inline'" in csp
-    # QR codes render to data: URLs.
-    assert "img-src 'self' data:" in csp
+    # QR codes render to data: URLs; Google profile avatars (P11) come from
+    # the googleusercontent CDN.
+    assert "img-src 'self' data: https://*.googleusercontent.com" in csp
 
 
 def test_csp_keeps_hardening_directives():

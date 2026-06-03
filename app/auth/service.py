@@ -55,6 +55,18 @@ async def get_user_by_username(db: AsyncSession, username: str) -> Optional[Auth
     return res.scalar_one_or_none()
 
 
+async def get_user_by_provider(
+    db: AsyncSession, provider: str, provider_user_id: str
+) -> Optional[AuthUser]:
+    res = await db.execute(
+        select(AuthUser).where(
+            AuthUser.provider == provider,
+            AuthUser.provider_user_id == provider_user_id,
+        )
+    )
+    return res.scalar_one_or_none()
+
+
 # ── registration ──────────────────────────────────────────────────
 
 
@@ -154,6 +166,80 @@ async def _register_failure(db: AsyncSession, user: AuthUser) -> None:
     if user.failed_login_count >= settings.account_lockout_threshold:
         user.locked_until = _now() + timedelta(minutes=settings.account_lockout_minutes)
         logger.warning(f"[auth] account locked id={user.id} until {user.locked_until}")
+
+
+# ── OAuth (Google) login / linking ────────────────────────────────
+
+# OAuth accounts have no usable password. This non-bcrypt sentinel makes
+# email/password login impossible for them (verify_password rejects any
+# non-bcrypt hash) without needing a nullable password column.
+OAUTH_NO_PASSWORD = "!google-oauth-no-password"
+
+
+async def login_or_link_google(
+    db: AsyncSession,
+    *,
+    sub: str,
+    email: str,
+    email_verified: bool,
+    name: Optional[str] = None,
+    picture: Optional[str] = None,
+    ip: Optional[str] = None,
+    device: Optional[str] = None,
+) -> tuple[AuthUser, str, str]:
+    """Resolve a Google identity to a session, creating or linking as needed.
+
+    Order: (1) already linked to this Google sub → log in; (2) an email account
+    exists → link Google to it (password login still works); (3) otherwise
+    create a new FREE/ACTIVE/UTC account. Returns (user, access, refresh).
+    """
+    email = (email or "").strip().lower()
+    if not email:
+        raise AuthError(400, "Google account has no email")
+    if not email_verified:
+        raise AuthError(403, "Google email is not verified")
+
+    created = False
+    user = await get_user_by_provider(db, "google", sub)
+    if user is None:
+        user = await get_user_by_email(db, email)
+        if user is not None:
+            # Link Google to the existing account; keep its password intact.
+            user.provider = "google"
+            user.provider_user_id = sub
+            user.is_verified = True
+            if picture and not getattr(user, "avatar_url", None):
+                user.avatar_url = picture
+        else:
+            user = AuthUser(
+                email=email,
+                username=None,
+                password_hash=OAUTH_NO_PASSWORD,
+                role="FREE",
+                status="ACTIVE",
+                is_verified=True,
+                provider="google",
+                provider_user_id=sub,
+                avatar_url=picture or None,
+                timezone="UTC",
+            )
+            db.add(user)
+            await db.flush()  # populate user.id
+            created = True
+
+    if user.status == "SUSPENDED":
+        await _record_login(db, user, email, ip, device, success=False, detail="suspended")
+        raise AuthError(403, "Account suspended")
+
+    user.last_login_at = _now()
+    user.failed_login_count = 0
+    user.locked_until = None
+
+    access = security.create_access_token(user.id, user.role)
+    refresh = await _create_session(db, user, ip, device)
+    await _record_login(db, user, email, ip, device, success=True, detail="google")
+    logger.info(f"[auth] google login id={user.id} email={email} created={created}")
+    return user, access, refresh
 
 
 # ── sessions / refresh ────────────────────────────────────────────

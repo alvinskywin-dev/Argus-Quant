@@ -7,10 +7,12 @@ All persistence goes through app.auth.service; this layer only handles HTTP.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, Request
-from fastapi.responses import JSONResponse
+from urllib.parse import urlencode
 
-from app.auth import service
+from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import JSONResponse, RedirectResponse
+
+from app.auth import google_oauth, service
 from app.auth.deps import (
     client_device,
     client_ip,
@@ -57,6 +59,9 @@ def _user_out(user: AuthUser) -> UserOut:
         created_at=user.created_at,
         last_login_at=user.last_login_at,
         timezone=getattr(user, "timezone", None) or "UTC",
+        provider=getattr(user, "provider", None) or "email",
+        avatar_url=getattr(user, "avatar_url", None),
+        login_method="Google" if (getattr(user, "provider", None) == "google") else "Email",
     )
 
 
@@ -98,6 +103,89 @@ async def login(body: LoginIn, request: Request):
             return _tokens(access, refresh)
     except service.AuthError as exc:
         return _err(exc)
+
+
+# ── Google OAuth (P11) ─────────────────────────────────────────────
+
+
+def _cookie_secure() -> bool:
+    """Mark the state cookie Secure when the redirect runs over https."""
+    return settings.google_redirect_uri.lower().startswith("https")
+
+
+def _success_url_with_tokens(access: str, refresh: str) -> str:
+    """Hand tokens to the SPA via the query string (kept out of the hash route
+    so it still lands on #/dashboard). The SPA consumes and strips them on boot;
+    the fragment carries no tokens, and the query is never logged server-side."""
+    path, _, frag = settings.oauth_success_redirect.partition("#")
+    qs = urlencode({"oauth_at": access, "oauth_rt": refresh})
+    sep = "&" if "?" in path else "?"
+    new_path = f"{path}{sep}{qs}"
+    return f"{new_path}#{frag}" if frag else new_path
+
+
+@router.get("/google/login")
+async def google_login():
+    """Redirect to Google's consent screen (or to the failure page if off)."""
+    if not google_oauth.enabled():
+        return RedirectResponse(settings.oauth_failure_redirect, status_code=302)
+    state = google_oauth.generate_state()
+    resp = RedirectResponse(google_oauth.authorization_url(state), status_code=302)
+    resp.set_cookie(
+        key=google_oauth.STATE_COOKIE,
+        value=state,
+        max_age=google_oauth.STATE_COOKIE_MAX_AGE,
+        httponly=True,
+        samesite="lax",
+        secure=_cookie_secure(),
+        path="/api/auth/google",
+    )
+    return resp
+
+
+@router.get("/google/callback")
+async def google_callback(
+    request: Request,
+    code: str = Query(default=""),
+    state: str = Query(default=""),
+    error: str = Query(default=""),
+):
+    """Validate state, exchange the code, and log the user in, then redirect to
+    the SPA. Any failure redirects to the configured failure page (no detail
+    leaked into the URL)."""
+    fail = RedirectResponse(settings.oauth_failure_redirect, status_code=302)
+    fail.delete_cookie(google_oauth.STATE_COOKIE, path="/api/auth/google")
+    if not google_oauth.enabled():
+        return fail
+    try:
+        if error or not code:
+            raise google_oauth.OAuthError(400, "Google authorization was not completed")
+        google_oauth.validate_state(request.cookies.get(google_oauth.STATE_COOKIE), state)
+        id_token = await google_oauth.exchange_code(code)
+        ident = google_oauth.extract_identity(id_token)
+        async with get_session() as db:
+            _user, access, refresh = await service.login_or_link_google(
+                db,
+                sub=ident["sub"],
+                email=ident["email"],
+                email_verified=ident["email_verified"],
+                name=ident["name"],
+                picture=ident["picture"],
+                ip=client_ip(request),
+                device=client_device(request),
+            )
+    except (google_oauth.OAuthError, service.AuthError):
+        return fail
+
+    resp = RedirectResponse(_success_url_with_tokens(access, refresh), status_code=302)
+    resp.delete_cookie(google_oauth.STATE_COOKIE, path="/api/auth/google")
+    return resp
+
+
+@router.get("/google/status", response_model=MessageOut)
+async def google_status():
+    """Public: lets the login page know whether to show the Google button."""
+    return MessageOut(message="enabled" if google_oauth.enabled() else "disabled")
 
 
 @router.post("/refresh", response_model=TokenOut)
