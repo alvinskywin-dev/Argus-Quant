@@ -156,6 +156,17 @@ class Settings(BaseSettings):
     live_pilot_allowed_symbols: str = "BTCUSDT,ETHUSDT"
     live_pilot_require_confirmation: bool = True
 
+    # ── Multi-user Live Beta — controlled live access (default OFF) ──
+    live_beta_enabled: bool = False
+    live_beta_max_users: int = 10
+    live_beta_require_admin_approval: bool = True
+    live_beta_invite_code: str = ""  # if set, required to request access
+    live_beta_global_max_notional: float = 500.0  # cap across ALL beta users
+    live_beta_default_user_max_notional: float = 100.0
+    live_beta_default_max_positions: int = 2
+    live_beta_per_symbol_max_notional: float = 100.0
+    live_beta_allowed_exchanges: str = "binance"
+
     # --- Sprint 21 — Live Safety Foundation feature flags (all default OFF) ---
     # These engines are read-only / non-destructive by design; the flags only
     # gate whether their APIs + startup hooks are active. None of them place,

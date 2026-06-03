@@ -2656,6 +2656,14 @@ def create_app():
             setup_accounting(app)
         except Exception as exc:  # noqa: BLE001
             print(f"accounting setup skipped (non-fatal): {exc!r}")
+    # Multi-user Live Beta — membership API (controlled live access).
+    if settings.live_beta_enabled:
+        try:
+            from app.live_beta import setup_live_beta
+
+            setup_live_beta(app)
+        except Exception as exc:  # noqa: BLE001
+            print(f"live beta setup skipped (non-fatal): {exc!r}")
     # V12 — mount the SaaS portal shell at /app (static; APIs stay flag-gated).
     try:
         from app.dashboard.saas_app import setup_saas_app

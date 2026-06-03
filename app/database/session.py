@@ -117,6 +117,7 @@ async def init_db() -> None:
     # avoid import cycles with app.database.models.
     try:
         import app.accounting.models  # noqa: F401
+        import app.live_beta.models  # noqa: F401
         import app.order_failures.models  # noqa: F401
         import app.reconciliation.models  # noqa: F401
     except Exception as exc:  # noqa: BLE001 — missing optional module is non-fatal

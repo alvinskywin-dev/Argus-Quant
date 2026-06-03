@@ -136,6 +136,19 @@ async def open_position(
         await _audit(db, user_id, exchange, symbol, "OPEN", "REJECTED", mode, blocked)
         raise LiveTradingError(403, f"Blocked by safety: {blocked}")
 
+    # Multi-user Live Beta gate (no-op unless LIVE_BETA_ENABLED). Enforces the
+    # per-user / per-symbol / global exposure envelope for beta members.
+    from app.live_beta import service as live_beta
+
+    if live_beta.beta_enabled():
+        est_notional = float(notional_usdt or (quantity or 0) * (entry_price or pmath_mark(symbol)))
+        beta_block = await live_beta.beta_gate(
+            db, user_id=user_id, exchange=exchange, symbol=symbol, notional_usdt=est_notional
+        )
+        if beta_block:
+            await _audit(db, user_id, exchange, symbol, "OPEN", "REJECTED", mode, beta_block)
+            raise LiveTradingError(403, f"Blocked by live beta: {beta_block}")
+
     try:
         adapter = await _adapter_for(db, user_id, exchange)
     except vault.VaultError as exc:

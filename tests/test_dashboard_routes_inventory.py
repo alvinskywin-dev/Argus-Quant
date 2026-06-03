@@ -27,6 +27,7 @@ _ROUTER_FLAGS = (
     "position_recovery_enabled",
     "order_failure_engine_enabled",
     "accounting_enabled",
+    "live_beta_enabled",
 )
 
 # Baseline captured after the Phase 4 decomposition (+ P11/pilot routes). Every
@@ -96,6 +97,12 @@ BASELINE_ROUTES = frozenset(
         "/api/live/positions/{position_id}/emergency-close",
         "/api/live/status",
         "/api/live/trades",
+        "/api/live-beta/request",
+        "/api/live-beta/status",
+        "/api/live-beta/admin/members",
+        "/api/live-beta/admin/approve",
+        "/api/live-beta/admin/reject",
+        "/api/live-beta/admin/suspend",
         "/api/oi/status",
         "/api/order-failures",
         "/api/order-failures/list",
