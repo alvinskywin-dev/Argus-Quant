@@ -23,6 +23,7 @@ from app.database.models import (
 )
 from app.database.session import SessionLocal
 from app.market_data import universe
+from app.utils.observability import CorrelationMiddleware
 from app.utils.timezone import normalize_utc_iso
 
 # ── auth ──────────────────────────────────────────────────────────
@@ -116,6 +117,9 @@ class _SecurityHeaders(BaseHTTPMiddleware):
 
 
 app.add_middleware(_SecurityHeaders)
+# Added last → outermost: assigns the correlation id before any other
+# middleware runs, so security-header and route logs share one request id.
+app.add_middleware(CorrelationMiddleware)
 
 
 # ── stats helper ──────────────────────────────────────────────────

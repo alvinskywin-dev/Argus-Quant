@@ -27,6 +27,7 @@ from app.database.models import FundingRateSnapshot, OpenInterestSnapshot, Signa
 from app.database.session import SessionLocal
 from app.market_data import universe
 from app.market_data.ws_engine import ws_health
+from app.utils.observability import METRICS
 from app.utils.timezone import normalize_utc_iso
 
 router = APIRouter()
@@ -378,6 +379,7 @@ async def api_funding_status():
 @router.get("/metrics")
 async def metrics():
     wsh = ws_health()
+    m = METRICS.snapshot()
     lines = [
         "# HELP alpha_radar_universe_size Total symbols in universe",
         "# TYPE alpha_radar_universe_size gauge",
@@ -388,6 +390,24 @@ async def metrics():
         "# HELP alpha_radar_ws_ok WebSocket price feed health (1=ok,0=stale)",
         "# TYPE alpha_radar_ws_ok gauge",
         f"alpha_radar_ws_ok {1 if wsh.get('ok') else 0}",
+        "# HELP alpha_radar_http_requests_total HTTP requests by status class",
+        "# TYPE alpha_radar_http_requests_total counter",
+    ]
+    for status_class, count in sorted(m["http_requests_total"].items()):
+        lines.append(f'alpha_radar_http_requests_total{{status="{status_class}"}} {count}')
+    lines += [
+        "# HELP alpha_radar_http_request_errors_total HTTP 5xx responses",
+        "# TYPE alpha_radar_http_request_errors_total counter",
+        f"alpha_radar_http_request_errors_total {m['http_requests_errors_total']}",
+        "# HELP alpha_radar_http_requests_in_flight In-flight HTTP requests",
+        "# TYPE alpha_radar_http_requests_in_flight gauge",
+        f"alpha_radar_http_requests_in_flight {m['http_requests_in_flight']}",
+        "# HELP alpha_radar_http_request_duration_seconds_sum Total request time",
+        "# TYPE alpha_radar_http_request_duration_seconds_sum counter",
+        f"alpha_radar_http_request_duration_seconds_sum {m['http_request_duration_sum']}",
+        "# HELP alpha_radar_http_request_duration_seconds_count Completed requests",
+        "# TYPE alpha_radar_http_request_duration_seconds_count counter",
+        f"alpha_radar_http_request_duration_seconds_count {m['http_request_duration_count']}",
     ]
     return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
 

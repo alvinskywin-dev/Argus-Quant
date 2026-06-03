@@ -25,6 +25,11 @@ STALE_AFTER_SEC = 5.0
 
 PRICE_URL = "https://fapi.binance.com/fapi/v1/ticker/price"
 
+# Reconnect/backoff tuning for the price-poll loop.
+POLL_INTERVAL_SEC = 2.0  # steady-state cadence between successful polls
+BACKOFF_BASE_SEC = 2.0  # first delay after a loop-level failure
+BACKOFF_MAX_SEC = 60.0  # cap so a long outage still retries once a minute
+
 
 def register_symbols(symbols) -> None:
     """Add symbols to the polled set so the loop keeps their price fresh."""
@@ -102,6 +107,8 @@ async def ensure_prices(symbols) -> None:
 async def ws_price_loop() -> None:
     global last_ws_update
 
+    backoff = BACKOFF_BASE_SEC
+
     while True:
         try:
             symbols = sorted(_tracked)
@@ -118,10 +125,19 @@ async def ws_price_loop() -> None:
 
             logger.info(f"realtime price cache updated: {len(latest_prices)} symbols")
 
-        except Exception as exc:
-            logger.warning(f"price cache error: {exc}")
+            # Healthy cycle — reset backoff and resume steady cadence.
+            backoff = BACKOFF_BASE_SEC
+            await asyncio.sleep(POLL_INTERVAL_SEC)
 
-        await asyncio.sleep(2)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            # Loop-level failure (e.g. session/DNS outage): back off
+            # exponentially with a cap so we neither hammer Binance nor stop
+            # retrying during a prolonged outage.
+            logger.warning(f"price cache error: {exc} — retrying in {backoff:.0f}s")
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, BACKOFF_MAX_SEC)
 
 
 def ws_health() -> dict:

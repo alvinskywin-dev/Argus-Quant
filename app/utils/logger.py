@@ -50,9 +50,14 @@ def setup_logging() -> None:
 
     logger.remove()
 
+    # Ensure {extra[request_id]} is always renderable, even for log records
+    # emitted outside an HTTP request (scanner loops, startup, background jobs).
+    logger.configure(extra={"request_id": "-"})
+
     fmt = (
         "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
         "<level>{level:<8}</level> | "
+        "<magenta>{extra[request_id]}</magenta> | "
         "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | "
         "<level>{message}</level>"
     )
