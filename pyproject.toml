@@ -1,0 +1,62 @@
+# ARGUS QUANT — tooling configuration.
+# Test config intentionally stays in pytest.ini (single source of truth).
+
+# ─────────────────────────── Ruff (lint + import sort) ───────────────────────
+[tool.ruff]
+target-version = "py311"   # match the Docker runtime (python:3.11-slim)
+line-length = 100
+extend-exclude = [
+    "app/database/migrations",   # one-off operational scripts
+    "archive",
+    "backups",
+]
+
+[tool.ruff.lint]
+# Pragmatic, high-signal set. E501 is delegated to Black; broader stylistic /
+# pyupgrade rewrites (UP/B) are deliberately deferred to avoid churning the
+# trading engine in one pass — they can be ratcheted in later (Phase 12).
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# market_regime scoring is an intentional column-aligned table (signal logic —
+# not to be reformatted). __init__ re-exports are not "unused".
+"app/market_data/market_regime.py" = ["E701"]
+"**/__init__.py" = ["F401"]
+"tests/*" = ["F401", "F811"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+# ─────────────────────────── Black (formatter) ───────────────────────────────
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+extend-exclude = '''
+/(
+    app/database/migrations
+  | archive
+  | backups
+)/
+'''
+
+# ─────────────────────────── MyPy (advisory type gate) ───────────────────────
+# Pragmatic typing per project guidance: do NOT over-type legacy async
+# SQLAlchemy internals. Optional-access noise (union-attr) and untyped-def
+# notes are silenced; missing third-party stubs are ignored. This gate is
+# ADVISORY in CI (does not block PRs yet) and ratchets to blocking as modules
+# gain annotations — see .github/workflows/ci.yml and ARGUS_QUANT_PRODUCTION_REVIEW.md.
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+disable_error_code = ["union-attr", "annotation-unchecked"]
+warn_unused_ignores = true          # keep "noqa/ignore" debt honest
+warn_redundant_casts = true
+no_implicit_optional = true
+follow_imports = "silent"
+exclude = [
+    "app/database/migrations/",
+    "tests/",
+    "archive/",
+    "backups/",
+]
