@@ -13,6 +13,16 @@ from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def _norm_base_symbol(sym: str) -> str:
+    """Upper-case a symbol and strip a trailing USDT/USD/BUSD/PERP quote so
+    ``BTCUSDT`` -> ``BTC``. Used to match symbols to correlation groups."""
+    s = (sym or "").strip().upper()
+    for suffix in ("USDT", "BUSD", "USDC", "PERP", "USD"):
+        if s.endswith(suffix) and len(s) > len(suffix):
+            return s[: -len(suffix)]
+    return s
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -229,6 +239,52 @@ class Settings(BaseSettings):
     # When the 1D stop is closer than the min floor: "widen" to the floor, or "reject".
     stoploss_too_close_action: str = "widen"  # widen | reject
 
+    # ══════════════════════════════════════════════════════════════════
+    #  SPRINT 22 — Institutional Risk & Execution Upgrade (all default OFF)
+    #  Every engine below is feature-flagged and degrades gracefully: with
+    #  its flag off, behaviour is identical to before. None place real
+    #  orders; shadow mode is hard-guaranteed never to touch the exchange.
+    # ══════════════════════════════════════════════════════════════════
+
+    # ── 22A — Portfolio Exposure + Position Lock Engine ──
+    portfolio_exposure_engine_enabled: bool = False
+    max_open_positions_per_user: int = 5
+    max_same_direction_positions: int = 3
+    max_correlated_positions: int = 2
+    max_daily_loss_percent: float = 5.0
+    symbol_lock_enabled: bool = True
+    pending_order_lock_enabled: bool = True
+    # group_name:SYM,SYM;group_name:SYM,SYM  — symbols sharing a group are
+    # treated as correlated. A leading group label before ':' is optional.
+    correlation_groups: str = "BTC:ETH,SOL,DOGE,AVAX;AI:FET,AGIX,OCEAN;MEME:DOGE,SHIB,PEPE"
+
+    # ── 22B — Signal Explainability ──
+    signal_explainability_enabled: bool = False
+
+    # ── 22C — Trade Lifecycle Analytics ──
+    trade_lifecycle_analytics_enabled: bool = False
+
+    # ── 22D — Break-Even + Partial TP Engine (reduce-only; never widens SL) ──
+    break_even_engine_enabled: bool = False
+    partial_tp_percent: float = 40.0  # % of size closed at TP1
+    move_sl_to_entry_on_tp1: bool = True
+    trailing_stop_enabled: bool = True
+    trailing_stop_distance_percent: float = 1.5
+
+    # ── 22E — News / Event Risk Filter ──
+    news_event_filter_enabled: bool = False
+    pre_event_block_minutes: int = 60
+    post_event_block_minutes: int = 30
+    high_impact_events: str = "CPI,FOMC,NFP,FED"
+
+    # ── 22F — Liquidity Map V2 ──
+    liquidity_map_v2_enabled: bool = False
+
+    # ── 22G — Shadow Mode Live Validation (NEVER places real orders) ──
+    shadow_mode_enabled: bool = False
+    shadow_mode_slippage_bps: float = 5.0  # assumed slippage per fill (bps)
+    shadow_mode_latency_ms: float = 250.0  # assumed execution latency
+
     # --- Sprint 21F — Binance live/testnet validation (read-only) ---
     # Gate the admin-only Binance preflight endpoint. The preflight is strictly
     # read-only (server time, balance, exchangeInfo, positions — never an order),
@@ -330,6 +386,40 @@ class Settings(BaseSettings):
     @property
     def smtp_configured(self) -> bool:
         return bool(self.smtp_host.strip())
+
+    @property
+    def correlation_group_map(self) -> dict:
+        """Parse CORRELATION_GROUPS into {GROUP: {SYM, ...}}.
+
+        Accepts ``GROUP:SYM,SYM;GROUP:SYM,SYM``. A group label is optional —
+        a bare ``SYM,SYM`` segment is given an auto label ``G0``, ``G1`` …
+        Symbols are upper-cased and de-suffixed of a trailing USDT/USD/PERP so
+        ``BTCUSDT`` and ``BTC`` land in the same group.
+        """
+        out: dict = {}
+        raw = (self.correlation_groups or "").strip()
+        if not raw:
+            return out
+        for idx, segment in enumerate(s for s in raw.split(";") if s.strip()):
+            if ":" in segment:
+                label, members = segment.split(":", 1)
+                label = label.strip().upper() or f"G{idx}"
+            else:
+                label, members = f"G{idx}", segment
+            syms = {_norm_base_symbol(m) for m in members.split(",") if m.strip()}
+            # The group leader (e.g. ``BTC`` in ``BTC:ETH,SOL``) is itself a
+            # member of the correlated set. Category labels like ``AI``/``MEME``
+            # are added too but simply never match a real symbol.
+            leader = _norm_base_symbol(label)
+            if leader:
+                syms.add(leader)
+            if syms:
+                out[label] = syms
+        return out
+
+    @property
+    def high_impact_event_set(self) -> set:
+        return {e.strip().upper() for e in (self.high_impact_events or "").split(",") if e.strip()}
 
     @property
     def vault_key_material(self) -> str:

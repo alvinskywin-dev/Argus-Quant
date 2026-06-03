@@ -683,3 +683,65 @@ async def risk_disclaimer():
 """,
         )
     )
+
+
+# ── Sprint 22A — Portfolio exposure diagnostics ──────────────────────────────
+@router.get("/api/portfolio/exposure")
+async def api_portfolio_exposure():
+    """Portfolio-level exposure picture built from currently OPEN signals.
+
+    Read-only: reports the exposure score, open positions, correlation groups,
+    long/short ratio and locked symbols. Always available (the engine flag only
+    gates *enforcement* at signal time, not this diagnostic view)."""
+    from app.risk.portfolio_exposure import build_state
+
+    try:
+        async with SessionLocal() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(Signal)
+                        .where(Signal.status == "OPEN")
+                        .order_by(desc(Signal.created_at))
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        positions = [
+            {
+                "symbol": s.symbol,
+                "side": s.side,
+                "status": "OPEN",
+                "notional": float(getattr(s, "risk_reward", 0) or 0),
+            }
+            for s in rows
+        ]
+        state = build_state(open_positions=positions)
+        return JSONResponse(
+            {
+                "enabled": settings.portfolio_exposure_engine_enabled,
+                "limits": {
+                    "max_open_positions_per_user": settings.max_open_positions_per_user,
+                    "max_same_direction_positions": settings.max_same_direction_positions,
+                    "max_correlated_positions": settings.max_correlated_positions,
+                    "max_daily_loss_percent": settings.max_daily_loss_percent,
+                },
+                **state.to_diagnostics(),
+            }
+        )
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+# ── Sprint 22E — News / macro event risk ─────────────────────────────────────
+@router.get("/api/public/news-risk")
+async def api_public_news_risk():
+    """Upcoming macro / event-risk windows and whether entries are currently
+    blocked. The calendar is populated by the operator; empty == no events."""
+    from app.risk.news_event_filter import news_risk_snapshot
+
+    try:
+        return JSONResponse(news_risk_snapshot())
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
