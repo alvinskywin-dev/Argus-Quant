@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     binance_api_secret: str = ""
     binance_testnet: bool = False
 
+    # ── 21F — Binance Futures testnet validation (separate keys; default OFF) ──
+    binance_testnet_enabled: bool = False
+    binance_testnet_base_url: str = "https://testnet.binancefuture.com"
+    binance_testnet_ws_url: str = "wss://stream.binancefuture.com/ws"
+    binance_testnet_api_key: str = ""
+    binance_testnet_api_secret: str = ""
+
     # --- Telegram ---
     telegram_bot_token: str = ""
     telegram_signal_chat_id: str = ""
