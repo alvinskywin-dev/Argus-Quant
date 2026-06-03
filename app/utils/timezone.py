@@ -16,6 +16,7 @@ Design rules (enforced here):
   * Only the supported IANA zones are ever honored; anything else falls back to
     the default.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -38,6 +39,7 @@ DateLike = Union[datetime, str, None]
 
 
 # ── core ────────────────────────────────────────────────────────────
+
 
 def utc_now() -> datetime:
     """Timezone-aware 'now' in UTC."""
@@ -89,6 +91,7 @@ def normalize_utc_iso(value: DateLike) -> Optional[str]:
 
 # ── timezone selection ──────────────────────────────────────────────
 
+
 def is_supported_timezone(tz: Optional[str]) -> bool:
     """True only for an exactly-supported IANA zone string."""
     return isinstance(tz, str) and tz in SUPPORTED_TIMEZONES
@@ -108,6 +111,7 @@ def _zoneinfo(tz: Optional[str]) -> ZoneInfo:
 
 
 # ── display conversion (never persisted) ───────────────────────────
+
 
 def to_user_timezone(value: DateLike, tz: Optional[str]) -> Optional[datetime]:
     """Convert a UTC value into the (supported) user zone for display only."""

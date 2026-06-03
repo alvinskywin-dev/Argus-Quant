@@ -5,6 +5,7 @@ Wraps every auto open with account-protection checks and exposes user/admin
 kill switches. Pure maths is in app.safety.rules; this module does the DB
 aggregation and state mutation.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -52,6 +53,7 @@ def _midnight_next(now: datetime) -> datetime:
 
 # ── config / state ────────────────────────────────────────────────
 
+
 async def get_or_create_config(db: AsyncSession, user_id: int) -> SafetyConfig:
     res = await db.execute(select(SafetyConfig).where(SafetyConfig.user_id == user_id))
     cfg = res.scalar_one_or_none()
@@ -63,9 +65,14 @@ async def get_or_create_config(db: AsyncSession, user_id: int) -> SafetyConfig:
 
 
 _UPDATABLE = {
-    "max_daily_loss_pct", "max_weekly_loss_pct", "max_open_positions",
-    "max_correlated_positions", "max_leverage", "trade_cooldown_minutes",
-    "loss_streak_limit", "loss_streak_cooldown_hours",
+    "max_daily_loss_pct",
+    "max_weekly_loss_pct",
+    "max_open_positions",
+    "max_correlated_positions",
+    "max_leverage",
+    "trade_cooldown_minutes",
+    "loss_streak_limit",
+    "loss_streak_cooldown_hours",
 }
 
 
@@ -88,6 +95,7 @@ async def get_or_create_state(db: AsyncSession, user_id: int) -> SafetyState:
 
 
 # ── kill switches ─────────────────────────────────────────────────
+
 
 async def get_global_kill(db: AsyncSession) -> bool:
     row = await db.get(SystemSetting, _GLOBAL_KILL_KEY)
@@ -133,50 +141,73 @@ async def _disable(db: AsyncSession, user_id: int, until: datetime, reason: str)
 
 # ── aggregation helpers ───────────────────────────────────────────
 
+
 async def _realized_since(db: AsyncSession, account_id: int, since: datetime) -> float:
-    rows = (await db.execute(
-        select(PaperTrade.pnl_usdt).where(
-            PaperTrade.account_id == account_id, PaperTrade.closed_at >= since
+    rows = (
+        (
+            await db.execute(
+                select(PaperTrade.pnl_usdt).where(
+                    PaperTrade.account_id == account_id, PaperTrade.closed_at >= since
+                )
+            )
         )
-    )).scalars().all()
+        .scalars()
+        .all()
+    )
     return float(sum(rows))
 
 
 async def _recent_pnls(db: AsyncSession, account_id: int, limit: int = 20) -> list[float]:
-    rows = (await db.execute(
-        select(PaperTrade.pnl_usdt)
-        .where(PaperTrade.account_id == account_id)
-        .order_by(PaperTrade.closed_at.desc())
-        .limit(limit)
-    )).scalars().all()
+    rows = (
+        (
+            await db.execute(
+                select(PaperTrade.pnl_usdt)
+                .where(PaperTrade.account_id == account_id)
+                .order_by(PaperTrade.closed_at.desc())
+                .limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
     return [float(x) for x in rows]
 
 
 async def _open_clusters_sides(db: AsyncSession, account_id: int) -> list[tuple[str, str]]:
-    rows = (await db.execute(
-        select(PaperAccountPosition.symbol, PaperAccountPosition.side).where(
-            PaperAccountPosition.account_id == account_id,
-            PaperAccountPosition.status == "OPEN",
+    rows = (
+        await db.execute(
+            select(PaperAccountPosition.symbol, PaperAccountPosition.side).where(
+                PaperAccountPosition.account_id == account_id,
+                PaperAccountPosition.status == "OPEN",
+            )
         )
-    )).all()
+    ).all()
     return [(rules.correlation_cluster(sym), side) for sym, side in rows]
 
 
 async def _last_open_at(db: AsyncSession, account_id: int) -> Optional[datetime]:
-    row = (await db.execute(
-        select(PaperAccountPosition.opened_at)
-        .where(PaperAccountPosition.account_id == account_id)
-        .order_by(PaperAccountPosition.opened_at.desc())
-        .limit(1)
-    )).scalar_one_or_none()
+    row = (
+        await db.execute(
+            select(PaperAccountPosition.opened_at)
+            .where(PaperAccountPosition.account_id == account_id)
+            .order_by(PaperAccountPosition.opened_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
     return row
 
 
 # ── the check ─────────────────────────────────────────────────────
 
+
 async def check(
-    db: AsyncSession, *, user_id: int, account: PaperAccount, summary: dict,
-    symbol: str, side: str,
+    db: AsyncSession,
+    *,
+    user_id: int,
+    account: PaperAccount,
+    summary: dict,
+    symbol: str,
+    side: str,
 ) -> SafetyDecision:
     """Run all protective rules. May set a timed lockout as a side effect."""
     now = _now()
@@ -189,14 +220,19 @@ async def check(
         return SafetyDecision(False, "kill switch enabled", "user_kill")
     if state.disabled_until and state.disabled_until > now:
         return SafetyDecision(
-            False, f"trading disabled until {state.disabled_until:%Y-%m-%d %H:%M} UTC "
-                   f"({state.disabled_reason})", "locked")
+            False,
+            f"trading disabled until {state.disabled_until:%Y-%m-%d %H:%M} UTC "
+            f"({state.disabled_reason})",
+            "locked",
+        )
 
     cfg = await get_or_create_config(db, user_id)
     init_bal = account.initial_balance
 
     # Daily / weekly loss limits -> lock until next UTC midnight.
-    daily = await _realized_since(db, account.id, now.replace(hour=0, minute=0, second=0, microsecond=0))
+    daily = await _realized_since(
+        db, account.id, now.replace(hour=0, minute=0, second=0, microsecond=0)
+    )
     if rules.loss_exceeds_limit(daily, init_bal, cfg.max_daily_loss_pct):
         await _disable(db, user_id, _midnight_next(now), "daily loss limit")
         return SafetyDecision(False, f"daily loss limit hit ({daily:.2f})", "daily_loss")
@@ -209,8 +245,12 @@ async def check(
     # Loss streak -> lock for cooldown hours.
     streak = rules.consecutive_losses(await _recent_pnls(db, account.id))
     if cfg.loss_streak_limit > 0 and streak >= cfg.loss_streak_limit:
-        await _disable(db, user_id, now + timedelta(hours=cfg.loss_streak_cooldown_hours),
-                       f"{streak} losses in a row")
+        await _disable(
+            db,
+            user_id,
+            now + timedelta(hours=cfg.loss_streak_cooldown_hours),
+            f"{streak} losses in a row",
+        )
         return SafetyDecision(False, f"loss streak protection ({streak} losses)", "loss_streak")
 
     # Trade cooldown (transient, no lockout).
@@ -228,8 +268,10 @@ async def check(
     correlated = rules.count_correlated(await _open_clusters_sides(db, account.id), cluster, side)
     if correlated >= cfg.max_correlated_positions:
         return SafetyDecision(
-            False, f"max correlated positions in {cluster} ({cfg.max_correlated_positions})",
-            "max_correlated")
+            False,
+            f"max correlated positions in {cluster} ({cfg.max_correlated_positions})",
+            "max_correlated",
+        )
 
     return SafetyDecision(True, "ok", "ok")
 
@@ -253,11 +295,14 @@ async def trading_blocked(db: AsyncSession, user_id: int) -> Optional[str]:
 
 # ── status (for API) ──────────────────────────────────────────────
 
+
 async def status(db: AsyncSession, user_id: int, account: PaperAccount) -> dict:
     now = _now()
     state = await get_or_create_state(db, user_id)
     cfg = await get_or_create_config(db, user_id)
-    daily = await _realized_since(db, account.id, now.replace(hour=0, minute=0, second=0, microsecond=0))
+    daily = await _realized_since(
+        db, account.id, now.replace(hour=0, minute=0, second=0, microsecond=0)
+    )
     weekly = await _realized_since(db, account.id, now - timedelta(days=7))
     streak = rules.consecutive_losses(await _recent_pnls(db, account.id))
     locked = bool(state.disabled_until and state.disabled_until > now)

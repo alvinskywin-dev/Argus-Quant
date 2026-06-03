@@ -7,6 +7,7 @@ Mounted only when ACCOUNTING_ENABLED=true.
   GET /api/accounting/trades       — authed; caller's per-trade breakdowns
   GET /api/accounting/user/{id}    — authed; own summary (or admin for any user)
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException

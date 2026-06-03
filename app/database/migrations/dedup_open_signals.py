@@ -10,6 +10,7 @@ This migration MUST be run before the partial unique index
 Usage:
     docker compose exec bot python -m app.database.migrations.dedup_open_signals
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -53,9 +54,7 @@ async def run() -> None:
     async with SessionLocal() as session:
         for sig_id in to_expire:
             await session.execute(
-                update(Signal)
-                .where(Signal.id == sig_id)
-                .values(status="EXPIRED")
+                update(Signal).where(Signal.id == sig_id).values(status="EXPIRED")
             )
         await session.commit()
 

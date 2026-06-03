@@ -5,6 +5,7 @@ All functions take an AsyncSession and operate on the paper_* per-user tables.
 They raise PaperError (mapped to HTTP status codes by the router) on any
 expected failure. Pure maths lives in app.paper_engine.math.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -80,6 +81,7 @@ async def ensure_marks(symbols) -> None:
 
 # ── account lifecycle ─────────────────────────────────────────────
 
+
 async def get_or_create_account(db: AsyncSession, user_id: int) -> PaperAccount:
     res = await db.execute(select(PaperAccount).where(PaperAccount.user_id == user_id))
     acc = res.scalar_one_or_none()
@@ -111,6 +113,7 @@ async def set_auto_follow(db: AsyncSession, account: PaperAccount, enabled: bool
 
 
 # ── open ──────────────────────────────────────────────────────────
+
 
 async def _open_positions(db: AsyncSession, account_id: int) -> list[PaperAccountPosition]:
     res = await db.execute(
@@ -254,9 +257,7 @@ async def copy_signal(
     )
 
 
-def simulate_signal(
-    account: PaperAccount, signal: Signal, leverage: Optional[int] = None
-) -> dict:
+def simulate_signal(account: PaperAccount, signal: Signal, leverage: Optional[int] = None) -> dict:
     """Dry-run projection (no DB writes) of opening a position from a signal."""
     entry = float(signal.entry_low or 0)
     if entry <= 0:
@@ -302,6 +303,7 @@ def simulate_signal(
 
 
 # ── close ─────────────────────────────────────────────────────────
+
 
 async def close_position(
     db: AsyncSession,
@@ -403,6 +405,7 @@ async def check_liquidations(db: AsyncSession, account: PaperAccount) -> list[in
 
 
 # ── queries / summary ─────────────────────────────────────────────
+
 
 async def account_summary(db: AsyncSession, account: PaperAccount) -> dict:
     open_pos = await _open_positions(db, account.id)

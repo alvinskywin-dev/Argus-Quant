@@ -3,6 +3,7 @@
 Validates connect (with permission checks + withdrawal rejection), no-plaintext
 storage, test, accounts listing, and disconnect (secret wipe).
 """
+
 import asyncio
 
 import httpx
@@ -15,7 +16,9 @@ from app.database.session import get_session, init_db
 
 async def _row(email_user_id: int):
     async with get_session() as db:
-        res = await db.execute(select(ExchangeAccount).where(ExchangeAccount.user_id == email_user_id))
+        res = await db.execute(
+            select(ExchangeAccount).where(ExchangeAccount.user_id == email_user_id)
+        )
         return res.scalar_one_or_none()
 
 
@@ -24,28 +27,42 @@ async def main() -> None:
     app = create_app()
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
-        await c.post("/api/auth/register", json={"email": "vault@example.com", "password": "Sup3rSecret!"})
-        r = await c.post("/api/auth/login", json={"email": "vault@example.com", "password": "Sup3rSecret!"})
+        await c.post(
+            "/api/auth/register", json={"email": "vault@example.com", "password": "Sup3rSecret!"}
+        )
+        r = await c.post(
+            "/api/auth/login", json={"email": "vault@example.com", "password": "Sup3rSecret!"}
+        )
         h = {"Authorization": f"Bearer {r.json()['access_token']}"}
         from app.auth.security import decode_access_token
+
         uid = int(decode_access_token(r.json()["access_token"])["sub"])
 
         # reject: withdrawal-enabled key is NOT stored
-        r = await c.post("/api/exchange/connect", headers=h, json={
-            "exchange": "binance", "api_key": "WITHDRAWkey99", "api_secret": "sekret"})
+        r = await c.post(
+            "/api/exchange/connect",
+            headers=h,
+            json={"exchange": "binance", "api_key": "WITHDRAWkey99", "api_secret": "sekret"},
+        )
         print("connect-withdrawal", r.status_code, r.json().get("detail"))
         assert r.status_code == 403
         assert await _row(uid) is None, "withdrawal key must NOT be persisted"
 
         # reject: okx without passphrase
-        r = await c.post("/api/exchange/connect", headers=h, json={
-            "exchange": "okx", "api_key": "GOODKEY", "api_secret": "sekret"})
+        r = await c.post(
+            "/api/exchange/connect",
+            headers=h,
+            json={"exchange": "okx", "api_key": "GOODKEY", "api_secret": "sekret"},
+        )
         print("connect-okx-nopass", r.status_code, r.json().get("detail"))
         assert r.status_code == 400
 
         # success: trade+futures-only key
-        r = await c.post("/api/exchange/connect", headers=h, json={
-            "exchange": "binance", "api_key": "GOODKEYabcd1234", "api_secret": "topsecret"})
+        r = await c.post(
+            "/api/exchange/connect",
+            headers=h,
+            json={"exchange": "binance", "api_key": "GOODKEYabcd1234", "api_secret": "topsecret"},
+        )
         print("connect-ok", r.status_code, r.json())
         assert r.status_code == 201
         assert r.json()["status"] == "CONNECTED"
@@ -58,13 +75,16 @@ async def main() -> None:
         assert row.encrypted_api_key and "GOODKEYabcd1234" not in row.encrypted_api_key
         assert row.encrypted_api_secret and "topsecret" not in row.encrypted_api_secret
         from app.exchange_vault import crypto
+
         assert crypto.decrypt(row.encrypted_api_key) == "GOODKEYabcd1234"  # decrypts back
         print("ciphertext-only OK")
 
         # test connection
         r = await c.post("/api/exchange/test", headers=h, json={"exchange": "binance"})
         print("test", r.status_code, r.json())
-        assert r.status_code == 200 and r.json()["status"] == "CONNECTED" and r.json()["can_futures"]
+        assert (
+            r.status_code == 200 and r.json()["status"] == "CONNECTED" and r.json()["can_futures"]
+        )
 
         # accounts listing (no secrets)
         r = await c.get("/api/exchange/accounts", headers=h)

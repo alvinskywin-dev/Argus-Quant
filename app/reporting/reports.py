@@ -5,6 +5,7 @@ Reports are formatted as Telegram HTML messages and sent to admin chat(s).
 They include: signals generated, win/loss, win rate, best/worst symbols,
 performance summary, and open positions.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -50,7 +51,8 @@ def _build_stats(signals: List[Signal]) -> dict:
         sym_map.setdefault(s.symbol, []).append(float(s.pnl_pct or 0))
     leaderboard = sorted(
         [(k, round(sum(v) / len(v), 2), len(v)) for k, v in sym_map.items()],
-        key=lambda x: x[1], reverse=True,
+        key=lambda x: x[1],
+        reverse=True,
     )
 
     return {
@@ -120,7 +122,9 @@ class WeeklyReport:
         until = week_start + timedelta(days=7)
         signals = await _fetch_signals(since, until)
         st = _build_stats(signals)
-        week_str = f"{since.strftime('%b %d')} – {(until - timedelta(days=1)).strftime('%b %d, %Y')}"
+        week_str = (
+            f"{since.strftime('%b %d')} – {(until - timedelta(days=1)).strftime('%b %d, %Y')}"
+        )
 
         lines = [
             "📈 <b>WEEKLY REPORT</b>",

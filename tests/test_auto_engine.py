@@ -1,6 +1,7 @@
 """
 Sprint 20D — unit tests for auto-engine risk + protection logic (no DB).
 """
+
 from __future__ import annotations
 
 import pytest
@@ -11,10 +12,18 @@ from app.paper_engine import math as pm
 
 def _eval(**over):
     base = dict(
-        enabled=True, symbol="BTCUSDT", side="LONG", confidence=90.0,
-        open_positions=0, available_margin=1000.0,
-        max_positions=5, max_leverage=10, risk_per_trade_pct=1.0,
-        allowed_coins="", allowed_exchanges="", min_confidence=0.0,
+        enabled=True,
+        symbol="BTCUSDT",
+        side="LONG",
+        confidence=90.0,
+        open_positions=0,
+        available_margin=1000.0,
+        max_positions=5,
+        max_leverage=10,
+        risk_per_trade_pct=1.0,
+        allowed_coins="",
+        allowed_exchanges="",
+        min_confidence=0.0,
     )
     base.update(over)
     return risk.evaluate(**base)

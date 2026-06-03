@@ -3,6 +3,7 @@ Smart market filters and rate-limiting safeguards.
 
 These keep the signal stream clean — no spam, no chop, no duplicates.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -36,7 +37,11 @@ class CooldownTracker:
 
             # Also check DB — survives restarts
             last_db = await repo.last_signal_for(symbol, side)
-            if last_db and (now - last_db.created_at).total_seconds() < settings.symbol_cooldown_minutes * 60:
+            if (
+                last_db
+                and (now - last_db.created_at).total_seconds()
+                < settings.symbol_cooldown_minutes * 60
+            ):
                 self._last[key] = last_db.created_at
                 return False
             return True
@@ -108,7 +113,7 @@ def passes_market_filters(snap: FeatureSnapshot, decision: MTFDecision) -> tuple
         decision.confidence -= 6
 
     # momentum bonus
-    if abs(getattr(snap, 'price_change_pct_5m', 0) or 0) > 2.5:
+    if abs(getattr(snap, "price_change_pct_5m", 0) or 0) > 2.5:
         decision.confidence += 3
 
     # heavy volatility penalty
@@ -116,11 +121,11 @@ def passes_market_filters(snap: FeatureSnapshot, decision: MTFDecision) -> tuple
         decision.confidence -= 4
 
     # overbought longs penalty
-    if decision.side == "LONG" and getattr(snap, 'rsi', getattr(snap, 'rsi_value', 50)) > 72:
+    if decision.side == "LONG" and getattr(snap, "rsi", getattr(snap, "rsi_value", 50)) > 72:
         decision.confidence -= 8
 
     # oversold shorts penalty
-    if decision.side == "SHORT" and getattr(snap, 'rsi', getattr(snap, 'rsi_value', 50)) < 28:
+    if decision.side == "SHORT" and getattr(snap, "rsi", getattr(snap, "rsi_value", 50)) < 28:
         decision.confidence -= 8
 
     # simple market sentiment guard from live major prices cache

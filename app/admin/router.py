@@ -5,6 +5,7 @@ Mounted only when ADMIN_DASHBOARD_ENABLED=true. EVERY route requires the ADMIN
 role (require_role("ADMIN")). Read-oriented platform oversight plus user
 suspend/activate moderation. Decrypted credentials are never exposed.
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -51,7 +52,8 @@ async def user_detail(user_id: int, user: AuthUser = _admin):
 async def set_user_status(user_id: int, body: SetUserStatusIn, user: AuthUser = _admin):
     async with get_session() as db:
         return await service.set_user_status(
-            db, admin_id=user.id, user_id=user_id, status=body.status)
+            db, admin_id=user.id, user_id=user_id, status=body.status
+        )
 
 
 @router.get("/audit", response_model=list)

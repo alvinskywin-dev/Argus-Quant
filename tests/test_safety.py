@@ -1,6 +1,7 @@
 """
 Sprint 20E — unit tests for the pure safety rules (no DB required).
 """
+
 from __future__ import annotations
 
 from app.safety import rules
@@ -17,10 +18,10 @@ def test_correlation_cluster():
 
 def test_consecutive_losses():
     assert rules.consecutive_losses([-1, -2, -3, 5, -1]) == 3
-    assert rules.consecutive_losses([5, -1, -2]) == 0   # most recent is a win
+    assert rules.consecutive_losses([5, -1, -2]) == 0  # most recent is a win
     assert rules.consecutive_losses([]) == 0
     assert rules.consecutive_losses([-1]) == 1
-    assert rules.consecutive_losses([0, -1]) == 0       # 0 is not a loss
+    assert rules.consecutive_losses([0, -1]) == 0  # 0 is not a loss
 
 
 def test_loss_exceeds_limit():
@@ -28,7 +29,7 @@ def test_loss_exceeds_limit():
     assert rules.loss_exceeds_limit(-500, 10_000, 5.0)
     assert rules.loss_exceeds_limit(-600, 10_000, 5.0)
     assert not rules.loss_exceeds_limit(-499, 10_000, 5.0)
-    assert not rules.loss_exceeds_limit(200, 10_000, 5.0)   # profit
+    assert not rules.loss_exceeds_limit(200, 10_000, 5.0)  # profit
     # guards
     assert not rules.loss_exceeds_limit(-999, 0, 5.0)
     assert not rules.loss_exceeds_limit(-999, 10_000, 0)

@@ -5,6 +5,7 @@ Feature-flagged: nothing here is active unless AUTH_ENABLED=true.
 Call setup_auth(app) from the dashboard's create_app() to mount the router
 and install the AuthError -> JSON exception handler.
 """
+
 from __future__ import annotations
 
 from fastapi import FastAPI, Request

@@ -23,6 +23,7 @@ The same pure helpers also let the system turn "risk ~25 USDT" into a Binance-
 valid order quantity (:func:`plan_order_quantity`), which is the practical
 prerequisite for a small live test.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -54,30 +55,48 @@ def fapi_base(testnet: bool) -> str:
 @dataclass
 class ClockSkewResult:
     ok: bool
-    skew_ms: int          # local - server  (positive == local clock is ahead)
+    skew_ms: int  # local - server  (positive == local clock is ahead)
     abs_skew_ms: int
-    severity: str         # OK / WARN / FAIL
+    severity: str  # OK / WARN / FAIL
     message: str
 
 
 def classify_clock_skew(
-    local_ms: int, server_ms: int, *, warn_ms: int = CLOCK_WARN_MS, fail_ms: int = CLOCK_FAIL_MS,
+    local_ms: int,
+    server_ms: int,
+    *,
+    warn_ms: int = CLOCK_WARN_MS,
+    fail_ms: int = CLOCK_FAIL_MS,
 ) -> ClockSkewResult:
     """Classify the local↔Binance clock skew that signed requests depend on."""
     skew = int(local_ms) - int(server_ms)
     a = abs(skew)
     if a >= fail_ms:
         return ClockSkewResult(
-            ok=False, skew_ms=skew, abs_skew_ms=a, severity="FAIL",
-            message=(f"Clock skew {skew:+d}ms exceeds {fail_ms}ms — signed requests will be "
-                     f"rejected (-1021). Sync the host clock (NTP) before live trading."))
+            ok=False,
+            skew_ms=skew,
+            abs_skew_ms=a,
+            severity="FAIL",
+            message=(
+                f"Clock skew {skew:+d}ms exceeds {fail_ms}ms — signed requests will be "
+                f"rejected (-1021). Sync the host clock (NTP) before live trading."
+            ),
+        )
     if a >= warn_ms:
         return ClockSkewResult(
-            ok=True, skew_ms=skew, abs_skew_ms=a, severity="WARN",
-            message=f"Clock skew {skew:+d}ms is high; sync the host clock to be safe.")
+            ok=True,
+            skew_ms=skew,
+            abs_skew_ms=a,
+            severity="WARN",
+            message=f"Clock skew {skew:+d}ms is high; sync the host clock to be safe.",
+        )
     return ClockSkewResult(
-        ok=True, skew_ms=skew, abs_skew_ms=a, severity="OK",
-        message=f"Clock skew {skew:+d}ms is within tolerance.")
+        ok=True,
+        skew_ms=skew,
+        abs_skew_ms=a,
+        severity="OK",
+        message=f"Clock skew {skew:+d}ms is within tolerance.",
+    )
 
 
 def _precision_from_step(step: float) -> int:
@@ -124,12 +143,16 @@ def parse_symbol_filters(exchange_info: dict, symbol: str) -> SymbolFilters:
         step = _as_float(lot.get("stepSize"))
         tick = _as_float(price.get("tickSize"))
         return SymbolFilters(
-            symbol=symbol, found=True,
-            step_size=step, min_qty=_as_float(lot.get("minQty")), tick_size=tick,
+            symbol=symbol,
+            found=True,
+            step_size=step,
+            min_qty=_as_float(lot.get("minQty")),
+            tick_size=tick,
             min_notional=_as_float(mn.get("notional", mn.get("minNotional"))),
             qty_precision=int(s.get("quantityPrecision", _precision_from_step(step))),
             price_precision=int(s.get("pricePrecision", _precision_from_step(tick))),
-            status=str(s.get("status", "")))
+            status=str(s.get("status", "")),
+        )
     return SymbolFilters(symbol=symbol, found=False)
 
 
@@ -145,7 +168,9 @@ def round_step_down(value: float, step: float) -> float:
     if step <= 0:
         return float(value)
     try:
-        d = (Decimal(str(value)) / Decimal(str(step))).to_integral_value(ROUND_DOWN) * Decimal(str(step))
+        d = (Decimal(str(value)) / Decimal(str(step))).to_integral_value(ROUND_DOWN) * Decimal(
+            str(step)
+        )
         return float(d)
     except InvalidOperation:
         return float(value)
@@ -156,7 +181,9 @@ def round_step_up(value: float, step: float) -> float:
     if step <= 0:
         return float(value)
     try:
-        d = (Decimal(str(value)) / Decimal(str(step))).to_integral_value(ROUND_UP) * Decimal(str(step))
+        d = (Decimal(str(value)) / Decimal(str(step))).to_integral_value(ROUND_UP) * Decimal(
+            str(step)
+        )
         return float(d)
     except InvalidOperation:
         return float(value)
@@ -167,7 +194,9 @@ def round_price(value: float, tick: float) -> float:
     if tick <= 0:
         return float(value)
     try:
-        d = (Decimal(str(value)) / Decimal(str(tick))).to_integral_value(ROUND_HALF_UP) * Decimal(str(tick))
+        d = (Decimal(str(value)) / Decimal(str(tick))).to_integral_value(ROUND_HALF_UP) * Decimal(
+            str(tick)
+        )
         return float(d)
     except InvalidOperation:
         return float(value)
@@ -201,7 +230,9 @@ def plan_order_quantity(filters: SymbolFilters, price: float, target_notional: f
     if not filters.found:
         return OrderPlan(ok=False, reason=f"Symbol {filters.symbol} not found in exchangeInfo")
     if not filters.tradable:
-        return OrderPlan(ok=False, reason=f"Symbol {filters.symbol} is not TRADING (status={filters.status!r})")
+        return OrderPlan(
+            ok=False, reason=f"Symbol {filters.symbol} is not TRADING (status={filters.status!r})"
+        )
     if price <= 0 or target_notional <= 0:
         return OrderPlan(ok=False, reason="Price and target notional must be positive")
 
@@ -216,14 +247,23 @@ def plan_order_quantity(filters: SymbolFilters, price: float, target_notional: f
 
     notional = qty * price
     if qty <= 0:
-        return OrderPlan(ok=False, qty=0.0, notional=0.0,
-                         reason="Rounded quantity is zero for this price/notional")
+        return OrderPlan(
+            ok=False,
+            qty=0.0,
+            notional=0.0,
+            reason="Rounded quantity is zero for this price/notional",
+        )
     passes, notional = check_min_notional(qty, price, filters.min_notional)
     if not passes:
-        return OrderPlan(ok=False, qty=qty, notional=notional,
-                         reason=f"Notional {notional:.4f} below exchange minimum {filters.min_notional}")
-    return OrderPlan(ok=True, qty=qty, notional=notional,
-                     reason=f"qty={qty} notional≈{notional:.4f} USDT")
+        return OrderPlan(
+            ok=False,
+            qty=qty,
+            notional=notional,
+            reason=f"Notional {notional:.4f} below exchange minimum {filters.min_notional}",
+        )
+    return OrderPlan(
+        ok=True, qty=qty, notional=notional, reason=f"qty={qty} notional≈{notional:.4f} USDT"
+    )
 
 
 @dataclass
@@ -235,7 +275,10 @@ class PrecisionResult:
 
 
 def enforce_order_precision(
-    filters: SymbolFilters, qty: float, price: Optional[float], order_type: str,
+    filters: SymbolFilters,
+    qty: float,
+    price: Optional[float],
+    order_type: str,
 ) -> PrecisionResult:
     """
     Round an order to the symbol's valid precision before it is sent.
@@ -252,8 +295,11 @@ def enforce_order_precision(
     rq = round_step_down(qty, filters.step_size)
     if rq <= 0 or (filters.min_qty and rq < filters.min_qty):
         return PrecisionResult(
-            False, rq, price,
-            f"quantity {qty} rounds to {rq}, below minimum {filters.min_qty} for {filters.symbol}")
+            False,
+            rq,
+            price,
+            f"quantity {qty} rounds to {rq}, below minimum {filters.min_qty} for {filters.symbol}",
+        )
     rp = price
     if order_type.upper() in ("LIMIT", "STOP", "TAKE_PROFIT") and price:
         rp = round_price(price, filters.tick_size)
@@ -268,7 +314,7 @@ class PreflightCheck:
     name: str
     ok: bool
     detail: str = ""
-    severity: str = "OK"   # OK / WARN / FAIL
+    severity: str = "OK"  # OK / WARN / FAIL
 
 
 @dataclass
@@ -316,7 +362,11 @@ def build_preflight_summary(checks: list[PreflightCheck]) -> bool:
 
 
 async def run_binance_preflight(
-    api_key: str, api_secret: str, *, testnet: bool = True, symbol: str = "BTCUSDT",
+    api_key: str,
+    api_secret: str,
+    *,
+    testnet: bool = True,
+    symbol: str = "BTCUSDT",
 ) -> BinancePreflightResult:
     """
     Run the read-only preflight against Binance USDT-M futures.
@@ -357,7 +407,9 @@ async def run_binance_preflight(
 
             # 2) futures balance (signed read) — proves the key authenticates
             try:
-                async with s.get(f"{base}/fapi/v2/balance", params=_signed({}), headers=headers) as r:
+                async with s.get(
+                    f"{base}/fapi/v2/balance", params=_signed({}), headers=headers
+                ) as r:
                     bal = await r.json(content_type=None)
                 if r.status >= 400 or isinstance(bal, dict):
                     msg = bal.get("msg") if isinstance(bal, dict) else str(bal)
@@ -366,9 +418,12 @@ async def run_binance_preflight(
                     usdt = next((b for b in bal if b.get("asset") == "USDT"), {})
                     avail = _as_float(usdt.get("availableBalance", usdt.get("balance")))
                     res.add("account_read", True, f"USDT available≈{avail}")
-                    res.add("balance_positive", avail > 0,
-                            f"available USDT={avail}",
-                            severity="OK" if avail > 0 else "WARN")
+                    res.add(
+                        "balance_positive",
+                        avail > 0,
+                        f"available USDT={avail}",
+                        severity="OK" if avail > 0 else "WARN",
+                    )
             except Exception as exc:  # noqa: BLE001
                 res.add("account_read", False, f"balance read error: {exc!s:.80}")
 
@@ -378,8 +433,11 @@ async def run_binance_preflight(
                     info = await r.json(content_type=None)
                 f = parse_symbol_filters(info if isinstance(info, dict) else {}, symbol)
                 if f.found:
-                    res.add("symbol_filters", True,
-                            f"{symbol}: step={f.step_size} tick={f.tick_size} minNotional={f.min_notional}")
+                    res.add(
+                        "symbol_filters",
+                        True,
+                        f"{symbol}: step={f.step_size} tick={f.tick_size} minNotional={f.min_notional}",
+                    )
                 else:
                     res.add("symbol_filters", False, f"{symbol} not found in exchangeInfo")
             except Exception as exc:  # noqa: BLE001
@@ -387,11 +445,16 @@ async def run_binance_preflight(
 
             # 4) positions readable (signed read)
             try:
-                async with s.get(f"{base}/fapi/v2/positionRisk", params=_signed({}), headers=headers) as r:
+                async with s.get(
+                    f"{base}/fapi/v2/positionRisk", params=_signed({}), headers=headers
+                ) as r:
                     pos = await r.json(content_type=None)
                 ok = isinstance(pos, list)
-                res.add("positions_read", ok,
-                        f"{len(pos)} position rows" if ok else f"unexpected: {str(pos)[:80]}")
+                res.add(
+                    "positions_read",
+                    ok,
+                    f"{len(pos)} position rows" if ok else f"unexpected: {str(pos)[:80]}",
+                )
             except Exception as exc:  # noqa: BLE001
                 res.add("positions_read", False, f"positionRisk error: {exc!s:.80}")
     except Exception as exc:  # noqa: BLE001 — never raise out of a preflight

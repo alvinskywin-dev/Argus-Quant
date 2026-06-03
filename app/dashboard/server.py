@@ -36,6 +36,7 @@ from app.utils.timezone import normalize_utc_iso
 
 # ── auth ──────────────────────────────────────────────────────────
 
+
 def _admin_user() -> str:
     return os.getenv("DASHBOARD_USER", "admin")
 
@@ -77,18 +78,22 @@ def _js_single_quote(value: str) -> str:
     raw = raw.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "").replace("\r", "")
     return _esc(raw)
 
+
 def _is_logged_in(request: Request) -> bool:
     return request.cookies.get("alpha_radar_auth") == "ok"
 
 
 def _login_page(error: str = "") -> HTMLResponse:
     if not _admin_auth_configured():
-        error = "Admin login is disabled until DASHBOARD_USER and DASHBOARD_PASSWORD are set in .env"
+        error = (
+            "Admin login is disabled until DASHBOARD_USER and DASHBOARD_PASSWORD are set in .env"
+        )
     err = f"<div class='err'>{_esc(error)}</div>" if error else ""
     return HTMLResponse(_LOGIN_HTML.replace("__ERR__", err))
 
 
 # ── app ───────────────────────────────────────────────────────────
+
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
@@ -105,7 +110,7 @@ app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 # Production filter: only V3 MTF signals appear on all public-facing queries.
 # Legacy 5m / old-engine signals live in archive_signals after migration.
 _MTF_TIMEFRAMES = ["15m", "1h", "4h", "1d"]
-_MTF_STRATEGY   = "MTF_SMC_STRICT"
+_MTF_STRATEGY = "MTF_SMC_STRICT"
 
 
 class _SecurityHeaders(BaseHTTPMiddleware):
@@ -124,13 +129,15 @@ app.add_middleware(_SecurityHeaders)
 
 # ── stats helper ──────────────────────────────────────────────────
 
+
 async def _get_stats() -> dict:
     now = datetime.now(timezone.utc)
     prod_start_raw = os.getenv("PRODUCTION_START_UTC", "").strip()
     try:
         start7 = (
             datetime.strptime(prod_start_raw, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
-            if prod_start_raw else now - timedelta(days=7)
+            if prod_start_raw
+            else now - timedelta(days=7)
         )
     except Exception:
         start7 = now - timedelta(days=7)
@@ -143,7 +150,8 @@ async def _get_stats() -> dict:
                 Signal.strategy == _MTF_STRATEGY,
                 Signal.timeframe.in_(_MTF_TIMEFRAMES),
             )
-            .order_by(desc(Signal.created_at)).limit(500)
+            .order_by(desc(Signal.created_at))
+            .limit(500)
         )
         week = week_res.scalars().all()
         recent_res = await session.execute(
@@ -152,7 +160,8 @@ async def _get_stats() -> dict:
                 Signal.strategy == _MTF_STRATEGY,
                 Signal.timeframe.in_(_MTF_TIMEFRAMES),
             )
-            .order_by(desc(Signal.created_at)).limit(20)
+            .order_by(desc(Signal.created_at))
+            .limit(20)
         )
         recent = recent_res.scalars().all()
 
@@ -167,8 +176,12 @@ async def _get_stats() -> dict:
     for s in closed:
         sym_map.setdefault(s.symbol, []).append(float(s.pnl_pct or 0))
     leaderboard = sorted(
-        [{"symbol": k, "avg": round(sum(v) / len(v), 2), "count": len(v)} for k, v in sym_map.items()],
-        key=lambda x: x["avg"], reverse=True,
+        [
+            {"symbol": k, "avg": round(sum(v) / len(v), 2), "count": len(v)}
+            for k, v in sym_map.items()
+        ],
+        key=lambda x: x["avg"],
+        reverse=True,
     )[:10]
 
     def _row(s):
@@ -176,7 +189,9 @@ async def _get_stats() -> dict:
             "id": s.id,
             "time": s.created_at.strftime("%m-%d %H:%M") if s.created_at else "-",
             "time_iso": normalize_utc_iso(s.created_at),
-            "symbol": s.symbol, "side": s.side, "tf": s.timeframe,
+            "symbol": s.symbol,
+            "side": s.side,
+            "tf": s.timeframe,
             "conf": round(float(s.confidence or 0), 1),
             "rr": round(float(s.risk_reward or 0), 2),
             "status": s.status,
@@ -204,6 +219,7 @@ async def _get_stats() -> dict:
 
 # ── public API (no auth) ──────────────────────────────────────────
 
+
 @app.get("/api/public/stats")
 async def api_public_stats():
     try:
@@ -227,6 +243,7 @@ async def _json_body(resp):
     if isinstance(resp, JSONResponse):
         try:
             import json as _json
+
             return _json.loads(resp.body)
         except Exception:
             return None
@@ -239,8 +256,14 @@ async def api_public_dashboard():
     if _dash_cache["data"] is not None and now - _dash_cache["ts"] < _DASH_TTL:
         return JSONResponse(_dash_cache["data"])
 
-    result = {"stats": {}, "signals": [], "positions": [],
-              "health": {}, "performance": {}, "market_regime": {}}
+    result = {
+        "stats": {},
+        "signals": [],
+        "positions": [],
+        "health": {},
+        "performance": {},
+        "market_regime": {},
+    }
 
     try:
         result["stats"] = await _get_stats() or {}
@@ -255,7 +278,8 @@ async def api_public_dashboard():
 
     # open positions = open signals (public proxy), normalised to signal shape
     result["positions"] = [
-        s for s in result["signals"]
+        s
+        for s in result["signals"]
         if isinstance(s, dict) and str(s.get("status", "")).upper() == "OPEN"
     ][:20]
 
@@ -292,23 +316,29 @@ async def api_public_signals(limit: int = 50):
                     Signal.strategy == _MTF_STRATEGY,
                     Signal.timeframe.in_(_MTF_TIMEFRAMES),
                 )
-                .order_by(desc(Signal.created_at)).limit(limit)
+                .order_by(desc(Signal.created_at))
+                .limit(limit)
             )
             rows = res.scalars().all()
-        return JSONResponse([{
-            "id": s.id,
-            "symbol": s.symbol,
-            "side": s.side,
-            "timeframe": s.timeframe,
-            "confidence": round(float(s.confidence or 0), 1),
-            "risk_reward": round(float(s.risk_reward or 0), 2),
-            "status": s.status,
-            "pnl_pct": round(float(s.pnl_pct or 0), 2),
-            "entry_low": round(float(s.entry_low or 0), 6),
-            "tp1": round(float(s.tp1 or 0), 6),
-            "sl": round(float(s.stop_loss or 0), 6),
-            "created_at": s.created_at.isoformat() if s.created_at else None,
-        } for s in rows])
+        return JSONResponse(
+            [
+                {
+                    "id": s.id,
+                    "symbol": s.symbol,
+                    "side": s.side,
+                    "timeframe": s.timeframe,
+                    "confidence": round(float(s.confidence or 0), 1),
+                    "risk_reward": round(float(s.risk_reward or 0), 2),
+                    "status": s.status,
+                    "pnl_pct": round(float(s.pnl_pct or 0), 2),
+                    "entry_low": round(float(s.entry_low or 0), 6),
+                    "tp1": round(float(s.tp1 or 0), 6),
+                    "sl": round(float(s.stop_loss or 0), 6),
+                    "created_at": s.created_at.isoformat() if s.created_at else None,
+                }
+                for s in rows
+            ]
+        )
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=500)
 
@@ -337,8 +367,7 @@ async def api_public_performance():
             closed = list(closed_res.scalars().all())
 
             open_cnt_res = await session.execute(
-                select(_sqlfunc.count(Signal.id))
-                .where(
+                select(_sqlfunc.count(Signal.id)).where(
                     Signal.status == "OPEN",
                     Signal.strategy == _MTF_STRATEGY,
                     Signal.timeframe.in_(_MTF_TIMEFRAMES),
@@ -359,40 +388,41 @@ async def api_public_performance():
             sl = [s for s in sigs if s.status == "SL"]
             sp = [float(s.pnl_pct or 0) for s in sigs]
             sr = [float(s.risk_reward or 0) for s in sigs]
-            n  = max(1, len(sigs))
+            n = max(1, len(sigs))
             return {
-                "total":    len(sigs),
-                "wins":     len(sw),
-                "losses":   len(sl),
+                "total": len(sigs),
+                "wins": len(sw),
+                "losses": len(sl),
                 "win_rate": round(len(sw) / n * 100, 1),
-                "avg_pnl":  round(sum(sp) / n, 2),
-                "avg_rr":   round(sum(sr) / n, 2),
+                "avg_pnl": round(sum(sp) / n, 2),
+                "avg_rr": round(sum(sr) / n, 2),
             }
 
         # ── overall metrics ────────────────────────────────────────────
         total_closed = len(closed)
-        wins   = [s for s in closed if s.status in WIN_ST]
+        wins = [s for s in closed if s.status in WIN_ST]
         losses = [s for s in closed if s.status == "SL"]
-        pnls   = [float(s.pnl_pct or 0)    for s in closed]
-        rrs    = [float(s.risk_reward or 0) for s in closed]
-        n      = max(1, total_closed)
+        pnls = [float(s.pnl_pct or 0) for s in closed]
+        rrs = [float(s.risk_reward or 0) for s in closed]
+        n = max(1, total_closed)
 
-        win_rate  = round(len(wins)   / n * 100, 1)
+        win_rate = round(len(wins) / n * 100, 1)
         loss_rate = round(len(losses) / n * 100, 1)
-        avg_pnl   = round(sum(pnls) / n, 2)
-        total_pnl = round(sum(pnls),     2)
-        avg_rr    = round(sum(rrs)  / n, 2)
+        avg_pnl = round(sum(pnls) / n, 2)
+        total_pnl = round(sum(pnls), 2)
+        avg_rr = round(sum(rrs) / n, 2)
         profit_factor = _pf(pnls)
 
         # hold time — skip signals without closed_at
         hold_times = [
             (s.closed_at - s.created_at).total_seconds() / 60
-            for s in closed if s.created_at and s.closed_at
+            for s in closed
+            if s.created_at and s.closed_at
         ]
         avg_hold_min = round(sum(hold_times) / len(hold_times), 0) if hold_times else None
 
         # ── LONG / SHORT ───────────────────────────────────────────────
-        long_sigs  = [s for s in closed if s.side == "LONG"]
+        long_sigs = [s for s in closed if s.side == "LONG"]
         short_sigs = [s for s in closed if s.side == "SHORT"]
 
         # ── symbol leaderboard ─────────────────────────────────────────
@@ -404,36 +434,42 @@ async def api_public_performance():
         for sym, sigs in sym_map.items():
             sw = [s for s in sigs if s.status in WIN_ST]
             sl = [s for s in sigs if s.status == "SL"]
-            sp = [float(s.pnl_pct or 0)    for s in sigs]
+            sp = [float(s.pnl_pct or 0) for s in sigs]
             sr = [float(s.risk_reward or 0) for s in sigs]
             nn = max(1, len(sigs))
             ls = [s for s in sigs if s.side == "LONG"]
             ss = [s for s in sigs if s.side == "SHORT"]
             lw = [s for s in ls if s.status in WIN_ST]
             shw = [s for s in ss if s.status in WIN_ST]
-            leaderboard_rows.append({
-                "symbol":    sym,
-                "total":     len(sigs),
-                "wins":      len(sw),
-                "losses":    len(sl),
-                "win_rate":  round(len(sw) / nn * 100, 1),
-                "avg_pnl":   round(sum(sp) / nn, 2),
-                "total_pnl": round(sum(sp), 2),
-                "avg_rr":    round(sum(sr) / nn, 2),
-                "long": {
-                    "total":   len(ls),
-                    "wins":    len(lw),
-                    "avg_pnl": round(sum(float(s.pnl_pct or 0) for s in ls) / max(1, len(ls)), 2),
-                },
-                "short": {
-                    "total":   len(ss),
-                    "wins":    len(shw),
-                    "avg_pnl": round(sum(float(s.pnl_pct or 0) for s in ss) / max(1, len(ss)), 2),
-                },
-            })
+            leaderboard_rows.append(
+                {
+                    "symbol": sym,
+                    "total": len(sigs),
+                    "wins": len(sw),
+                    "losses": len(sl),
+                    "win_rate": round(len(sw) / nn * 100, 1),
+                    "avg_pnl": round(sum(sp) / nn, 2),
+                    "total_pnl": round(sum(sp), 2),
+                    "avg_rr": round(sum(sr) / nn, 2),
+                    "long": {
+                        "total": len(ls),
+                        "wins": len(lw),
+                        "avg_pnl": round(
+                            sum(float(s.pnl_pct or 0) for s in ls) / max(1, len(ls)), 2
+                        ),
+                    },
+                    "short": {
+                        "total": len(ss),
+                        "wins": len(shw),
+                        "avg_pnl": round(
+                            sum(float(s.pnl_pct or 0) for s in ss) / max(1, len(ss)), 2
+                        ),
+                    },
+                }
+            )
 
         leaderboard_rows.sort(key=lambda x: x["total_pnl"], reverse=True)
-        best5  = sorted(leaderboard_rows, key=lambda x: x["avg_pnl"], reverse=True)[:5]
+        best5 = sorted(leaderboard_rows, key=lambda x: x["avg_pnl"], reverse=True)[:5]
         worst5 = sorted(leaderboard_rows, key=lambda x: x["avg_pnl"])[:5]
 
         # ── monthly breakdown ──────────────────────────────────────────
@@ -444,45 +480,57 @@ async def api_public_performance():
 
         monthly_rows = []
         for month, msigs in sorted(mo_map.items()):
-            mw  = [s for s in msigs if s.status in WIN_ST]
-            ml  = [s for s in msigs if s.status == "SL"]
-            mp  = [float(s.pnl_pct or 0) for s in msigs]
-            mn  = max(1, len(msigs))
-            monthly_rows.append({
-                "month":         month,
-                "signals":       len(msigs),
-                "wins":          len(mw),
-                "losses":        len(ml),
-                "win_rate":      round(len(mw) / mn * 100, 1),
-                "total_pnl":     round(sum(mp), 2),
-                "profit_factor": _pf(mp),
-            })
+            mw = [s for s in msigs if s.status in WIN_ST]
+            ml = [s for s in msigs if s.status == "SL"]
+            mp = [float(s.pnl_pct or 0) for s in msigs]
+            mn = max(1, len(msigs))
+            monthly_rows.append(
+                {
+                    "month": month,
+                    "signals": len(msigs),
+                    "wins": len(mw),
+                    "losses": len(ml),
+                    "win_rate": round(len(mw) / mn * 100, 1),
+                    "total_pnl": round(sum(mp), 2),
+                    "profit_factor": _pf(mp),
+                }
+            )
 
-        return JSONResponse({
-            # ── primary schema (Sprint 4) ──────────────────────────────
-            "total_signals":        total_closed + open_count,
-            "closed_signals":       total_closed,
-            "open_signals":         open_count,
-            "win_rate":             win_rate,
-            "loss_rate":            loss_rate,
-            "avg_pnl":              avg_pnl,
-            "total_pnl":            total_pnl,
-            "avg_rr":               avg_rr,
-            "profit_factor":        profit_factor,   # null when no losses
-            "avg_hold_time_minutes":avg_hold_min,
-            "long":                 _side_stat(long_sigs),
-            "short":                _side_stat(short_sigs),
-            "best_symbols":         [{"symbol": x["symbol"], "avg": x["avg_pnl"], "count": x["total"]} for x in best5],
-            "worst_symbols":        [{"symbol": x["symbol"], "avg": x["avg_pnl"], "count": x["total"]} for x in worst5],
-            "symbol_leaderboard":   leaderboard_rows,
-            "monthly":              monthly_rows,
-            # ── backward-compat aliases ────────────────────────────────
-            "total_closed":         total_closed,
-            "wins":                 len(wins),
-            "losses":               len(losses),
-            "avg_hold_min":         avg_hold_min,
-            "leaderboard": [{"symbol": x["symbol"], "avg": x["avg_pnl"], "count": x["total"]} for x in leaderboard_rows[:10]],
-        })
+        return JSONResponse(
+            {
+                # ── primary schema (Sprint 4) ──────────────────────────────
+                "total_signals": total_closed + open_count,
+                "closed_signals": total_closed,
+                "open_signals": open_count,
+                "win_rate": win_rate,
+                "loss_rate": loss_rate,
+                "avg_pnl": avg_pnl,
+                "total_pnl": total_pnl,
+                "avg_rr": avg_rr,
+                "profit_factor": profit_factor,  # null when no losses
+                "avg_hold_time_minutes": avg_hold_min,
+                "long": _side_stat(long_sigs),
+                "short": _side_stat(short_sigs),
+                "best_symbols": [
+                    {"symbol": x["symbol"], "avg": x["avg_pnl"], "count": x["total"]} for x in best5
+                ],
+                "worst_symbols": [
+                    {"symbol": x["symbol"], "avg": x["avg_pnl"], "count": x["total"]}
+                    for x in worst5
+                ],
+                "symbol_leaderboard": leaderboard_rows,
+                "monthly": monthly_rows,
+                # ── backward-compat aliases ────────────────────────────────
+                "total_closed": total_closed,
+                "wins": len(wins),
+                "losses": len(losses),
+                "avg_hold_min": avg_hold_min,
+                "leaderboard": [
+                    {"symbol": x["symbol"], "avg": x["avg_pnl"], "count": x["total"]}
+                    for x in leaderboard_rows[:10]
+                ],
+            }
+        )
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=500)
 
@@ -492,8 +540,9 @@ async def api_paper():
     """Paper trading — stats + latest positions (Sprint 6 primary endpoint)."""
     try:
         from app.paper.trading import get_portfolio_stats, get_positions
+
         stats = await get_portfolio_stats()
-        open_pos   = await get_positions(status="open",   limit=50)
+        open_pos = await get_positions(status="open", limit=50)
         closed_pos = await get_positions(status="closed", limit=50)
         return JSONResponse({**stats, "open": open_pos, "closed": closed_pos})
     except Exception as exc:
@@ -506,6 +555,7 @@ async def api_paper_positions(status: str = "", limit: int = 100):
     limit = min(max(1, limit), 500)
     try:
         from app.paper.trading import get_positions
+
         rows = await get_positions(
             status=status.lower() if status else None,
             limit=limit,
@@ -520,6 +570,7 @@ async def api_paper_stats():
     """Paper trading — portfolio statistics only."""
     try:
         from app.paper.trading import get_portfolio_stats
+
         return JSONResponse(await get_portfolio_stats())
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=500)
@@ -538,31 +589,33 @@ async def api_public_signal(signal_id: int):
         if sig is None:
             return JSONResponse({"error": "not found"}, status_code=404)
         reasons_list = [r.strip() for r in (sig.reasons or "").split("|") if r.strip()]
-        return JSONResponse({
-            "id": sig.id,
-            "symbol": sig.symbol,
-            "side": sig.side,
-            "timeframe": sig.timeframe,
-            "confidence": round(float(sig.confidence or 0), 1),
-            "risk_reward": round(float(sig.risk_reward or 0), 2),
-            "risk_level": sig.risk_level or "",
-            "strategy": sig.strategy or "",
-            "status": sig.status,
-            "pnl_pct": round(float(sig.pnl_pct or 0), 2),
-            "entry_low": round(float(sig.entry_low or 0), 6),
-            "entry_high": round(float(sig.entry_high or 0), 6),
-            "tp1": round(float(sig.tp1 or 0), 6),
-            "tp2": round(float(sig.tp2 or 0), 6),
-            "tp3": round(float(sig.tp3 or 0), 6),
-            "stop_loss": round(float(sig.stop_loss or 0), 6),
-            "trend_score": sig.trend_score,
-            "structure_score": sig.structure_score,
-            "setup_score": sig.setup_score,
-            "entry_score": sig.entry_score,
-            "reasons": reasons_list,
-            "created_at": sig.created_at.isoformat() if sig.created_at else None,
-            "closed_at": sig.closed_at.isoformat() if sig.closed_at else None,
-        })
+        return JSONResponse(
+            {
+                "id": sig.id,
+                "symbol": sig.symbol,
+                "side": sig.side,
+                "timeframe": sig.timeframe,
+                "confidence": round(float(sig.confidence or 0), 1),
+                "risk_reward": round(float(sig.risk_reward or 0), 2),
+                "risk_level": sig.risk_level or "",
+                "strategy": sig.strategy or "",
+                "status": sig.status,
+                "pnl_pct": round(float(sig.pnl_pct or 0), 2),
+                "entry_low": round(float(sig.entry_low or 0), 6),
+                "entry_high": round(float(sig.entry_high or 0), 6),
+                "tp1": round(float(sig.tp1 or 0), 6),
+                "tp2": round(float(sig.tp2 or 0), 6),
+                "tp3": round(float(sig.tp3 or 0), 6),
+                "stop_loss": round(float(sig.stop_loss or 0), 6),
+                "trend_score": sig.trend_score,
+                "structure_score": sig.structure_score,
+                "setup_score": sig.setup_score,
+                "entry_score": sig.entry_score,
+                "reasons": reasons_list,
+                "created_at": sig.created_at.isoformat() if sig.created_at else None,
+                "closed_at": sig.closed_at.isoformat() if sig.closed_at else None,
+            }
+        )
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=500)
 
@@ -574,6 +627,7 @@ async def api_public_diagnostics(signal_id: int):
     Includes per-layer scores, funding/OI/liquidity scores, and RR method.
     """
     import json as _json
+
     try:
         async with SessionLocal() as session:
             sig = await session.get(Signal, signal_id)
@@ -585,14 +639,16 @@ async def api_public_diagnostics(signal_id: int):
                 diag = _json.loads(sig.diagnostics)
             except Exception:
                 diag = {}
-        return JSONResponse({
-            "signal_id":  signal_id,
-            "symbol":     sig.symbol,
-            "side":       sig.side,
-            "confidence": round(float(sig.confidence or 0), 1),
-            "rr_method":  sig.rr_method or "atr",
-            "diagnostics": diag,
-        })
+        return JSONResponse(
+            {
+                "signal_id": signal_id,
+                "symbol": sig.symbol,
+                "side": sig.side,
+                "confidence": round(float(sig.confidence or 0), 1),
+                "rr_method": sig.rr_method or "atr",
+                "diagnostics": diag,
+            }
+        )
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=500)
 
@@ -606,6 +662,7 @@ async def api_public_winrate_analysis():
     """
     try:
         from app.analytics.winrate import compute_winrate_analysis
+
         result = await compute_winrate_analysis()
         return JSONResponse(result)
     except Exception as exc:
@@ -616,6 +673,7 @@ async def api_public_winrate_analysis():
 async def api_public_languages():
     """List of all supported UI languages with code and native name."""
     from app.dashboard.i18n import SUPPORTED_LANGUAGES
+
     return JSONResponse({"languages": SUPPORTED_LANGUAGES, "count": len(SUPPORTED_LANGUAGES)})
 
 
@@ -623,8 +681,10 @@ async def api_public_languages():
 async def api_public_translations(lang: str = "en"):
     """Lazy-load the full translation map for *lang*. Falls back to English."""
     import re as _re
+
     safe = _re.sub(r"[^a-zA-Z]", "", lang)[:8].lower() or "en"
     from app.dashboard.i18n import load_locale
+
     return JSONResponse(load_locale(safe))
 
 
@@ -633,51 +693,53 @@ async def api_public_strategy():
     """Public strategy engine config — exact filters and logic descriptions powering the bot."""
     entry_pass = int(os.getenv("ENTRY_PASS_SCORE", str(settings.entry_pass_score)))
     cooldown_min = round(settings.signal_cooldown_sec / 60, 1)
-    return JSONResponse({
-        "timeframes": {
-            "trend":     "1D",
-            "structure": "4H",
-            "setup":     "1H",
-            "entry":     "15M",
-        },
-        "filters": {
-            "min_confidence":      settings.min_confidence,
-            "min_rr":              settings.min_rr,
-            "entry_pass_score":    entry_pass,
-            "max_signals_per_hour": settings.max_signals_per_hour,
-            "cooldown_seconds":    settings.signal_cooldown_sec,
-        },
-        "strategy": {
-            "trend_engine": (
-                "EMA50 vs EMA200 cross required. LONG: EMA50 > EMA200. "
-                "SHORT: EMA50 < EMA200. BOS/MSS market structure confirmation. "
-                "Score: 10 base + EMA separation bonus (max 5) + structure bonus (5) = max 20 pts."
-            ),
-            "structure_engine": (
-                "4H confluence: BOS · CHoCH · Order Block · Fair Value Gap · Liquidity Sweep. "
-                "Minimum 2/5 hits required. Each extra hit adds confidence bonus."
-            ),
-            "setup_engine": (
-                "1H conditions: Pullback zone · Retest · VWAP alignment · EMA alignment · Volume spike. "
-                "Minimum 3/5 conditions required. Extra hits add confidence bonus."
-            ),
-            "entry_engine": (
-                f"15M factors (each 1 pt, max 5): BOS · FVG retest · OB retest · "
-                f"EMA pullback · VWAP reclaim. Minimum {entry_pass}/5 required to trigger entry."
-            ),
-            "funding_engine": (
-                "Funding rate classification: Neutral (|rate| < 0.03%), "
-                "Crowded Long (rate > 0.08%), Crowded Short (rate < -0.08%). "
-                "Extreme funding blocks signal emission. Filter weight: 10 pts."
-            ),
-            "risk_engine": (
-                f"Confidence gate: ≥ {settings.min_confidence}%. "
-                f"RR gate: ≥ 1:{settings.min_rr}. "
-                f"Rate limiter: max {settings.max_signals_per_hour}/hr. "
-                f"Cooldown: {cooldown_min} min per symbol+side."
-            ),
-        },
-    })
+    return JSONResponse(
+        {
+            "timeframes": {
+                "trend": "1D",
+                "structure": "4H",
+                "setup": "1H",
+                "entry": "15M",
+            },
+            "filters": {
+                "min_confidence": settings.min_confidence,
+                "min_rr": settings.min_rr,
+                "entry_pass_score": entry_pass,
+                "max_signals_per_hour": settings.max_signals_per_hour,
+                "cooldown_seconds": settings.signal_cooldown_sec,
+            },
+            "strategy": {
+                "trend_engine": (
+                    "EMA50 vs EMA200 cross required. LONG: EMA50 > EMA200. "
+                    "SHORT: EMA50 < EMA200. BOS/MSS market structure confirmation. "
+                    "Score: 10 base + EMA separation bonus (max 5) + structure bonus (5) = max 20 pts."
+                ),
+                "structure_engine": (
+                    "4H confluence: BOS · CHoCH · Order Block · Fair Value Gap · Liquidity Sweep. "
+                    "Minimum 2/5 hits required. Each extra hit adds confidence bonus."
+                ),
+                "setup_engine": (
+                    "1H conditions: Pullback zone · Retest · VWAP alignment · EMA alignment · Volume spike. "
+                    "Minimum 3/5 conditions required. Extra hits add confidence bonus."
+                ),
+                "entry_engine": (
+                    f"15M factors (each 1 pt, max 5): BOS · FVG retest · OB retest · "
+                    f"EMA pullback · VWAP reclaim. Minimum {entry_pass}/5 required to trigger entry."
+                ),
+                "funding_engine": (
+                    "Funding rate classification: Neutral (|rate| < 0.03%), "
+                    "Crowded Long (rate > 0.08%), Crowded Short (rate < -0.08%). "
+                    "Extreme funding blocks signal emission. Filter weight: 10 pts."
+                ),
+                "risk_engine": (
+                    f"Confidence gate: ≥ {settings.min_confidence}%. "
+                    f"RR gate: ≥ 1:{settings.min_rr}. "
+                    f"Rate limiter: max {settings.max_signals_per_hour}/hr. "
+                    f"Cooldown: {cooldown_min} min per symbol+side."
+                ),
+            },
+        }
+    )
 
 
 @app.get("/api/public/paper")
@@ -708,48 +770,57 @@ async def api_public_paper():
             size = running_balance * RISK_PCT
             pnl_usdt = round(size * float(s.pnl_pct or 0) / 100, 2)
             running_balance += pnl_usdt
-            closed_rows.append({
+            closed_rows.append(
+                {
+                    "id": s.id,
+                    "symbol": s.symbol,
+                    "side": s.side,
+                    "entry": round(float(s.entry_low or 0), 6),
+                    "sl": round(float(s.stop_loss or 0), 6),
+                    "tp1": round(float(s.tp1 or 0), 6),
+                    "status": s.status,
+                    "pnl_pct": round(float(s.pnl_pct or 0), 2),
+                    "pnl_usdt": pnl_usdt,
+                    "opened": s.created_at.strftime("%m-%d %H:%M") if s.created_at else "-",
+                    "opened_iso": normalize_utc_iso(s.created_at),
+                }
+            )
+
+        open_rows = [
+            {
                 "id": s.id,
                 "symbol": s.symbol,
                 "side": s.side,
                 "entry": round(float(s.entry_low or 0), 6),
                 "sl": round(float(s.stop_loss or 0), 6),
                 "tp1": round(float(s.tp1 or 0), 6),
-                "status": s.status,
-                "pnl_pct": round(float(s.pnl_pct or 0), 2),
-                "pnl_usdt": pnl_usdt,
+                "conf": round(float(s.confidence or 0), 1),
+                "rr": round(float(s.risk_reward or 0), 2),
                 "opened": s.created_at.strftime("%m-%d %H:%M") if s.created_at else "-",
                 "opened_iso": normalize_utc_iso(s.created_at),
-            })
-
-        open_rows = [{
-            "id": s.id,
-            "symbol": s.symbol,
-            "side": s.side,
-            "entry": round(float(s.entry_low or 0), 6),
-            "sl": round(float(s.stop_loss or 0), 6),
-            "tp1": round(float(s.tp1 or 0), 6),
-            "conf": round(float(s.confidence or 0), 1),
-            "rr": round(float(s.risk_reward or 0), 2),
-            "opened": s.created_at.strftime("%m-%d %H:%M") if s.created_at else "-",
-            "opened_iso": normalize_utc_iso(s.created_at),
-        } for s in open_pos]
+            }
+            for s in open_pos
+        ]
 
         wins = [r for r in closed_rows if r["status"] in ("TP1", "TP2", "TP3")]
         total_pnl_usdt = round(sum(r["pnl_usdt"] for r in closed_rows), 2)
         win_rate = round(len(wins) / max(1, len(closed_rows)) * 100, 1)
 
-        return JSONResponse({
-            "initial_balance": INITIAL_BALANCE,
-            "current_balance": round(running_balance, 2),
-            "total_pnl_usdt": total_pnl_usdt,
-            "total_pnl_pct": round((running_balance - INITIAL_BALANCE) / INITIAL_BALANCE * 100, 2),
-            "win_rate": win_rate,
-            "total_trades": len(closed_rows),
-            "open_count": len(open_rows),
-            "open": open_rows,
-            "closed": list(reversed(closed_rows))[:50],
-        })
+        return JSONResponse(
+            {
+                "initial_balance": INITIAL_BALANCE,
+                "current_balance": round(running_balance, 2),
+                "total_pnl_usdt": total_pnl_usdt,
+                "total_pnl_pct": round(
+                    (running_balance - INITIAL_BALANCE) / INITIAL_BALANCE * 100, 2
+                ),
+                "win_rate": win_rate,
+                "total_trades": len(closed_rows),
+                "open_count": len(open_rows),
+                "open": open_rows,
+                "closed": list(reversed(closed_rows))[:50],
+            }
+        )
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=500)
 
@@ -764,30 +835,38 @@ def _compute_backtest(signals: list) -> dict:
     from collections import defaultdict as _dd
 
     _EMPTY = {
-        "total": 0, "wins": 0, "losses": 0,
-        "win_rate": 0.0, "profit_factor": 0.0,
-        "max_drawdown": 0.0, "max_drawdown_pct": 0.0,
-        "sharpe_ratio": 0.0, "avg_rr": 0.0, "avg_pnl": 0.0,
-        "total_pnl": 0.0, "rr_distribution": [],
-        "equity_curve": [0.0], "monthly": [],
+        "total": 0,
+        "wins": 0,
+        "losses": 0,
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "max_drawdown": 0.0,
+        "max_drawdown_pct": 0.0,
+        "sharpe_ratio": 0.0,
+        "avg_rr": 0.0,
+        "avg_pnl": 0.0,
+        "total_pnl": 0.0,
+        "rr_distribution": [],
+        "equity_curve": [0.0],
+        "monthly": [],
     }
     if not signals:
         return _EMPTY
 
     WIN_ST = ("TP1", "TP2", "TP3")
-    wins   = [s for s in signals if s.status in WIN_ST]
+    wins = [s for s in signals if s.status in WIN_ST]
     losses = [s for s in signals if s.status == "SL"]
-    pnls   = [float(s.pnl_pct   or 0) for s in signals]
-    rrs    = [float(s.risk_reward or 0) for s in signals]
-    n      = len(signals)
+    pnls = [float(s.pnl_pct or 0) for s in signals]
+    rrs = [float(s.risk_reward or 0) for s in signals]
+    n = len(signals)
 
     # ── core metrics ──────────────────────────────────────────────
-    gross_win  = sum(p for p in pnls if p > 0)
+    gross_win = sum(p for p in pnls if p > 0)
     gross_loss = abs(sum(p for p in pnls if p < 0))
     profit_factor = round(gross_win / gross_loss, 2) if gross_loss > 0 else None
 
     mean_pnl = sum(pnls) / max(1, n)
-    sharpe   = 0.0
+    sharpe = 0.0
     if n > 1:
         var = sum((p - mean_pnl) ** 2 for p in pnls) / n
         sharpe = round(mean_pnl / max(0.001, _m.sqrt(var)), 2)
@@ -796,7 +875,7 @@ def _compute_backtest(signals: list) -> dict:
     cum = peak = max_dd = 0.0
     equity_curve = [0.0]
     for p in pnls:
-        cum   = round(cum + p, 2)
+        cum = round(cum + p, 2)
         equity_curve.append(cum)
         if cum > peak:
             peak = cum
@@ -810,8 +889,7 @@ def _compute_backtest(signals: list) -> dict:
         b = f"{_m.floor(rr * 2) / 2:.1f}"
         rr_buckets[b] = rr_buckets.get(b, 0) + 1
     rr_dist = sorted(
-        [{"rr": k, "count": v} for k, v in rr_buckets.items()],
-        key=lambda x: float(x["rr"])
+        [{"rr": k, "count": v} for k, v in rr_buckets.items()], key=lambda x: float(x["rr"])
     )
 
     # ── monthly breakdown ─────────────────────────────────────────
@@ -822,46 +900,48 @@ def _compute_backtest(signals: list) -> dict:
 
     monthly_rows = []
     for month, msigs in sorted(mo_map.items()):
-        mw   = [s for s in msigs if s.status in WIN_ST]
-        ml   = [s for s in msigs if s.status == "SL"]
-        mp   = [float(s.pnl_pct or 0) for s in msigs]
-        mn   = max(1, len(msigs))
-        mgw  = sum(p for p in mp if p > 0)
-        mgl  = abs(sum(p for p in mp if p < 0))
+        mw = [s for s in msigs if s.status in WIN_ST]
+        ml = [s for s in msigs if s.status == "SL"]
+        mp = [float(s.pnl_pct or 0) for s in msigs]
+        mn = max(1, len(msigs))
+        mgw = sum(p for p in mp if p > 0)
+        mgl = abs(sum(p for p in mp if p < 0))
         m_pf = round(mgw / mgl, 2) if mgl > 0 else None
-        monthly_rows.append({
-            "month":         month,
-            "signals":       len(msigs),
-            "wins":          len(mw),
-            "losses":        len(ml),
-            "win_rate":      round(len(mw) / mn * 100, 1),
-            "total_pnl":     round(sum(mp), 2),
-            "profit_factor": m_pf,
-        })
+        monthly_rows.append(
+            {
+                "month": month,
+                "signals": len(msigs),
+                "wins": len(mw),
+                "losses": len(ml),
+                "win_rate": round(len(mw) / mn * 100, 1),
+                "total_pnl": round(sum(mp), 2),
+                "profit_factor": m_pf,
+            }
+        )
 
     return {
-        "total":            n,
-        "wins":             len(wins),
-        "losses":           len(losses),
-        "win_rate":         round(len(wins) / n * 100, 1),
-        "profit_factor":    profit_factor,
-        "max_drawdown":     round(max_dd, 2),
-        "max_drawdown_pct": round(max_dd, 2),   # backward-compat alias
-        "sharpe_ratio":     sharpe,
-        "avg_rr":           round(sum(rrs) / max(1, n), 2),
-        "avg_pnl":          round(mean_pnl, 2),
-        "total_pnl":        round(sum(pnls), 2),
-        "rr_distribution":  rr_dist,
-        "equity_curve":     equity_curve[-61:],  # max 61 points (60 trades + start)
-        "monthly":          monthly_rows,
+        "total": n,
+        "wins": len(wins),
+        "losses": len(losses),
+        "win_rate": round(len(wins) / n * 100, 1),
+        "profit_factor": profit_factor,
+        "max_drawdown": round(max_dd, 2),
+        "max_drawdown_pct": round(max_dd, 2),  # backward-compat alias
+        "sharpe_ratio": sharpe,
+        "avg_rr": round(sum(rrs) / max(1, n), 2),
+        "avg_pnl": round(mean_pnl, 2),
+        "total_pnl": round(sum(pnls), 2),
+        "rr_distribution": rr_dist,
+        "equity_curve": equity_curve[-61:],  # max 61 points (60 trades + start)
+        "monthly": monthly_rows,
     }
 
 
 @app.get("/api/backtest/run")
 async def api_backtest_run(
-    symbol:   str = "BTCUSDT",
-    start:    str = "",
-    end:      str = "",
+    symbol: str = "BTCUSDT",
+    start: str = "",
+    end: str = "",
     strategy: str = "V3.2",
 ):
     """
@@ -883,6 +963,7 @@ async def api_backtest_run(
     # Default date range: last 90 days
     from datetime import datetime, timedelta
     from datetime import timezone as _tz
+
     _today = datetime.now(_tz.utc).date()
     if not end:
         end = str(_today - timedelta(days=1))
@@ -967,6 +1048,7 @@ def _cache_set(key: str, val):
 
 # ── Sprint 12: Performance Analytics Center ───────────────────────
 
+
 @app.get("/api/public/performance-center")
 async def api_performance_center():
     """Multi-period signal analytics: 24h/7D/30D, bands, pairs, distribution."""
@@ -978,7 +1060,7 @@ async def api_performance_center():
 
     now = datetime.now(timezone.utc)
     cutoff_24h = now - timedelta(hours=24)
-    cutoff_7d  = now - timedelta(days=7)
+    cutoff_7d = now - timedelta(days=7)
     cutoff_30d = now - timedelta(days=30)
 
     WIN_ST = ("TP1", "TP2", "TP3")
@@ -998,24 +1080,28 @@ async def api_performance_center():
 
         def _period(sigs):
             closed = [s for s in sigs if s.status in ("TP1", "TP2", "TP3", "SL", "EXPIRED")]
-            open_s  = [s for s in sigs if s.status == "OPEN"]
+            open_s = [s for s in sigs if s.status == "OPEN"]
             tp1 = [s for s in sigs if s.status == "TP1"]
             tp2 = [s for s in sigs if s.status == "TP2"]
-            sl  = [s for s in sigs if s.status == "SL"]
+            sl = [s for s in sigs if s.status == "SL"]
             exp = [s for s in sigs if s.status == "EXPIRED"]
             wins = [s for s in closed if s.status in WIN_ST]
             nc = max(1, len(closed))
             wr = round(len(wins) / nc * 100, 1) if len(closed) >= 5 else None
             return {
-                "total": len(sigs), "closed": len(closed),
-                "tp1": len(tp1), "tp2": len(tp2),
-                "sl": len(sl), "expired": len(exp),
+                "total": len(sigs),
+                "closed": len(closed),
+                "tp1": len(tp1),
+                "tp2": len(tp2),
+                "sl": len(sl),
+                "expired": len(exp),
                 "open": len(open_s),
-                "closed_winrate": wr, "sample_ok": len(closed) >= 30,
+                "closed_winrate": wr,
+                "sample_ok": len(closed) >= 30,
             }
 
         sigs_24h = [s for s in all_sigs if s.created_at and s.created_at >= cutoff_24h]
-        sigs_7d  = [s for s in all_sigs if s.created_at and s.created_at >= cutoff_7d]
+        sigs_7d = [s for s in all_sigs if s.created_at and s.created_at >= cutoff_7d]
         sigs_30d = all_sigs
 
         closed_30d = [s for s in sigs_30d if s.status in ("TP1", "TP2", "TP3", "SL")]
@@ -1026,7 +1112,7 @@ async def api_performance_center():
             n = max(1, len(sigs))
             return {"total": len(sigs), "winrate": round(len(wins) / n * 100, 1)}
 
-        long_30d  = [s for s in closed_30d if s.side == "LONG"]
+        long_30d = [s for s in closed_30d if s.side == "LONG"]
         short_30d = [s for s in closed_30d if s.side == "SHORT"]
 
         # Best / Worst pairs
@@ -1037,31 +1123,38 @@ async def api_performance_center():
         pair_rows = []
         for sym, sigs in sym_map.items():
             wins = [s for s in sigs if s.status in WIN_ST]
-            rrs  = [float(s.risk_reward or 0) for s in sigs]
+            rrs = [float(s.risk_reward or 0) for s in sigs]
             n = len(sigs)
-            pair_rows.append({
-                "symbol": sym, "total": n,
-                "winrate": round(len(wins) / n * 100, 1),
-                "avg_rr": round(sum(rrs) / max(1, n), 2),
-            })
+            pair_rows.append(
+                {
+                    "symbol": sym,
+                    "total": n,
+                    "winrate": round(len(wins) / n * 100, 1),
+                    "avg_rr": round(sum(rrs) / max(1, n), 2),
+                }
+            )
 
-        best_pairs  = sorted(pair_rows, key=lambda x: x["winrate"], reverse=True)[:5]
+        best_pairs = sorted(pair_rows, key=lambda x: x["winrate"], reverse=True)[:5]
         worst_pairs = sorted(pair_rows, key=lambda x: x["winrate"])[:5]
 
         # Confidence bands (30D all statuses)
         def _band(lo, hi):
             bsigs = [s for s in sigs_30d if lo <= float(s.confidence or 0) < hi]
-            wins  = [s for s in bsigs if s.status in WIN_ST]
+            wins = [s for s in bsigs if s.status in WIN_ST]
             losses = [s for s in bsigs if s.status == "SL"]
             n = len(bsigs)
             return {
-                "signals": n, "wins": len(wins), "losses": len(losses),
+                "signals": n,
+                "wins": len(wins),
+                "losses": len(losses),
                 "winrate": round(len(wins) / n * 100, 1) if n >= 3 else None,
             }
 
         # Status distribution (30D)
-        status_dist = {k: sum(1 for s in sigs_30d if s.status == k)
-                       for k in ("OPEN", "TP1", "TP2", "SL", "EXPIRED")}
+        status_dist = {
+            k: sum(1 for s in sigs_30d if s.status == k)
+            for k in ("OPEN", "TP1", "TP2", "SL", "EXPIRED")
+        }
 
         total_closed_30d = len(closed_30d)
 
@@ -1069,15 +1162,15 @@ async def api_performance_center():
             "sample_size": total_closed_30d,
             "data_collecting": total_closed_30d < 30,
             "period_24h": _period(sigs_24h),
-            "period_7d":  _period(sigs_7d),
+            "period_7d": _period(sigs_7d),
             "period_30d": _period(sigs_30d),
             "long_vs_short": {"long": _side(long_30d), "short": _side(short_30d)},
-            "best_pairs":  best_pairs,
+            "best_pairs": best_pairs,
             "worst_pairs": worst_pairs,
             "confidence_bands": {
-                "75_80":   _band(75, 80),
-                "80_85":   _band(80, 85),
-                "85_90":   _band(85, 90),
+                "75_80": _band(75, 80),
+                "80_85": _band(80, 85),
+                "85_90": _band(85, 90),
                 "90_plus": _band(90, 200),
             },
             "status_distribution": status_dist,
@@ -1091,6 +1184,7 @@ async def api_performance_center():
 
 # ── Sprint 13: Market Radar ───────────────────────────────────────
 
+
 @app.get("/api/public/market-radar")
 async def api_market_radar():
     """Daily market intelligence: bias, risk, setups, sentiment."""
@@ -1098,10 +1192,9 @@ async def api_market_radar():
     if cached is not None:
         return JSONResponse(cached)
 
-
     now = datetime.now(timezone.utc)
     cutoff_24h = now - timedelta(hours=24)
-    cutoff_2h  = now - timedelta(hours=2)
+    cutoff_2h = now - timedelta(hours=2)
 
     try:
         async with SessionLocal() as session:
@@ -1126,10 +1219,11 @@ async def api_market_radar():
                 .subquery()
             )
             fund_res = await session.execute(
-                select(FundingRateSnapshot)
-                .join(fund_subq,
-                    (FundingRateSnapshot.symbol == fund_subq.c.symbol) &
-                    (FundingRateSnapshot.created_at == fund_subq.c.latest))
+                select(FundingRateSnapshot).join(
+                    fund_subq,
+                    (FundingRateSnapshot.symbol == fund_subq.c.symbol)
+                    & (FundingRateSnapshot.created_at == fund_subq.c.latest),
+                )
             )
             funding_snaps = list(fund_res.scalars().all())
 
@@ -1140,41 +1234,62 @@ async def api_market_radar():
             r = longs / len(sigs)
             return "BULLISH" if r >= 0.65 else ("BEARISH" if r <= 0.35 else "NEUTRAL")
 
-        btc_sigs   = [s for s in recent_sigs if s.symbol == "BTCUSDT"]
-        eth_sigs   = [s for s in recent_sigs if s.symbol == "ETHUSDT"]
+        btc_sigs = [s for s in recent_sigs if s.symbol == "BTCUSDT"]
+        eth_sigs = [s for s in recent_sigs if s.symbol == "ETHUSDT"]
         other_sigs = [s for s in recent_sigs if s.symbol not in ("BTCUSDT", "ETHUSDT")]
 
         extreme_pos = sum(1 for s in funding_snaps if s.classification == "extreme_positive")
         extreme_neg = sum(1 for s in funding_snaps if s.classification == "extreme_negative")
-        total_fund  = max(1, len(funding_snaps))
+        total_fund = max(1, len(funding_snaps))
         er = (extreme_pos + extreme_neg) / total_fund
         market_risk = "HIGH" if er >= 0.30 else ("MEDIUM" if er >= 0.12 else "LOW")
 
         strongest = [
             {
-                "symbol": s.symbol, "side": s.side,
+                "symbol": s.symbol,
+                "side": s.side,
                 "confidence": round(float(s.confidence or 0), 1),
                 "rr": round(float(s.risk_reward or 0), 2),
-                "status": s.status, "tf": s.timeframe,
+                "status": s.status,
+                "tf": s.timeframe,
             }
             for s in sorted(recent_sigs, key=lambda x: float(x.confidence or 0), reverse=True)[:10]
         ]
 
-        total_sigs   = len(recent_sigs)
-        long_count   = sum(1 for s in recent_sigs if s.side == "LONG")
-        short_count  = total_sigs - long_count
-        dir_score    = (long_count / max(1, total_sigs)) * 60
-        fund_adj     = -((extreme_pos - extreme_neg) / total_fund) * 20
+        total_sigs = len(recent_sigs)
+        long_count = sum(1 for s in recent_sigs if s.side == "LONG")
+        short_count = total_sigs - long_count
+        dir_score = (long_count / max(1, total_sigs)) * 60
+        fund_adj = -((extreme_pos - extreme_neg) / total_fund) * 20
         sentiment_score = max(0, min(100, round(dir_score + 20 + fund_adj)))
-        sentiment_label = "GREED" if sentiment_score >= 60 else ("FEAR" if sentiment_score <= 40 else "NEUTRAL")
+        sentiment_label = (
+            "GREED" if sentiment_score >= 60 else ("FEAR" if sentiment_score <= 40 else "NEUTRAL")
+        )
 
         _SECTOR_MAP = {
-            "Layer 1":  {"BTCUSDT","ETHUSDT","SOLUSDT","AVAXUSDT","DOTUSDT","NEARUSDT","ADAUSDT","TRXUSDT"},
-            "DeFi":     {"UNIUSDT","AAVEUSDT","COMPUSDT","CRVUSDT","MKRUSDT","DYDXUSDT","SNXUSDT"},
-            "Layer 2":  {"MATICUSDT","OPUSDT","ARBUSDT","STRKUSDT"},
-            "Meme":     {"DOGEUSDT","SHIBUSDT","PEPEUSDT","FLOKIUSDT","BONKUSDT","WIFUSDT"},
-            "AI/Data":  {"FETUSDT","WLDUSDT","TAOUSDT","RENDERUSDT","OCEANUSDT"},
-            "Gaming":   {"AXSUSDT","SANDUSDT","MANAUSDT","GALAUSDT","IMXUSDT"},
+            "Layer 1": {
+                "BTCUSDT",
+                "ETHUSDT",
+                "SOLUSDT",
+                "AVAXUSDT",
+                "DOTUSDT",
+                "NEARUSDT",
+                "ADAUSDT",
+                "TRXUSDT",
+            },
+            "DeFi": {
+                "UNIUSDT",
+                "AAVEUSDT",
+                "COMPUSDT",
+                "CRVUSDT",
+                "MKRUSDT",
+                "DYDXUSDT",
+                "SNXUSDT",
+            },
+            "Layer 2": {"MATICUSDT", "OPUSDT", "ARBUSDT", "STRKUSDT"},
+            "Meme": {"DOGEUSDT", "SHIBUSDT", "PEPEUSDT", "FLOKIUSDT", "BONKUSDT", "WIFUSDT"},
+            "AI/Data": {"FETUSDT", "WLDUSDT", "TAOUSDT", "RENDERUSDT", "OCEANUSDT"},
+            "Gaming": {"AXSUSDT", "SANDUSDT", "MANAUSDT", "GALAUSDT", "IMXUSDT"},
         }
         sector_stats = []
         for sector, syms in _SECTOR_MAP.items():
@@ -1182,10 +1297,13 @@ async def api_market_radar():
             if ssigs:
                 longs = sum(1 for s in ssigs if s.side == "LONG")
                 r = longs / len(ssigs)
-                sector_stats.append({
-                    "sector": sector, "signals": len(ssigs),
-                    "bias": "BULLISH" if r >= 0.6 else ("BEARISH" if r <= 0.4 else "NEUTRAL"),
-                })
+                sector_stats.append(
+                    {
+                        "sector": sector,
+                        "signals": len(ssigs),
+                        "bias": "BULLISH" if r >= 0.6 else ("BEARISH" if r <= 0.4 else "NEUTRAL"),
+                    }
+                )
         if not sector_stats:
             sector_stats = [{"sector": "Sector data collecting", "signals": 0, "bias": "NEUTRAL"}]
 
@@ -1342,41 +1460,48 @@ async def api_setup_library():
     return JSONResponse({"setups": _SETUP_LIBRARY, "count": len(_SETUP_LIBRARY)})
 
 
-
 # ── Sprint 19A: Market Regime ─────────────────────────────────────
+
 
 @app.get("/api/public/market-regime")
 async def api_public_market_regime():
     """Current market regime classification and supporting metrics."""
     try:
         from app.market_data.market_regime import get_market_regime
+
         regime = await get_market_regime()
         if regime is None:
             return JSONResponse(
-                {"error": "market regime not yet calculated — try again after the first scan cycle"},
+                {
+                    "error": "market regime not yet calculated — try again after the first scan cycle"
+                },
                 status_code=503,
             )
-        return JSONResponse({
-            "market_regime":   regime.market_regime,
-            "regime_score":    regime.regime_score,
-            "breadth":         regime.breadth_ema200,
-            "breadth_ema50":   regime.breadth_ema50,
-            "btc_trend":       regime.btc_trend,
-            "eth_trend":       regime.eth_trend,
-            "atr_percentile":  regime.atr_percentile,
-            "calculated_at":   regime.calculated_at,
-        })
+        return JSONResponse(
+            {
+                "market_regime": regime.market_regime,
+                "regime_score": regime.regime_score,
+                "breadth": regime.breadth_ema200,
+                "breadth_ema50": regime.breadth_ema50,
+                "btc_trend": regime.btc_trend,
+                "eth_trend": regime.eth_trend,
+                "atr_percentile": regime.atr_percentile,
+                "calculated_at": regime.calculated_at,
+            }
+        )
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=500)
 
 
 # ── Sprint 19B: Short Protection Analytics ────────────────────────
 
+
 @app.get("/api/public/short-protection")
 async def api_public_short_protection():
     """Short protection filter statistics — rejection counts and top reasons."""
     try:
         from app.scanner.short_protection import get_short_protection_stats
+
         stats = await get_short_protection_stats()
         return JSONResponse(stats)
     except Exception as exc:
@@ -1389,9 +1514,9 @@ async def affiliate_redirect(exchange: str, request: Request):
     exchange = exchange.lower().strip()
     url_map = {
         "binance": settings.binance_affiliate_url,
-        "bybit":   settings.bybit_affiliate_url,
-        "okx":     settings.okx_affiliate_url,
-        "bitget":  settings.bitget_affiliate_url,
+        "bybit": settings.bybit_affiliate_url,
+        "okx": settings.okx_affiliate_url,
+        "bitget": settings.bitget_affiliate_url,
     }
     dest = _safe_url(url_map.get(exchange, ""))
     if not dest:
@@ -1418,6 +1543,7 @@ async def affiliate_stats(request: Request):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     try:
         from sqlalchemy import func as sqlfunc
+
         async with SessionLocal() as session:
             res = await session.execute(
                 select(AffiliateClick.exchange, sqlfunc.count(AffiliateClick.id).label("clicks"))
@@ -1453,6 +1579,7 @@ async def api_performance_rebuild(request: Request):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     try:
         from app.performance.rebuild import rebuild as _rebuild
+
         result = await _rebuild()
         return JSONResponse(result)
     except Exception as exc:
@@ -1460,6 +1587,7 @@ async def api_performance_rebuild(request: Request):
 
 
 # ── monitoring (no auth) ──────────────────────────────────────────
+
 
 @app.get("/health", response_class=HTMLResponse)
 async def health():
@@ -1474,19 +1602,24 @@ async def api_health():
     telegram, scanner, worker, scheduler — plus activity metrics.
     Backward-compat fields (uptime_sec, components, config) are preserved.
     """
-    now_ts  = datetime.now(timezone.utc)
+    now_ts = datetime.now(timezone.utc)
     checked = now_ts.isoformat()
-    uptime  = round(time.time() - _boot_time)
+    uptime = round(time.time() - _boot_time)
 
-    def _svc(ok: bool, *, error: str | None = None,
-              latency_ms: float | None = None, detail: str | None = None,
-              **extra) -> dict:
+    def _svc(
+        ok: bool,
+        *,
+        error: str | None = None,
+        latency_ms: float | None = None,
+        detail: str | None = None,
+        **extra,
+    ) -> dict:
         s: dict = {
-            "ok":         ok,
-            "status":     "ONLINE" if ok else "OFFLINE",
+            "ok": ok,
+            "status": "ONLINE" if ok else "OFFLINE",
             "checked_at": checked,
             "latency_ms": latency_ms,
-            "error":      error,
+            "error": error,
         }
         if detail:
             s["detail"] = detail
@@ -1494,8 +1627,7 @@ async def api_health():
         return s
 
     # ── Dashboard ─────────────────────────────────────────────────────
-    svc_dashboard = _svc(True, detail=f"port {settings.dashboard_port}",
-                         uptime_seconds=uptime)
+    svc_dashboard = _svc(True, detail=f"port {settings.dashboard_port}", uptime_seconds=uptime)
 
     # ── Database ──────────────────────────────────────────────────────
     db_ok = False
@@ -1509,8 +1641,7 @@ async def api_health():
         db_ok = True
     except Exception as exc:
         db_err = str(exc)[:150]
-    svc_database = _svc(db_ok, latency_ms=db_lat, error=db_err,
-                        detail="PostgreSQL (asyncpg)")
+    svc_database = _svc(db_ok, latency_ms=db_lat, error=db_err, detail="PostgreSQL (asyncpg)")
 
     # ── Redis ─────────────────────────────────────────────────────────
     redis_ok = False
@@ -1518,6 +1649,7 @@ async def api_health():
     redis_err: str | None = None
     try:
         from app.market_data.cache import get_redis
+
         t0 = time.monotonic()
         r = await get_redis()
         await r.ping()
@@ -1525,13 +1657,14 @@ async def api_health():
         redis_ok = True
     except Exception as exc:
         redis_err = str(exc)[:150]
-    svc_redis = _svc(redis_ok, latency_ms=redis_lat, error=redis_err,
-                     detail="price & cooldown cache")
+    svc_redis = _svc(
+        redis_ok, latency_ms=redis_lat, error=redis_err, detail="price & cooldown cache"
+    )
 
     # ── Binance WebSocket price feed ──────────────────────────────────
     wsh = ws_health()
     binance_ok = bool(wsh.get("ok"))
-    feed_age   = wsh.get("last_update_age_sec")
+    feed_age = wsh.get("last_update_age_sec")
     svc_binance = _svc(
         binance_ok,
         error=None if binance_ok else "Price feed stale or disconnected",
@@ -1555,7 +1688,7 @@ async def api_health():
     if elapsed >= scan_iv:
         completed_scans = int(elapsed / scan_iv)
         last_scan_epoch = _boot_time + completed_scans * scan_iv
-        last_scan_iso   = datetime.fromtimestamp(last_scan_epoch, tz=timezone.utc).isoformat()
+        last_scan_iso = datetime.fromtimestamp(last_scan_epoch, tz=timezone.utc).isoformat()
     else:
         last_scan_iso = None
     svc_scanner = _svc(
@@ -1582,15 +1715,13 @@ async def api_health():
 
     # ── Activity metrics from DB ──────────────────────────────────────
     last_signal_iso: str | None = None
-    signals_today   = 0
+    signals_today = 0
     try:
         today_start = now_ts.replace(hour=0, minute=0, second=0, microsecond=0)
         async with SessionLocal() as s:
             # most recent signal
             res = await s.execute(
-                select(Signal.created_at)
-                .order_by(desc(Signal.created_at))
-                .limit(1)
+                select(Signal.created_at).order_by(desc(Signal.created_at)).limit(1)
             )
             ts = res.scalar_one_or_none()
             if ts:
@@ -1598,8 +1729,7 @@ async def api_health():
 
             # signals today
             cnt_res = await s.execute(
-                select(_sqlfunc.count(Signal.id))
-                .where(Signal.created_at >= today_start)
+                select(_sqlfunc.count(Signal.id)).where(Signal.created_at >= today_start)
             )
             signals_today = int(cnt_res.scalar() or 0)
     except Exception:
@@ -1607,53 +1737,57 @@ async def api_health():
 
     services = {
         "dashboard": svc_dashboard,
-        "database":  svc_database,
-        "redis":     svc_redis,
-        "binance":   svc_binance,
-        "telegram":  svc_telegram,
-        "scanner":   svc_scanner,
-        "worker":    svc_worker,
+        "database": svc_database,
+        "redis": svc_redis,
+        "binance": svc_binance,
+        "telegram": svc_telegram,
+        "scanner": svc_scanner,
+        "worker": svc_worker,
         "scheduler": svc_scheduler,
     }
 
     overall_ok = db_ok and redis_ok
 
-    return JSONResponse({
-        # ── Sprint 5 schema ────────────────────────────────────────────
-        "ok":              overall_ok,
-        "checked_at":      checked,
-        "uptime_seconds":  uptime,
-        "services":        services,
-        "last_scan_time":  last_scan_iso,
-        "last_signal_time":last_signal_iso,
-        "signals_today":   signals_today,
-        "errors_today":    0,
-        # ── backward-compat (admin dashboard JS reads these) ───────────
-        "brand":           "ARGUS QUANT",
-        "uptime_sec":      uptime,
-        "components": {
-            "dashboard": {"ok": True, "detail": f"port {settings.dashboard_port}"},
-            "database":  {"ok": db_ok,    "latency_ms": db_lat   or -1},
-            "redis":     {"ok": redis_ok, "latency_ms": redis_lat or -1},
-            "websocket": wsh,
-        },
-        "config": {
-            "min_confidence":     settings.min_confidence,
-            "min_rr":             settings.min_rr,
-            "scan_interval_sec":  settings.scan_interval_sec,
-            "max_signals_per_hour": settings.max_signals_per_hour,
-            "paper_trading":      settings.paper_trading,
-            "auto_trading_enabled": settings.auto_trading_enabled,
-        },
-    })
+    return JSONResponse(
+        {
+            # ── Sprint 5 schema ────────────────────────────────────────────
+            "ok": overall_ok,
+            "checked_at": checked,
+            "uptime_seconds": uptime,
+            "services": services,
+            "last_scan_time": last_scan_iso,
+            "last_signal_time": last_signal_iso,
+            "signals_today": signals_today,
+            "errors_today": 0,
+            # ── backward-compat (admin dashboard JS reads these) ───────────
+            "brand": "ARGUS QUANT",
+            "uptime_sec": uptime,
+            "components": {
+                "dashboard": {"ok": True, "detail": f"port {settings.dashboard_port}"},
+                "database": {"ok": db_ok, "latency_ms": db_lat or -1},
+                "redis": {"ok": redis_ok, "latency_ms": redis_lat or -1},
+                "websocket": wsh,
+            },
+            "config": {
+                "min_confidence": settings.min_confidence,
+                "min_rr": settings.min_rr,
+                "scan_interval_sec": settings.scan_interval_sec,
+                "max_signals_per_hour": settings.max_signals_per_hour,
+                "paper_trading": settings.paper_trading,
+                "auto_trading_enabled": settings.auto_trading_enabled,
+            },
+        }
+    )
 
 
 @app.get("/status")
 async def status_route():
     wsh = ws_health()
     return {
-        "status": "ok", "uptime_sec": round(time.time() - _boot_time),
-        "universe": len(universe.symbols), "websocket": wsh,
+        "status": "ok",
+        "uptime_sec": round(time.time() - _boot_time),
+        "universe": len(universe.symbols),
+        "websocket": wsh,
         "config": {
             "min_confidence": settings.min_confidence,
             "scan_interval_sec": settings.scan_interval_sec,
@@ -1674,6 +1808,7 @@ async def api_oi_status():
     """
     try:
         from datetime import timedelta
+
         cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
 
         async with SessionLocal() as session:
@@ -1688,11 +1823,10 @@ async def api_oi_status():
                 .subquery()
             )
             res = await session.execute(
-                select(OpenInterestSnapshot)
-                .join(
+                select(OpenInterestSnapshot).join(
                     subq,
-                    (OpenInterestSnapshot.symbol == subq.c.symbol) &
-                    (OpenInterestSnapshot.created_at == subq.c.latest),
+                    (OpenInterestSnapshot.symbol == subq.c.symbol)
+                    & (OpenInterestSnapshot.created_at == subq.c.latest),
                 )
             )
             snapshots = res.scalars().all()
@@ -1700,31 +1834,33 @@ async def api_oi_status():
         bullish = sum(1 for s in snapshots if s.oi_score > 0)
         bearish = sum(1 for s in snapshots if s.oi_score < 0)
         neutral = sum(1 for s in snapshots if s.oi_score == 0)
-        total   = len(snapshots)
+        total = len(snapshots)
 
         recent = sorted(snapshots, key=lambda s: s.created_at, reverse=True)[:20]
 
-        return JSONResponse({
-            "open_interest_status": "active" if total > 0 else "no_data",
-            "total_symbols":  total,
-            "bullish_oi":     bullish,
-            "bearish_oi":     bearish,
-            "neutral_oi":     neutral,
-            "snapshots": [
-                {
-                    "symbol":        s.symbol,
-                    "open_interest": s.open_interest,
-                    "oi_change_5m":  s.oi_change_5m,
-                    "oi_change_15m": s.oi_change_15m,
-                    "oi_change_1h":  s.oi_change_1h,
-                    "price_change":  s.price_change_pct,
-                    "oi_score":      s.oi_score,
-                    "time":          s.created_at.strftime("%m-%d %H:%M") if s.created_at else "-",
-                    "time_iso":      normalize_utc_iso(s.created_at),
-                }
-                for s in recent
-            ],
-        })
+        return JSONResponse(
+            {
+                "open_interest_status": "active" if total > 0 else "no_data",
+                "total_symbols": total,
+                "bullish_oi": bullish,
+                "bearish_oi": bearish,
+                "neutral_oi": neutral,
+                "snapshots": [
+                    {
+                        "symbol": s.symbol,
+                        "open_interest": s.open_interest,
+                        "oi_change_5m": s.oi_change_5m,
+                        "oi_change_15m": s.oi_change_15m,
+                        "oi_change_1h": s.oi_change_1h,
+                        "price_change": s.price_change_pct,
+                        "oi_score": s.oi_score,
+                        "time": s.created_at.strftime("%m-%d %H:%M") if s.created_at else "-",
+                        "time_iso": normalize_utc_iso(s.created_at),
+                    }
+                    for s in recent
+                ],
+            }
+        )
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=500)
 
@@ -1739,6 +1875,7 @@ async def api_funding_status():
     """
     try:
         from datetime import timedelta
+
         cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
 
         async with SessionLocal() as session:
@@ -1752,11 +1889,10 @@ async def api_funding_status():
                 .subquery()
             )
             res = await session.execute(
-                select(FundingRateSnapshot)
-                .join(
+                select(FundingRateSnapshot).join(
                     subq,
-                    (FundingRateSnapshot.symbol == subq.c.symbol) &
-                    (FundingRateSnapshot.created_at == subq.c.latest),
+                    (FundingRateSnapshot.symbol == subq.c.symbol)
+                    & (FundingRateSnapshot.created_at == subq.c.latest),
                 )
             )
             snaps = res.scalars().all()
@@ -1770,26 +1906,28 @@ async def api_funding_status():
 
         recent = sorted(snaps, key=lambda s: s.created_at, reverse=True)[:20]
 
-        return JSONResponse({
-            "funding_status":          "active" if total > 0 else "no_data",
-            "total_symbols":           total,
-            "extreme_positive_funding": extreme_pos,
-            "extreme_negative_funding": extreme_neg,
-            "neutral_funding":          neutral_cnt,
-            "positive_funding":         positive_cnt,
-            "negative_funding":         negative_cnt,
-            "snapshots": [
-                {
-                    "symbol":         s.symbol,
-                    "funding_rate":   s.funding_rate,
-                    "funding_pct":    round(s.funding_rate * 100, 5),
-                    "classification": s.classification,
-                    "time":           s.created_at.strftime("%m-%d %H:%M") if s.created_at else "-",
-                    "time_iso":       normalize_utc_iso(s.created_at),
-                }
-                for s in recent
-            ],
-        })
+        return JSONResponse(
+            {
+                "funding_status": "active" if total > 0 else "no_data",
+                "total_symbols": total,
+                "extreme_positive_funding": extreme_pos,
+                "extreme_negative_funding": extreme_neg,
+                "neutral_funding": neutral_cnt,
+                "positive_funding": positive_cnt,
+                "negative_funding": negative_cnt,
+                "snapshots": [
+                    {
+                        "symbol": s.symbol,
+                        "funding_rate": s.funding_rate,
+                        "funding_pct": round(s.funding_rate * 100, 5),
+                        "classification": s.classification,
+                        "time": s.created_at.strftime("%m-%d %H:%M") if s.created_at else "-",
+                        "time_iso": normalize_utc_iso(s.created_at),
+                    }
+                    for s in recent
+                ],
+            }
+        )
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=500)
 
@@ -1817,8 +1955,7 @@ async def api_system_metrics():
     try:
         async with SessionLocal() as session:
             total_res = await session.execute(
-                select(_sqlfunc.count(Signal.id))
-                .where(
+                select(_sqlfunc.count(Signal.id)).where(
                     Signal.strategy == _MTF_STRATEGY,
                     Signal.timeframe.in_(_MTF_TIMEFRAMES),
                 )
@@ -1826,8 +1963,7 @@ async def api_system_metrics():
             signals_total = int(total_res.scalar() or 0)
 
             open_res = await session.execute(
-                select(_sqlfunc.count(Signal.id))
-                .where(
+                select(_sqlfunc.count(Signal.id)).where(
                     Signal.strategy == _MTF_STRATEGY,
                     Signal.timeframe.in_(_MTF_TIMEFRAMES),
                     Signal.status == "OPEN",
@@ -1836,8 +1972,7 @@ async def api_system_metrics():
             open_signals = int(open_res.scalar() or 0)
 
             closed_res = await session.execute(
-                select(_sqlfunc.count(Signal.id))
-                .where(
+                select(_sqlfunc.count(Signal.id)).where(
                     Signal.strategy == _MTF_STRATEGY,
                     Signal.timeframe.in_(_MTF_TIMEFRAMES),
                     Signal.status.in_(["TP1", "TP2", "TP3", "SL"]),
@@ -1846,8 +1981,7 @@ async def api_system_metrics():
             closed_signals = int(closed_res.scalar() or 0)
 
             wins_res = await session.execute(
-                select(_sqlfunc.count(Signal.id))
-                .where(
+                select(_sqlfunc.count(Signal.id)).where(
                     Signal.strategy == _MTF_STRATEGY,
                     Signal.timeframe.in_(_MTF_TIMEFRAMES),
                     Signal.status.in_(["TP1", "TP2", "TP3"]),
@@ -1857,20 +1991,23 @@ async def api_system_metrics():
 
         winrate_closed = round(wins / closed_signals * 100, 1) if closed_signals > 0 else None
 
-        return JSONResponse({
-            "ok": True,
-            "signals_total": signals_total,
-            "open_signals": open_signals,
-            "closed_signals": closed_signals,
-            "winrate_closed": winrate_closed,
-            "universe": len(universe.symbols),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        })
+        return JSONResponse(
+            {
+                "ok": True,
+                "signals_total": signals_total,
+                "open_signals": open_signals,
+                "closed_signals": closed_signals,
+                "winrate_closed": winrate_closed,
+                "universe": len(universe.symbols),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
     except Exception as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
 
 # ── admin API (requires auth) ─────────────────────────────────────
+
 
 @app.get("/api/prices")
 async def api_prices(request: Request):
@@ -1891,6 +2028,7 @@ async def api_dashboard(request: Request):
 
 # ── auth routes ───────────────────────────────────────────────────
 
+
 @app.get("/login", response_class=HTMLResponse)
 async def login_get():
     return _login_page()
@@ -1899,7 +2037,9 @@ async def login_get():
 @app.post("/login")
 async def login_post(username: str = Form(...), password: str = Form(...)):
     if not _admin_auth_configured():
-        return _login_page("Admin login is disabled until DASHBOARD_USER and DASHBOARD_PASSWORD are set in .env")
+        return _login_page(
+            "Admin login is disabled until DASHBOARD_USER and DASHBOARD_PASSWORD are set in .env"
+        )
     if username == _admin_user() and password == _admin_password():
         resp = RedirectResponse("/admin", status_code=302)
         resp.set_cookie("alpha_radar_auth", "ok", httponly=True, max_age=86400, samesite="lax")
@@ -1916,6 +2056,7 @@ async def logout():
 
 # ── admin dashboard ───────────────────────────────────────────────
 
+
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_index(request: Request):
     if not _is_logged_in(request):
@@ -1927,6 +2068,7 @@ async def admin_index(request: Request):
 # The page is served behind the existing dashboard cookie login and reads the
 # multi-user SaaS tables through app.admin.service (the same aggregation the
 # JWT /api/admin/* API uses). Credentials are never exposed (last4 only).
+
 
 @app.get("/admin/platform", response_class=HTMLResponse)
 async def admin_platform_page(request: Request):
@@ -1941,6 +2083,7 @@ async def saas_admin_overview(request: Request):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     try:
         from app.admin import service as admin_service
+
         async with get_session() as db:
             return JSONResponse(await admin_service.overview(db))
     except Exception as exc:  # noqa: BLE001
@@ -1952,31 +2095,41 @@ async def saas_admin_safety_overview(request: Request):
     """Sprint 21 — read-only live-safety snapshot for the admin platform."""
     if not _is_logged_in(request):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
-    out: dict = {"reconciliation": {}, "recovery": {}, "order_failures": {},
-                 "accounting": {}, "live_gate": {}}
+    out: dict = {
+        "reconciliation": {},
+        "recovery": {},
+        "order_failures": {},
+        "accounting": {},
+        "live_gate": {},
+    }
     try:
         from app.live_trading.service import gate_status
+
         out["live_gate"] = gate_status()
     except Exception as exc:  # noqa: BLE001
         out["live_gate"] = {"error": str(exc)[:120]}
     async with get_session() as db:
         try:
             from app.reconciliation import report as recon_report
+
             out["reconciliation"] = await recon_report.summary(db)
         except Exception as exc:  # noqa: BLE001
             out["reconciliation"] = {"error": str(exc)[:120]}
         try:
             from app.recovery.status import recovery_status
+
             out["recovery"] = await recovery_status(db)
         except Exception as exc:  # noqa: BLE001
             out["recovery"] = {"error": str(exc)[:120]}
         try:
             from app.order_failures import service as of_service
+
             out["order_failures"] = await of_service.summary(db)
         except Exception as exc:  # noqa: BLE001
             out["order_failures"] = {"error": str(exc)[:120]}
         try:
             from app.accounting import service as acct_service
+
             out["accounting"] = await acct_service.summary(db)
         except Exception as exc:  # noqa: BLE001
             out["accounting"] = {"error": str(exc)[:120]}
@@ -1984,16 +2137,20 @@ async def saas_admin_safety_overview(request: Request):
 
 
 @app.get("/api/saas-admin/users")
-async def saas_admin_users(request: Request, limit: int = 100, offset: int = 0,
-                           status: str = "", role: str = ""):
+async def saas_admin_users(
+    request: Request, limit: int = 100, offset: int = 0, status: str = "", role: str = ""
+):
     if not _is_logged_in(request):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     try:
         from app.admin import service as admin_service
+
         async with get_session() as db:
-            return JSONResponse(await admin_service.list_users(
-                db, limit=limit, offset=offset,
-                status=status or None, role=role or None))
+            return JSONResponse(
+                await admin_service.list_users(
+                    db, limit=limit, offset=offset, status=status or None, role=role or None
+                )
+            )
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"error": str(exc)}, status_code=500)
 
@@ -2004,6 +2161,7 @@ async def saas_admin_user_detail(request: Request, user_id: int):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     try:
         from app.admin import service as admin_service
+
         async with get_session() as db:
             return JSONResponse(await admin_service.user_detail(db, user_id))
     except admin_service.AdminError as exc:
@@ -2018,6 +2176,7 @@ async def saas_admin_audit(request: Request, limit: int = 100):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     try:
         from app.admin import service as admin_service
+
         async with get_session() as db:
             return JSONResponse(await admin_service.audit_feed(db, limit=limit))
     except Exception as exc:  # noqa: BLE001
@@ -2032,11 +2191,13 @@ async def saas_admin_set_status(request: Request, user_id: int):
         body = await request.json()
         new_status = str(body.get("status", "")).upper()
         from app.admin import service as admin_service
+
         async with get_session() as db:
             # admin_id=0: the dashboard operator is not a SaaS user, so the
             # self-suspend guard never applies here.
             result = await admin_service.set_user_status(
-                db, admin_id=0, user_id=user_id, status=new_status)
+                db, admin_id=0, user_id=user_id, status=new_status
+            )
         return JSONResponse(result)
     except admin_service.AdminError as exc:
         return JSONResponse({"error": exc.detail}, status_code=exc.status_code)
@@ -2046,6 +2207,7 @@ async def saas_admin_set_status(request: Request, user_id: int):
 
 # ── public homepage ───────────────────────────────────────────────
 
+
 @app.get("/", response_class=HTMLResponse)
 async def index():
     tg_url = _safe_url(settings.telegram_channel_url or os.getenv("TELEGRAM_CHANNEL_URL", ""))
@@ -2054,7 +2216,9 @@ async def index():
     bep20 = _safe_wallet(settings.donate_usdt_bep20 or os.getenv("DONATE_USDT_BEP20", ""))
     btc_addr = _safe_wallet(settings.donate_btc or os.getenv("DONATE_BTC", ""))
     eth_addr = _safe_wallet(settings.donate_eth or os.getenv("DONATE_ETH", ""))
-    binance_aff = _safe_url(settings.binance_affiliate_url or os.getenv("BINANCE_AFFILIATE_URL", ""))
+    binance_aff = _safe_url(
+        settings.binance_affiliate_url or os.getenv("BINANCE_AFFILIATE_URL", "")
+    )
     bybit_aff = _safe_url(settings.bybit_affiliate_url or os.getenv("BYBIT_AFFILIATE_URL", ""))
     okx_aff = _safe_url(settings.okx_affiliate_url or os.getenv("OKX_AFFILIATE_URL", ""))
     bitget_aff = _safe_url(settings.bitget_affiliate_url or os.getenv("BITGET_AFFILIATE_URL", ""))
@@ -2064,11 +2228,13 @@ async def index():
     # ── nav buttons ─────────────────────────────────────────────────
     tg_btn = (
         f'<a href="{tg_url}" target="_blank" rel="noopener" class="nav-tg">Join Telegram</a>'
-        if tg_url else ""
+        if tg_url
+        else ""
     )
     dc_btn = (
         f'<a href="{dc_url}" target="_blank" rel="noopener" class="nav-dc">Discord</a>'
-        if dc_url else ""
+        if dc_url
+        else ""
     )
     html = html.replace("__TG_BTN__", tg_btn).replace("__DC_BTN__", dc_btn)
 
@@ -2078,16 +2244,14 @@ async def index():
         hero_btns.append(
             f'<a href="{tg_url}" target="_blank" rel="noopener" class="btn-primary">'
             f'<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.96 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg>'
-            f'Join Telegram Channel</a>'
+            f"Join Telegram Channel</a>"
         )
     if dc_url:
         hero_btns.append(
             f'<a href="{dc_url}" target="_blank" rel="noopener" class="btn-outline">'
-            f'Join Discord</a>'
+            f"Join Discord</a>"
         )
-    hero_btns.append(
-        '<a href="/performance" class="btn-outline">&#128200; View Performance</a>'
-    )
+    hero_btns.append('<a href="/performance" class="btn-outline">&#128200; View Performance</a>')
     html = html.replace("__HERO_BTNS__", "".join(hero_btns))
 
     # ── raw URLs for inline CTA / float button / footer ─────────────
@@ -2103,7 +2267,9 @@ async def index():
     if dc_url:
         footer_comm.append(f'<a href="{dc_url}" target="_blank" rel="noopener">Discord</a>')
     if twitter_url:
-        footer_comm.append(f'<a href="{twitter_url}" target="_blank" rel="noopener">Twitter / X</a>')
+        footer_comm.append(
+            f'<a href="{twitter_url}" target="_blank" rel="noopener">Twitter / X</a>'
+        )
     if youtube_url:
         footer_comm.append(f'<a href="{youtube_url}" target="_blank" rel="noopener">YouTube</a>')
     html = html.replace("__FOOTER_COMM__", "".join(footer_comm))
@@ -2126,12 +2292,12 @@ async def index():
                 f'<div class="don-hdr">'
                 f'<span class="don-coin" style="color:{color}">{safe_coin} &mdash; {safe_net}</span>'
                 f'<span class="don-net">{safe_netname}</span>'
-                f'</div>'
+                f"</div>"
                 f'<div class="don-addr">{addr}</div>'
                 f'<div class="don-acts">'
                 f'<button class="don-btn don-copy" onclick="copyDonAddr(this,\'{addr}\')">Copy</button>'
-                f'<button class="don-btn don-qr" onclick="showQR(\'{safe_coin}\',\'{safe_net} &mdash; {safe_netname}\',\'{addr}\')">QR Code</button>'
-                f'</div></div>'
+                f"<button class=\"don-btn don-qr\" onclick=\"showQR('{safe_coin}','{safe_net} &mdash; {safe_netname}','{addr}')\">QR Code</button>"
+                f"</div></div>"
             )
     if not don_cards:
         for coin, net, netname, _addr, color in wallets:
@@ -2140,32 +2306,60 @@ async def index():
                 f'<div class="don-hdr"><span class="don-coin" style="color:{color}">{_esc(coin)} &mdash; {_esc(net)}</span>'
                 f'<span class="don-net">{_esc(netname)}</span></div>'
                 f'<div class="don-empty">Wallet address not configured yet</div>'
-                f'</div>'
+                f"</div>"
             )
     donate_section = (
         '<div class="sh">'
         '<div class="sh-lbl">&#9829; SUPPORT</div>'
         '<div class="sh-title">Support Argus Quant &#10084;&#65039;</div>'
         '<div class="sh-sub">If Argus Quant helps you, consider supporting development and server costs.</div>'
-        '</div>'
+        "</div>"
         '<div class="don-intro">'
         '<div class="card" style="padding:20px">'
         '<div style="font-weight:900;font-size:18px;margin-bottom:8px;color:var(--text)">Keep Argus Quant Free</div>'
         '<div class="don-copyline">Every donation helps fund data, servers, backtesting, and new features for the trading community.</div>'
         '<div style="margin-top:14px;color:var(--green);font-size:12px;font-weight:800">Thank you for your support! &#128591;</div>'
-        '</div>'
-        '<div class="don-grid">' + "".join(don_cards) + '</div>'
-        '</div>'
+        "</div>"
+        '<div class="don-grid">' + "".join(don_cards) + "</div>"
+        "</div>"
     )
     html = html.replace("__DONATE__", donate_section)
 
     # ── exchange affiliate cards ─────────────────────────────────────
     aff_cards = []
     exchanges = [
-        ("Binance", binance_aff, "#f3ba2f", "binance", "Best for Binance", "World's largest crypto exchange with deepest liquidity."),
-        ("Bybit", bybit_aff, "#f7a600", "bybit", "Best Futures Platform", "Top derivatives & perpetual futures with low fees."),
-        ("OKX", okx_aff, "#1a82ff", "okx", "Leading Altcoins", "Advanced trading tools and deep altcoin markets."),
-        ("Bitget", bitget_aff, "#00e6b3", "bitget", "Best Copy Trading", "Follow top traders automatically with copy trading."),
+        (
+            "Binance",
+            binance_aff,
+            "#f3ba2f",
+            "binance",
+            "Best for Binance",
+            "World's largest crypto exchange with deepest liquidity.",
+        ),
+        (
+            "Bybit",
+            bybit_aff,
+            "#f7a600",
+            "bybit",
+            "Best Futures Platform",
+            "Top derivatives & perpetual futures with low fees.",
+        ),
+        (
+            "OKX",
+            okx_aff,
+            "#1a82ff",
+            "okx",
+            "Leading Altcoins",
+            "Advanced trading tools and deep altcoin markets.",
+        ),
+        (
+            "Bitget",
+            bitget_aff,
+            "#00e6b3",
+            "bitget",
+            "Best Copy Trading",
+            "Follow top traders automatically with copy trading.",
+        ),
     ]
     for name, url, color, logo, tag, descr in exchanges:
         safe_name = _esc(name)
@@ -2174,20 +2368,20 @@ async def index():
                 f'<a href="{url}" target="_blank" rel="noopener" class="exch-btn" '
                 f'style="background:{color};box-shadow:0 4px 14px {color}44">Register Now &rarr;</a>'
             )
-            disabled_cls = ''
+            disabled_cls = ""
         else:
             btn = '<span class="exch-btn coming-soon">Coming Soon</span>'
-            disabled_cls = ' disabled'
+            disabled_cls = " disabled"
         aff_cards.append(
             f'<div class="exch-card card{disabled_cls}">'
             f'<div class="exch-ico"><img src="/static/exchanges/{logo}.svg" alt="{safe_name}" class="exch-logo-img"></div>'
             f'<div class="exch-name" style="color:{color}">{safe_name}</div>'
             f'<div class="exch-tag">{tag}</div>'
             f'<div class="exch-desc">{descr}</div>'
-            f'{btn}'
-            f'</div>'
+            f"{btn}"
+            f"</div>"
         )
-    aff_section = '<div class="exch-grid">' + "".join(aff_cards) + '</div>'
+    aff_section = '<div class="exch-grid">' + "".join(aff_cards) + "</div>"
     html = html.replace("__AFFILIATES__", aff_section)
 
     return HTMLResponse(html)
@@ -2238,12 +2432,12 @@ async def setup_library_page():
     return HTMLResponse(_setup_library_page_html())
 
 
-
 @app.get("/about", response_class=HTMLResponse)
 async def about_page():
-    return HTMLResponse(_info_page(
-        "About",
-        """
+    return HTMLResponse(
+        _info_page(
+            "About",
+            """
 <h2>About ARGUS QUANT</h2>
 <p>ARGUS QUANT is a free, AI-powered crypto futures signal service. Our multi-timeframe analysis engine scans the market 24/7 and delivers high-quality trade setups directly to Telegram.</p>
 <h3>How It Works</h3>
@@ -2263,14 +2457,16 @@ async def about_page():
 <p>All signals are provided free of charge. We monetize through voluntary donations and affiliate partnerships.</p>
 <p><a href="/faq">Frequently Asked Questions →</a></p>
 """,
-    ))
+        )
+    )
 
 
 @app.get("/faq", response_class=HTMLResponse)
 async def faq_page():
-    return HTMLResponse(_info_page(
-        "FAQ",
-        """
+    return HTMLResponse(
+        _info_page(
+            "FAQ",
+            """
 <h2>Frequently Asked Questions</h2>
 
 <h3>Are the signals free?</h3>
@@ -2300,14 +2496,16 @@ async def faq_page():
 <h3>Who runs this project?</h3>
 <p>ARGUS QUANT is an independent trading tools project. We are not a registered financial institution.</p>
 """,
-    ))
+        )
+    )
 
 
 @app.get("/terms", response_class=HTMLResponse)
 async def terms():
-    return HTMLResponse(_info_page(
-        "Terms of Service",
-        """
+    return HTMLResponse(
+        _info_page(
+            "Terms of Service",
+            """
 <h2>Terms of Service</h2>
 <p>Last updated: 2026-05-30</p>
 <h3>1. Acceptance</h3>
@@ -2323,14 +2521,16 @@ async def terms():
 <h3>6. Modifications</h3>
 <p>We reserve the right to modify these Terms at any time. Continued use of the Service constitutes acceptance of the updated Terms.</p>
 """,
-    ))
+        )
+    )
 
 
 @app.get("/privacy", response_class=HTMLResponse)
 async def privacy():
-    return HTMLResponse(_info_page(
-        "Privacy Policy",
-        """
+    return HTMLResponse(
+        _info_page(
+            "Privacy Policy",
+            """
 <h2>Privacy Policy</h2>
 <p>Last updated: 2026-05-30</p>
 <h3>1. Data We Collect</h3>
@@ -2345,14 +2545,16 @@ async def privacy():
 <h3>5. Contact</h3>
 <p>For privacy-related inquiries please reach out via our Telegram channel.</p>
 """,
-    ))
+        )
+    )
 
 
 @app.get("/risk-disclaimer", response_class=HTMLResponse)
 async def risk_disclaimer():
-    return HTMLResponse(_info_page(
-        "Risk Disclaimer",
-        """
+    return HTMLResponse(
+        _info_page(
+            "Risk Disclaimer",
+            """
 <h2>Risk Disclaimer</h2>
 <p><strong>TRADING FUTURES AND CRYPTOCURRENCIES INVOLVES SUBSTANTIAL RISK OF LOSS.</strong></p>
 <p>You should carefully consider whether trading is appropriate for you in light of your experience, objectives, financial resources, and other relevant circumstances.</p>
@@ -2368,7 +2570,8 @@ async def risk_disclaimer():
 </ul>
 <p>By using this service you acknowledge that you have read, understood, and accepted this risk disclaimer.</p>
 """,
-    ))
+        )
+    )
 
 
 def _page_shell(title: str, body: str, extra_css: str = "", extra_js: str = "") -> str:
@@ -3921,6 +4124,7 @@ document.addEventListener('DOMContentLoaded', loadLegacy);
 #  Sprint 12 — Performance Analytics Center
 # ══════════════════════════════════════════════════════════════════
 
+
 def _performance_center_page_html() -> str:
     css = """
 .pc2-hdr{margin-bottom:22px}
@@ -4120,6 +4324,7 @@ document.addEventListener('DOMContentLoaded', () => { load(); setInterval(load, 
 #  Sprint 13 — Market Radar
 # ══════════════════════════════════════════════════════════════════
 
+
 def _market_radar_page_html() -> str:
     css = """
 .mr-title{font-size:26px;font-weight:900;color:#eaf2ff;margin-bottom:4px}
@@ -4316,6 +4521,7 @@ document.addEventListener('DOMContentLoaded', () => { loadRadar(); setInterval(l
 #  Sprint 14 — Setup Library
 # ══════════════════════════════════════════════════════════════════
 
+
 def _setup_library_page_html() -> str:
     css = """
 .sl-title{font-size:26px;font-weight:900;color:#eaf2ff;margin-bottom:4px}
@@ -4387,12 +4593,12 @@ document.addEventListener('DOMContentLoaded', loadLibrary);
 # ══════════════════════════════════════════════════════════════════
 
 
-
 def create_app():
     # Sprint 20A — mount the multi-user auth API only when feature-flagged on.
     if settings.auth_enabled:
         try:
             from app.auth import setup_auth
+
             setup_auth(app)
         except Exception as exc:  # noqa: BLE001
             print(f"auth setup skipped (non-fatal): {exc!r}")
@@ -4400,6 +4606,7 @@ def create_app():
     if settings.paper_trading_enabled:
         try:
             from app.paper_engine import setup_paper
+
             setup_paper(app)
         except Exception as exc:  # noqa: BLE001
             print(f"paper setup skipped (non-fatal): {exc!r}")
@@ -4407,6 +4614,7 @@ def create_app():
     if settings.exchange_api_vault_enabled:
         try:
             from app.exchange_vault import setup_exchange_vault
+
             setup_exchange_vault(app)
         except Exception as exc:  # noqa: BLE001
             print(f"exchange vault setup skipped (non-fatal): {exc!r}")
@@ -4414,6 +4622,7 @@ def create_app():
     if settings.auto_trade_demo_enabled:
         try:
             from app.auto_engine import setup_auto_engine
+
             setup_auto_engine(app)
         except Exception as exc:  # noqa: BLE001
             print(f"auto engine setup skipped (non-fatal): {exc!r}")
@@ -4421,6 +4630,7 @@ def create_app():
     if settings.safety_layer_enabled:
         try:
             from app.safety import setup_safety
+
             setup_safety(app)
         except Exception as exc:  # noqa: BLE001
             print(f"safety layer setup skipped (non-fatal): {exc!r}")
@@ -4429,6 +4639,7 @@ def create_app():
     if settings.live_trading_api_enabled:
         try:
             from app.live_trading import setup_live
+
             setup_live(app)
         except Exception as exc:  # noqa: BLE001
             print(f"live trading setup skipped (non-fatal): {exc!r}")
@@ -4436,6 +4647,7 @@ def create_app():
     if settings.admin_dashboard_enabled:
         try:
             from app.admin import setup_admin
+
             setup_admin(app)
         except Exception as exc:  # noqa: BLE001
             print(f"admin dashboard setup skipped (non-fatal): {exc!r}")
@@ -4443,6 +4655,7 @@ def create_app():
     if settings.reconciliation_enabled:
         try:
             from app.reconciliation import setup_reconciliation
+
             setup_reconciliation(app)
         except Exception as exc:  # noqa: BLE001
             print(f"reconciliation setup skipped (non-fatal): {exc!r}")
@@ -4450,6 +4663,7 @@ def create_app():
     if settings.position_recovery_enabled:
         try:
             from app.recovery import setup_recovery
+
             setup_recovery(app)
         except Exception as exc:  # noqa: BLE001
             print(f"recovery setup skipped (non-fatal): {exc!r}")
@@ -4457,6 +4671,7 @@ def create_app():
     if settings.order_failure_engine_enabled:
         try:
             from app.order_failures import setup_order_failures
+
             setup_order_failures(app)
         except Exception as exc:  # noqa: BLE001
             print(f"order failure engine setup skipped (non-fatal): {exc!r}")
@@ -4464,12 +4679,14 @@ def create_app():
     if settings.accounting_enabled:
         try:
             from app.accounting import setup_accounting
+
             setup_accounting(app)
         except Exception as exc:  # noqa: BLE001
             print(f"accounting setup skipped (non-fatal): {exc!r}")
     # V12 — mount the SaaS portal shell at /app (static; APIs stay flag-gated).
     try:
         from app.dashboard.saas_app import setup_saas_app
+
         setup_saas_app(app)
     except Exception as exc:  # noqa: BLE001
         print(f"saas portal setup skipped (non-fatal): {exc!r}")

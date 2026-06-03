@@ -8,6 +8,7 @@ Everything executes against per-user PAPER accounts (Sprint 20B). No real
 orders are ever placed; LIVE_TRADING_ENABLED is irrelevant here. Invoked from
 the app orchestrator (main.py) on new signals and on tracker TP/SL events.
 """
+
 from __future__ import annotations
 
 from sqlalchemy import select
@@ -33,6 +34,7 @@ def _enabled() -> bool:
 
 # ── new signal → open paper positions for opted-in users ──────────
 
+
 async def on_new_signal(signal_id: int) -> int:
     """Open demo positions for every eligible user. Returns count opened."""
     if not _enabled():
@@ -55,12 +57,24 @@ async def on_new_signal(signal_id: int) -> int:
 
 async def _eligible_users(db: AsyncSession) -> list[tuple[int, AutoTradeConfig]]:
     """Users with auto-trade enabled, OR a paper account with auto_follow on."""
-    cfg_rows = (await db.execute(
-        select(AutoTradeConfig).where(AutoTradeConfig.enabled == True)  # noqa: E712
-    )).scalars().all()
-    follow_ids = (await db.execute(
-        select(PaperAccount.user_id).where(PaperAccount.auto_follow == True)  # noqa: E712
-    )).scalars().all()
+    cfg_rows = (
+        (
+            await db.execute(
+                select(AutoTradeConfig).where(AutoTradeConfig.enabled == True)  # noqa: E712
+            )
+        )
+        .scalars()
+        .all()
+    )
+    follow_ids = (
+        (
+            await db.execute(
+                select(PaperAccount.user_id).where(PaperAccount.auto_follow == True)  # noqa: E712
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     by_user: dict[int, AutoTradeConfig] = {c.user_id: c for c in cfg_rows}
     for uid in follow_ids:
@@ -72,9 +86,7 @@ async def _eligible_users(db: AsyncSession) -> list[tuple[int, AutoTradeConfig]]
     return list(by_user.items())
 
 
-async def _maybe_open(
-    db: AsyncSession, user_id: int, cfg: AutoTradeConfig, signal: Signal
-) -> bool:
+async def _maybe_open(db: AsyncSession, user_id: int, cfg: AutoTradeConfig, signal: Signal) -> bool:
     if await service.already_executed(db, user_id, signal.id):
         return False
 
@@ -87,13 +99,22 @@ async def _maybe_open(
         from app.safety import service as safety
 
         sdec = await safety.check(
-            db, user_id=user_id, account=account, summary=summary,
-            symbol=signal.symbol, side=signal.side,
+            db,
+            user_id=user_id,
+            account=account,
+            summary=summary,
+            symbol=signal.symbol,
+            side=signal.side,
         )
         if not sdec.allow:
             await service.log_execution(
-                db, user_id=user_id, action="SKIP", reason=f"safety:{sdec.code}",
-                signal_id=signal.id, account_id=account.id, symbol=signal.symbol,
+                db,
+                user_id=user_id,
+                action="SKIP",
+                reason=f"safety:{sdec.code}",
+                signal_id=signal.id,
+                account_id=account.id,
+                symbol=signal.symbol,
                 detail=sdec.reason,
             )
             return False
@@ -114,8 +135,13 @@ async def _maybe_open(
     )
     if not decision.allow:
         await service.log_execution(
-            db, user_id=user_id, action="SKIP", reason=decision.reason,
-            signal_id=signal.id, account_id=account.id, symbol=signal.symbol,
+            db,
+            user_id=user_id,
+            action="SKIP",
+            reason=decision.reason,
+            signal_id=signal.id,
+            account_id=account.id,
+            symbol=signal.symbol,
         )
         return False
 
@@ -123,22 +149,33 @@ async def _maybe_open(
         pos = await paper.copy_signal(db, account, signal, leverage=decision.leverage)
     except paper.PaperError as exc:
         await service.log_execution(
-            db, user_id=user_id, action="SKIP", reason="open_failed",
-            signal_id=signal.id, account_id=account.id, symbol=signal.symbol,
+            db,
+            user_id=user_id,
+            action="SKIP",
+            reason="open_failed",
+            signal_id=signal.id,
+            account_id=account.id,
+            symbol=signal.symbol,
             detail=exc.detail,
         )
         return False
 
     pos.auto_managed = True
     await service.log_execution(
-        db, user_id=user_id, action="OPEN",
+        db,
+        user_id=user_id,
+        action="OPEN",
         reason=f"{decision.leverage}x risk={decision.risk_pct}%",
-        signal_id=signal.id, account_id=account.id, position_id=pos.id, symbol=signal.symbol,
+        signal_id=signal.id,
+        account_id=account.id,
+        position_id=pos.id,
+        symbol=signal.symbol,
     )
     return True
 
 
 # ── tracker TP/SL events → manage auto positions ──────────────────
+
 
 async def on_signal_event(signal_id: int, event: str, pnl_pct: float = 0.0) -> None:
     """Apply break-even / trailing / close to auto-managed positions."""
@@ -146,13 +183,19 @@ async def on_signal_event(signal_id: int, event: str, pnl_pct: float = 0.0) -> N
         return
     try:
         async with get_session() as db:
-            rows = (await db.execute(
-                select(PaperAccountPosition).where(
-                    PaperAccountPosition.signal_id == signal_id,
-                    PaperAccountPosition.auto_managed == True,  # noqa: E712
-                    PaperAccountPosition.status == "OPEN",
+            rows = (
+                (
+                    await db.execute(
+                        select(PaperAccountPosition).where(
+                            PaperAccountPosition.signal_id == signal_id,
+                            PaperAccountPosition.auto_managed == True,  # noqa: E712
+                            PaperAccountPosition.status == "OPEN",
+                        )
+                    )
                 )
-            )).scalars().all()
+                .scalars()
+                .all()
+            )
             for pos in rows:
                 await _manage_position(db, pos, event)
     except Exception as exc:  # noqa: BLE001
@@ -171,8 +214,13 @@ async def _manage_position(db: AsyncSession, pos: PaperAccountPosition, event: s
             pos.stop_loss = pos.entry_price
             pos.protection = "BREAK_EVEN"
             await service.log_execution(
-                db, user_id=account.user_id, action="BREAK_EVEN", reason=event,
-                signal_id=pos.signal_id, account_id=account.id, position_id=pos.id,
+                db,
+                user_id=account.user_id,
+                action="BREAK_EVEN",
+                reason=event,
+                signal_id=pos.signal_id,
+                account_id=account.id,
+                position_id=pos.id,
                 symbol=pos.symbol,
             )
         # Trailing: tighten the stop behind the just-hit target.
@@ -183,9 +231,15 @@ async def _manage_position(db: AsyncSession, pos: PaperAccountPosition, event: s
                 pos.stop_loss = tighten_stop(pos.side, pos.stop_loss or 0.0, candidate)
                 pos.protection = "TRAILING"
                 await service.log_execution(
-                    db, user_id=account.user_id, action="TRAIL", reason=event,
-                    signal_id=pos.signal_id, account_id=account.id, position_id=pos.id,
-                    symbol=pos.symbol, detail=f"stop={pos.stop_loss:.6f}",
+                    db,
+                    user_id=account.user_id,
+                    action="TRAIL",
+                    reason=event,
+                    signal_id=pos.signal_id,
+                    account_id=account.id,
+                    position_id=pos.id,
+                    symbol=pos.symbol,
+                    detail=f"stop={pos.stop_loss:.6f}",
                 )
         return
 
@@ -196,27 +250,44 @@ async def _manage_position(db: AsyncSession, pos: PaperAccountPosition, event: s
         exit_price = float(pos.stop_loss or pos.entry_price)
 
     trade = await paper.close_position(
-        db, account, pos.id, mark=exit_price, reason=event,
+        db,
+        account,
+        pos.id,
+        mark=exit_price,
+        reason=event,
     )
     await service.log_execution(
-        db, user_id=account.user_id, action="CLOSE", reason=event,
-        signal_id=pos.signal_id, account_id=account.id, position_id=pos.id,
-        symbol=pos.symbol, detail=f"pnl={trade.pnl_usdt:.2f}",
+        db,
+        user_id=account.user_id,
+        action="CLOSE",
+        reason=event,
+        signal_id=pos.signal_id,
+        account_id=account.id,
+        position_id=pos.id,
+        symbol=pos.symbol,
+        detail=f"pnl={trade.pnl_usdt:.2f}",
     )
 
 
 # ── statistics ────────────────────────────────────────────────────
 
+
 async def status(db: AsyncSession, user_id: int) -> dict:
     cfg = await service.get_or_create_config(db, user_id)
     account = await paper.get_or_create_account(db, user_id)
-    open_auto = (await db.execute(
-        select(PaperAccountPosition).where(
-            PaperAccountPosition.account_id == account.id,
-            PaperAccountPosition.auto_managed == True,  # noqa: E712
-            PaperAccountPosition.status == "OPEN",
+    open_auto = (
+        (
+            await db.execute(
+                select(PaperAccountPosition).where(
+                    PaperAccountPosition.account_id == account.id,
+                    PaperAccountPosition.auto_managed == True,  # noqa: E712
+                    PaperAccountPosition.status == "OPEN",
+                )
+            )
         )
-    )).scalars().all()
+        .scalars()
+        .all()
+    )
     execs = await service.list_executions(db, user_id, limit=10_000)
     opened = sum(1 for e in execs if e.action == "OPEN")
     closed = sum(1 for e in execs if e.action == "CLOSE")

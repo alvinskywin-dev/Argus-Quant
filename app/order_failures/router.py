@@ -12,6 +12,7 @@ NOTE: /retry recomputes and persists the retry DECISION; it does not itself
 place an order (the execution layer acts on the decision). This keeps the API
 incapable of triggering real orders directly.
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -33,11 +34,13 @@ async def overview():
 
 
 @router.get("/list")
-async def list_own(final_state: str = "", limit: int = 200,
-                   user: AuthUser = Depends(get_current_user)):
+async def list_own(
+    final_state: str = "", limit: int = 200, user: AuthUser = Depends(get_current_user)
+):
     async with get_session() as db:
         return await service.list_failures(
-            db, user_id=user.id, final_state=final_state or None, limit=min(limit, 1000))
+            db, user_id=user.id, final_state=final_state or None, limit=min(limit, 1000)
+        )
 
 
 @router.get("/{failure_id}")

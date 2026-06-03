@@ -18,10 +18,7 @@ async def main():
         result = await session.execute(select(Signal))
         signals = result.scalars().all()
 
-    week_signals = [
-        s for s in signals
-        if s.created_at and s.created_at >= start
-    ]
+    week_signals = [s for s in signals if s.created_at and s.created_at >= start]
 
     closed = [s for s in week_signals if s.status in ["TP1", "TP2", "TP3", "SL"]]
     wins = len([s for s in closed if s.status in ["TP1", "TP2", "TP3"]])
@@ -65,5 +62,6 @@ async def main():
                 caption=caption,
                 parse_mode=constants.ParseMode.HTML,
             )
+
 
 asyncio.run(main())

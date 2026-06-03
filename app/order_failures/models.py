@@ -6,6 +6,7 @@ retry budget consumed, when the next retry is due, and the terminal state.
 Recording a failure is side-effect free w.r.t. the exchange — it never re-sends
 an order by itself; the caller decides based on the RetryPolicy decision.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -39,11 +40,15 @@ class OrderFailure(Base):
     error_message: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
 
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
-    next_retry_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_retry_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     # PENDING / RETRY_SCHEDULED / NEEDS_RECONCILE / RESOLVED / FAILED
     final_state: Mapped[str] = mapped_column(String(20), default="PENDING", index=True)
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), index=True)
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

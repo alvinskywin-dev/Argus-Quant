@@ -12,6 +12,7 @@ Score rules (uses 15m OI change as primary):
     SHORT — price_down + oi_down: -10   (shorts being covered on the move)
     Any other combination:          0
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -25,9 +26,9 @@ from app.utils.logger import logger
 
 # Redis TTL per window — 2× the window so the baseline persists across brief gaps.
 _TTL: dict[str, int] = {
-    "5m":  600,
+    "5m": 600,
     "15m": 1800,
-    "1h":  7200,
+    "1h": 7200,
 }
 _WINDOW_SEC: dict[str, int] = {"5m": 300, "15m": 900, "1h": 3600}
 
@@ -36,19 +37,19 @@ _WINDOW_SEC: dict[str, int] = {"5m": 300, "15m": 900, "1h": 3600}
 class OISnapshot:
     symbol: str
     open_interest: float
-    oi_change_5m: float    # % change vs baseline ~5m ago
+    oi_change_5m: float  # % change vs baseline ~5m ago
     oi_change_15m: float
     oi_change_1h: float
     price_change_pct: float
-    oi_score: int          # +15, -10, or 0
+    oi_score: int  # +15, -10, or 0
 
 
 def compute_oi_score(side: str, price_change_pct: float, oi_change_pct: float) -> int:
     """Return directional OI confluence score (+15, -10, or 0)."""
-    price_up   = price_change_pct > 0
+    price_up = price_change_pct > 0
     price_down = price_change_pct < 0
-    oi_up      = oi_change_pct > 0
-    oi_down    = oi_change_pct < 0
+    oi_up = oi_change_pct > 0
+    oi_down = oi_change_pct < 0
 
     if side == "LONG":
         if price_up and oi_up:
@@ -63,9 +64,7 @@ def compute_oi_score(side: str, price_change_pct: float, oi_change_pct: float) -
     return 0
 
 
-async def _oi_change_for_window(
-    symbol: str, current_oi: float, window: str
-) -> float:
+async def _oi_change_for_window(symbol: str, current_oi: float, window: str) -> float:
     """
     Return % OI change for `window`.  Refreshes the Redis baseline once the
     window duration has elapsed so the comparison always stays fresh.

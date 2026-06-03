@@ -6,6 +6,7 @@ and test validate trading + futures permission via an adapter and REJECT any
 key that has withdrawal enabled (such a key is never persisted). Every action
 is written to the exchange_audit_log.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -41,8 +42,13 @@ def _now() -> datetime:
 
 
 async def _audit(
-    db: AsyncSession, user_id: int, exchange: str, action: str, result: str,
-    detail: str = "", ip: Optional[str] = None,
+    db: AsyncSession,
+    user_id: int,
+    exchange: str,
+    action: str,
+    result: str,
+    detail: str = "",
+    ip: Optional[str] = None,
 ) -> None:
     """
     Write an audit row in its OWN session and commit immediately, so the record
@@ -53,8 +59,12 @@ async def _audit(
         async with SessionLocal() as audit_db:
             audit_db.add(
                 ExchangeAuditLog(
-                    user_id=user_id, exchange=exchange, action=action,
-                    result=result, detail=(detail or "")[:256], ip=ip,
+                    user_id=user_id,
+                    exchange=exchange,
+                    action=action,
+                    result=result,
+                    detail=(detail or "")[:256],
+                    ip=ip,
                 )
             )
             await audit_db.commit()
@@ -62,7 +72,9 @@ async def _audit(
         logger.warning(f"[vault] audit write failed: {exc}")
 
 
-async def _get(db: AsyncSession, user_id: int, exchange: str, label: str) -> Optional[ExchangeAccount]:
+async def _get(
+    db: AsyncSession, user_id: int, exchange: str, label: str
+) -> Optional[ExchangeAccount]:
     res = await db.execute(
         select(ExchangeAccount).where(
             ExchangeAccount.user_id == user_id,
@@ -79,20 +91,30 @@ def _status_to_vault_error(r: ExchangePermissionResult) -> VaultError:
     if r.status == STATUS_INVALID:
         return VaultError(400, f"Invalid API credentials. {r.error_message}".strip())
     if r.status == STATUS_IP_RESTRICTED:
-        return VaultError(403, "API key is IP-restricted and this server's IP is not allowed. "
-                               "Whitelist the server IP or use an unrestricted trade-only key.")
+        return VaultError(
+            403,
+            "API key is IP-restricted and this server's IP is not allowed. "
+            "Whitelist the server IP or use an unrestricted trade-only key.",
+        )
     if r.status == STATUS_VALIDATION_UNAVAILABLE:
-        return VaultError(503, "Could not validate the API key right now. Please try again. "
-                               f"{r.error_message}".strip())
+        return VaultError(
+            503,
+            "Could not validate the API key right now. Please try again. "
+            f"{r.error_message}".strip(),
+        )
     if r.status == STATUS_PERMISSION_DENIED and r.can_withdraw:
-        return VaultError(403, "Withdrawal-enabled API keys are not allowed. "
-                               "Create a key with trading-only permission.")
+        return VaultError(
+            403,
+            "Withdrawal-enabled API keys are not allowed. "
+            "Create a key with trading-only permission.",
+        )
     if r.status == STATUS_PERMISSION_DENIED:
         return VaultError(400, detail)
     return VaultError(400, detail)
 
 
 # ── connect ───────────────────────────────────────────────────────
+
 
 async def connect(
     db: AsyncSession,
@@ -115,8 +137,9 @@ async def connect(
     if result.status != STATUS_CONNECTED:
         exc = _status_to_vault_error(result)
         action = "REJECT" if result.can_withdraw else "CONNECT"
-        await _audit(db, user_id, exchange, action, "REJECTED",
-                     f"{result.status}: {exc.detail}", ip)
+        await _audit(
+            db, user_id, exchange, action, "REJECTED", f"{result.status}: {exc.detail}", ip
+        )
         raise exc
 
     acc = await _get(db, user_id, exchange, label)
@@ -135,7 +158,7 @@ async def connect(
     acc.can_futures = result.can_futures
     acc.can_withdraw = False  # guaranteed: a withdraw-enabled key never reaches here
     acc.last_validation_status = result.status
-    acc.permission_warning = (result.permission_warning or None)
+    acc.permission_warning = result.permission_warning or None
     acc.last_error = None
     acc.last_test = _now()
 
@@ -147,8 +170,13 @@ async def connect(
 
 # ── test ──────────────────────────────────────────────────────────
 
+
 async def test_connection(
-    db: AsyncSession, *, user_id: int, exchange: str, label: str = "default",
+    db: AsyncSession,
+    *,
+    user_id: int,
+    exchange: str,
+    label: str = "default",
     ip: Optional[str] = None,
 ) -> tuple[ExchangeAccount, ExchangePermissionResult]:
     exchange = exchange.lower()
@@ -171,9 +199,9 @@ async def test_connection(
     acc.can_read = result.can_read
     acc.can_trade = result.can_trade
     acc.can_futures = result.can_futures
-    acc.can_withdraw = bool(result.can_withdraw)   # None (undetectable) -> False
+    acc.can_withdraw = bool(result.can_withdraw)  # None (undetectable) -> False
     acc.last_validation_status = result.status
-    acc.permission_warning = (result.permission_warning or None)
+    acc.permission_warning = result.permission_warning or None
 
     if result.status == STATUS_CONNECTED:
         acc.status = "CONNECTED"
@@ -188,14 +216,21 @@ async def test_connection(
         # INVALID / PERMISSION_DENIED / IP_RESTRICTED / VALIDATION_UNAVAILABLE / ERROR
         acc.status = "ERROR"
         acc.last_error = (result.error_message or result.permission_warning or result.status)[:256]
-        await _audit(db, user_id, exchange, "TEST", "FAIL", f"{result.status}: {acc.last_error}", ip)
+        await _audit(
+            db, user_id, exchange, "TEST", "FAIL", f"{result.status}: {acc.last_error}", ip
+        )
     return acc, result
 
 
 # ── disconnect ────────────────────────────────────────────────────
 
+
 async def disconnect(
-    db: AsyncSession, *, user_id: int, exchange: str, label: str = "default",
+    db: AsyncSession,
+    *,
+    user_id: int,
+    exchange: str,
+    label: str = "default",
     ip: Optional[str] = None,
 ) -> None:
     exchange = exchange.lower()
@@ -216,6 +251,7 @@ async def disconnect(
 
 
 # ── list ──────────────────────────────────────────────────────────
+
 
 async def list_accounts(db: AsyncSession, user_id: int) -> list[ExchangeAccount]:
     res = await db.execute(
@@ -240,5 +276,7 @@ async def get_decrypted_credentials(
         "exchange": acc.exchange,
         "api_key": crypto.decrypt(acc.encrypted_api_key),
         "api_secret": crypto.decrypt(acc.encrypted_api_secret or ""),
-        "passphrase": crypto.decrypt(acc.encrypted_passphrase) if acc.encrypted_passphrase else None,
+        "passphrase": (
+            crypto.decrypt(acc.encrypted_passphrase) if acc.encrypted_passphrase else None
+        ),
     }

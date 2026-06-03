@@ -9,6 +9,7 @@ regress:
   2. closing is ALWAYS reduce-only in the OPPOSITE direction — it can never
      open or flip a position.
 """
+
 from __future__ import annotations
 
 import pytest

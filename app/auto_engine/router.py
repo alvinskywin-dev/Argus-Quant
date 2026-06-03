@@ -5,6 +5,7 @@ Mounted only when AUTO_TRADE_DEMO_ENABLED=true. Requires a 20A token. The
 engine itself runs server-side off signal/tracker events; these endpoints just
 let a user configure and inspect their demo auto-trading.
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
@@ -66,9 +67,15 @@ async def get_executions(user: AuthUser = Depends(get_current_user)):
         rows = await service.list_executions(db, user.id)
         return [
             ExecutionOut(
-                id=e.id, signal_id=e.signal_id, account_id=e.account_id,
-                position_id=e.position_id, symbol=e.symbol, action=e.action,
-                reason=e.reason, detail=e.detail, created_at=e.created_at,
+                id=e.id,
+                signal_id=e.signal_id,
+                account_id=e.account_id,
+                position_id=e.position_id,
+                symbol=e.symbol,
+                action=e.action,
+                reason=e.reason,
+                detail=e.detail,
+                created_at=e.created_at,
             )
             for e in rows
         ]

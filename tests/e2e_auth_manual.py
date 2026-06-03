@@ -3,6 +3,7 @@
 Not part of the pytest suite (requires a live DB). Exercises the real ASGI
 app end-to-end via httpx.
 """
+
 import asyncio
 
 import httpx

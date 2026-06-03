@@ -7,6 +7,7 @@ Pure functions only (no DB, no FastAPI). Covers:
   - opaque refresh / one-time tokens (secrets) + sha256 hashing for storage
   - TOTP 2FA helpers (pyotp)
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -28,6 +29,7 @@ _BCRYPT_MAX_BYTES = 72
 
 # ── passwords ─────────────────────────────────────────────────────
 
+
 def hash_password(password: str) -> str:
     pw = password.encode("utf-8")[:_BCRYPT_MAX_BYTES]
     return bcrypt.hashpw(pw, bcrypt.gensalt(rounds=settings.bcrypt_rounds)).decode("utf-8")
@@ -42,6 +44,7 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 
 # ── JWT access tokens ─────────────────────────────────────────────
+
 
 class TokenError(Exception):
     """Raised when a JWT cannot be decoded / verified."""
@@ -88,6 +91,7 @@ def decode_access_token(token: str) -> dict[str, Any]:
 
 # ── opaque tokens (refresh / verify / reset) ──────────────────────
 
+
 def generate_opaque_token(nbytes: int = 48) -> str:
     """Return a URL-safe random token to hand to the client (store the hash)."""
     return secrets.token_urlsafe(nbytes)
@@ -100,14 +104,13 @@ def hash_token(token: str) -> str:
 
 # ── TOTP 2FA ──────────────────────────────────────────────────────
 
+
 def generate_totp_secret() -> str:
     return pyotp.random_base32()
 
 
 def totp_provisioning_uri(secret: str, account: str) -> str:
-    return pyotp.TOTP(secret).provisioning_uri(
-        name=account, issuer_name=settings.auth_issuer
-    )
+    return pyotp.TOTP(secret).provisioning_uri(name=account, issuer_name=settings.auth_issuer)
 
 
 def verify_totp(secret: Optional[str], code: str) -> bool:

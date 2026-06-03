@@ -3,6 +3,7 @@ Sprint 20D — pure risk-check + protection maths for the auto engine.
 
 No DB, no I/O — just decisions, so every branch is unit-testable.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

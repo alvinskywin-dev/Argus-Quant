@@ -3,6 +3,7 @@
 Exercises the real ASGI app: register a user, get the demo account, open a
 manual position, simulate + copy a signal, close a position, and read history.
 """
+
 import asyncio
 
 import httpx
@@ -15,10 +16,21 @@ from app.database.session import get_session, init_db
 async def _seed_signal() -> int:
     async with get_session() as db:
         sig = Signal(
-            symbol="BTCUSDT", side="LONG", timeframe="1h", confidence=90.0,
-            risk_level="LOW", strategy="MTF_SMC_STRICT", reasons="test",
-            entry_low=100.0, entry_high=100.0, tp1=104.0, tp2=108.0, tp3=112.0,
-            stop_loss=98.0, risk_reward=2.0, status="OPEN",
+            symbol="BTCUSDT",
+            side="LONG",
+            timeframe="1h",
+            confidence=90.0,
+            risk_level="LOW",
+            strategy="MTF_SMC_STRICT",
+            reasons="test",
+            entry_low=100.0,
+            entry_high=100.0,
+            tp1=104.0,
+            tp2=108.0,
+            tp3=112.0,
+            stop_loss=98.0,
+            risk_reward=2.0,
+            status="OPEN",
         )
         db.add(sig)
         await db.flush()
@@ -32,9 +44,13 @@ async def main() -> None:
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
         # register + login
-        r = await c.post("/api/auth/register", json={"email": "paper@example.com", "password": "Sup3rSecret!"})
+        r = await c.post(
+            "/api/auth/register", json={"email": "paper@example.com", "password": "Sup3rSecret!"}
+        )
         assert r.status_code == 201, r.text
-        r = await c.post("/api/auth/login", json={"email": "paper@example.com", "password": "Sup3rSecret!"})
+        r = await c.post(
+            "/api/auth/login", json={"email": "paper@example.com", "password": "Sup3rSecret!"}
+        )
         assert r.status_code == 200, r.text
         h = {"Authorization": f"Bearer {r.json()['access_token']}"}
 
@@ -51,20 +67,35 @@ async def main() -> None:
         assert r.status_code == 200 and "TP3" in r.json()["projections"]
 
         # manual open: LONG 5000 notional @100, 10x
-        r = await c.post("/api/paper/account/open", headers=h, json={
-            "symbol": "ETHUSDT", "side": "LONG", "entry_price": 100,
-            "notional_usdt": 5000, "leverage": 10, "stop_loss": 98,
-        })
+        r = await c.post(
+            "/api/paper/account/open",
+            headers=h,
+            json={
+                "symbol": "ETHUSDT",
+                "side": "LONG",
+                "entry_price": 100,
+                "notional_usdt": 5000,
+                "leverage": 10,
+                "stop_loss": 98,
+            },
+        )
         print("open", r.status_code, "liq=", r.json().get("liquidation_price"))
         assert r.status_code == 201, r.text
         pos_id = r.json()["id"]
         assert r.json()["margin_usdt"] == 500.0  # 5000 / 10
 
         # over-leverage rejection: notional needing > available margin
-        r = await c.post("/api/paper/account/open", headers=h, json={
-            "symbol": "ETHUSDT", "side": "LONG", "entry_price": 100,
-            "notional_usdt": 10_000_000, "leverage": 1,
-        })
+        r = await c.post(
+            "/api/paper/account/open",
+            headers=h,
+            json={
+                "symbol": "ETHUSDT",
+                "side": "LONG",
+                "entry_price": 100,
+                "notional_usdt": 10_000_000,
+                "leverage": 1,
+            },
+        )
         print("open-too-big", r.status_code, r.json().get("detail"))
         assert r.status_code == 400
 
@@ -79,8 +110,11 @@ async def main() -> None:
         assert r.json()["open_positions"] == 2
 
         # close ETH at +10% (price 110) -> +500 USDT on 5000 notional
-        r = await c.post(f"/api/paper/account/positions/{pos_id}/close", headers=h,
-                         json={"mark_price": 110, "reason": "MANUAL"})
+        r = await c.post(
+            f"/api/paper/account/positions/{pos_id}/close",
+            headers=h,
+            json={"mark_price": 110, "reason": "MANUAL"},
+        )
         print("close", r.status_code, "pnl=", r.json()["pnl_usdt"], "roe=", r.json()["pnl_pct"])
         assert r.status_code == 200 and r.json()["pnl_usdt"] == 500.0
 

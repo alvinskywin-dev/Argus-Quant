@@ -7,6 +7,7 @@ aggregation, the testnet futures-account classifier, and host selection.
 No network and no real orders — the ``run_binance_preflight`` / ``validate_*``
 network paths are exercised manually against testnet, never in CI.
 """
+
 from __future__ import annotations
 
 from app.exchange_vault.binance_preflight import (
@@ -31,6 +32,7 @@ from app.exchange_vault.permission_validator import (
 
 # ── clock skew ──────────────────────────────────────────────────────
 
+
 def test_clock_skew_within_tolerance_is_ok():
     r = classify_clock_skew(1_000_000, 1_000_100)
     assert r.ok and r.severity == "OK" and r.skew_ms == -100
@@ -50,15 +52,24 @@ def test_clock_skew_beyond_recv_window_fails():
 # ── exchangeInfo filter parsing ─────────────────────────────────────
 
 _INFO = {
-    "symbols": [{
-        "symbol": "BTCUSDT", "status": "TRADING",
-        "quantityPrecision": 3, "pricePrecision": 1,
-        "filters": [
-            {"filterType": "LOT_SIZE", "stepSize": "0.001", "minQty": "0.001", "maxQty": "1000"},
-            {"filterType": "PRICE_FILTER", "tickSize": "0.10"},
-            {"filterType": "MIN_NOTIONAL", "notional": "5"},
-        ],
-    }]
+    "symbols": [
+        {
+            "symbol": "BTCUSDT",
+            "status": "TRADING",
+            "quantityPrecision": 3,
+            "pricePrecision": 1,
+            "filters": [
+                {
+                    "filterType": "LOT_SIZE",
+                    "stepSize": "0.001",
+                    "minQty": "0.001",
+                    "maxQty": "1000",
+                },
+                {"filterType": "PRICE_FILTER", "tickSize": "0.10"},
+                {"filterType": "MIN_NOTIONAL", "notional": "5"},
+            ],
+        }
+    ]
 }
 
 
@@ -76,12 +87,20 @@ def test_parse_symbol_filters_missing_symbol():
 
 
 def test_parse_symbol_filters_spot_min_notional_key():
-    info = {"symbols": [{"symbol": "X", "status": "TRADING", "filters": [
-        {"filterType": "MIN_NOTIONAL", "minNotional": "10"}]}]}
+    info = {
+        "symbols": [
+            {
+                "symbol": "X",
+                "status": "TRADING",
+                "filters": [{"filterType": "MIN_NOTIONAL", "minNotional": "10"}],
+            }
+        ]
+    }
     assert parse_symbol_filters(info, "X").min_notional == 10.0
 
 
 # ── rounding ────────────────────────────────────────────────────────
+
 
 def test_round_step_down_truncates_to_step():
     assert round_step_down(0.123456, 0.001) == 0.123
@@ -100,6 +119,7 @@ def test_round_price_to_tick_half_up():
 
 
 # ── min-notional + order planning ───────────────────────────────────
+
 
 def test_check_min_notional():
     ok, notional = check_min_notional(0.001, 4000, 5)
@@ -137,6 +157,7 @@ def test_plan_order_quantity_rejects_nonpositive():
 
 # ── order precision enforcement (executor path) ─────────────────────
 
+
 def test_enforce_precision_rounds_qty_down_and_price_to_tick():
     f = parse_symbol_filters(_INFO, "BTCUSDT")
     r = enforce_order_precision(f, qty=0.12345, price=100.07, order_type="LIMIT")
@@ -164,6 +185,7 @@ def test_enforce_precision_passthrough_without_filters():
 
 # ── preflight aggregation ───────────────────────────────────────────
 
+
 def test_preflight_summary_and_finalize():
     res = BinancePreflightResult(testnet=True, base_url=fapi_base(True))
     res.add("clock_skew", True, "ok")
@@ -190,6 +212,7 @@ def test_empty_preflight_is_not_ok():
 
 # ── host selection ──────────────────────────────────────────────────
 
+
 def test_fapi_base_selects_testnet_vs_prod():
     assert "testnet" in fapi_base(True)
     assert fapi_base(False) == "https://fapi.binance.com"
@@ -197,9 +220,11 @@ def test_fapi_base_selects_testnet_vs_prod():
 
 # ── testnet futures-account classifier ──────────────────────────────
 
+
 def test_futures_account_cantrade_true_is_connected():
     r = classify_binance_futures_account(
-        {"canTrade": True, "canWithdraw": False, "totalWalletBalance": "100"}, testnet=True)
+        {"canTrade": True, "canWithdraw": False, "totalWalletBalance": "100"}, testnet=True
+    )
     assert r.ok and r.status == STATUS_CONNECTED
     assert r.can_read and r.can_trade and r.can_futures
     # account-level withdraw flag is not trusted as key-permission -> undetectable
@@ -219,5 +244,6 @@ def test_futures_account_unreachable_is_denied():
 
 def test_futures_account_trusted_withdraw_flag_rejects():
     r = classify_binance_futures_account(
-        {"canTrade": True, "canWithdraw": True}, trust_withdraw_flag=True)
+        {"canTrade": True, "canWithdraw": True}, trust_withdraw_flag=True
+    )
     assert r.status == STATUS_PERMISSION_DENIED and r.can_withdraw is True

@@ -1,6 +1,7 @@
 """
 Sprint 20E — request/response models for the safety API.
 """
+
 from __future__ import annotations
 
 from datetime import datetime

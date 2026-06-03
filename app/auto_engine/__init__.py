@@ -7,6 +7,7 @@ per-user opt-in via AutoTradeConfig.enabled or PaperAccount.auto_follow.
 
 Call setup_auto_engine(app) from create_app() to mount the config/status API.
 """
+
 from __future__ import annotations
 
 from fastapi import FastAPI, Request

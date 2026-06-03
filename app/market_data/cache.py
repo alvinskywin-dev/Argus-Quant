@@ -1,6 +1,7 @@
 """
 Async Redis cache wrapper. Used by scanner to memoize klines and ticker data.
 """
+
 from __future__ import annotations
 
 from typing import Any, Optional

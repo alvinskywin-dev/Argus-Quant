@@ -1,6 +1,7 @@
 """
 Repository helpers — typed, async, transaction-safe.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -24,18 +25,16 @@ ACTIVE_STATUSES: list[str] = ["OPEN", "ACTIVE", "PENDING"]
 
 # ---------------- duplicate-signal guard ----------------
 
+
 async def has_active_signal(symbol: str, side: str | None = None) -> bool:
     """
     Return True if there is at least one active (OPEN/ACTIVE/PENDING) signal
     for *symbol*.  Pass *side* to restrict to a specific direction.
     """
     async with get_session() as s:
-        q = (
-            select(Signal.id)
-            .where(
-                Signal.symbol == symbol,
-                Signal.status.in_(ACTIVE_STATUSES),
-            )
+        q = select(Signal.id).where(
+            Signal.symbol == symbol,
+            Signal.status.in_(ACTIVE_STATUSES),
         )
         if side is not None:
             q = q.where(Signal.side == side)
@@ -100,11 +99,11 @@ async def get_active_signals_summary() -> list[dict[str, Any]]:
         )
         return [
             {
-                "symbol":     r[0],
-                "side":       r[1],
-                "status":     r[2],
+                "symbol": r[0],
+                "side": r[1],
+                "status": r[2],
                 "confidence": round(float(r[3] or 0), 1),
-                "opened":     r[4].strftime("%m-%d %H:%M") if r[4] else "-",
+                "opened": r[4].strftime("%m-%d %H:%M") if r[4] else "-",
             }
             for r in rows.all()
         ]
@@ -127,17 +126,13 @@ async def update_signal(signal_id: int, fields: dict[str, Any]) -> None:
 
 async def get_open_signals() -> List[Signal]:
     async with get_session() as s:
-        rows = await s.execute(
-            select(Signal).where(Signal.status.in_(["OPEN", "TP1", "TP2"]))
-        )
+        rows = await s.execute(select(Signal).where(Signal.status.in_(["OPEN", "TP1", "TP2"])))
         return list(rows.scalars().all())
 
 
 async def get_recent_signals(limit: int = 20) -> List[Signal]:
     async with get_session() as s:
-        rows = await s.execute(
-            select(Signal).order_by(desc(Signal.created_at)).limit(limit)
-        )
+        rows = await s.execute(select(Signal).order_by(desc(Signal.created_at)).limit(limit))
         return list(rows.scalars().all())
 
 
@@ -154,9 +149,7 @@ async def last_signal_for(symbol: str, side: str) -> Optional[Signal]:
 
 async def count_signals_since(since: datetime) -> int:
     async with get_session() as s:
-        rows = await s.execute(
-            select(func.count(Signal.id)).where(Signal.created_at >= since)
-        )
+        rows = await s.execute(select(func.count(Signal.id)).where(Signal.created_at >= since))
         return int(rows.scalar() or 0)
 
 
@@ -164,9 +157,7 @@ async def count_signals_since(since: datetime) -> int:
 async def add_watch(user_id: int, symbol: str) -> bool:
     async with get_session() as s:
         existing = await s.execute(
-            select(Watchlist).where(
-                and_(Watchlist.user_id == user_id, Watchlist.symbol == symbol)
-            )
+            select(Watchlist).where(and_(Watchlist.user_id == user_id, Watchlist.symbol == symbol))
         )
         if existing.scalar_one_or_none():
             return False
@@ -177,18 +168,14 @@ async def add_watch(user_id: int, symbol: str) -> bool:
 async def remove_watch(user_id: int, symbol: str) -> bool:
     async with get_session() as s:
         res = await s.execute(
-            delete(Watchlist).where(
-                and_(Watchlist.user_id == user_id, Watchlist.symbol == symbol)
-            )
+            delete(Watchlist).where(and_(Watchlist.user_id == user_id, Watchlist.symbol == symbol))
         )
         return (res.rowcount or 0) > 0
 
 
 async def list_watch(user_id: int) -> List[str]:
     async with get_session() as s:
-        rows = await s.execute(
-            select(Watchlist.symbol).where(Watchlist.user_id == user_id)
-        )
+        rows = await s.execute(select(Watchlist.symbol).where(Watchlist.user_id == user_id))
         return [r[0] for r in rows.all()]
 
 
@@ -282,13 +269,12 @@ async def save_signal_message(signal_id: int, chat_id: str, telegram_message_id:
 
 async def get_signal_messages(signal_id: int) -> list[SignalMessage]:
     async with get_session() as s:
-        rows = await s.execute(
-            select(SignalMessage).where(SignalMessage.signal_id == signal_id)
-        )
+        rows = await s.execute(select(SignalMessage).where(SignalMessage.signal_id == signal_id))
         return list(rows.scalars().all())
 
 
 # ---------------- funding rate snapshots ----------------
+
 
 async def save_funding_snapshot(
     symbol: str,
@@ -298,13 +284,15 @@ async def save_funding_snapshot(
     next_funding_time: int | None = None,
 ) -> None:
     async with get_session() as s:
-        s.add(FundingRateSnapshot(
-            symbol=symbol,
-            funding_rate=funding_rate,
-            funding_time=funding_time,
-            next_funding_time=next_funding_time,
-            classification=classification,
-        ))
+        s.add(
+            FundingRateSnapshot(
+                symbol=symbol,
+                funding_rate=funding_rate,
+                funding_time=funding_time,
+                next_funding_time=next_funding_time,
+                classification=classification,
+            )
+        )
 
 
 async def get_latest_funding(symbol: str) -> Optional[FundingRateSnapshot]:

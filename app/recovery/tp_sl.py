@@ -7,6 +7,7 @@ or partial failure those orders may be gone while the position is still open —
 the most dangerous live-trading state. This module computes the protection
 status; the engine acts on it (retry placement or mark UNSAFE).
 """
+
 from __future__ import annotations
 
 # tp_sl_status values
@@ -21,7 +22,11 @@ ALL_STATUSES = (SYNCED, MISSING_SL, MISSING_TP, MISSING_BOTH, UNKNOWN, UNSAFE)
 
 
 def compute_tp_sl_status(
-    has_tp: bool, has_sl: bool, *, expected_tp: bool = True, expected_sl: bool = True,
+    has_tp: bool,
+    has_sl: bool,
+    *,
+    expected_tp: bool = True,
+    expected_sl: bool = True,
 ) -> str:
     """
     Compare working protective orders against what the position expects.

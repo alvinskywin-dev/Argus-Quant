@@ -6,6 +6,7 @@ and slippage. When a component cannot be measured exactly (e.g. funding not yet
 fetched from the exchange), the breakdown is flagged PARTIAL so dashboards never
 present an estimate as if it were settled.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -14,8 +15,8 @@ from dataclasses import dataclass
 DEFAULT_TAKER_RATE = 0.0004
 
 # estimate_quality values
-EXACT = "EXACT"        # every component came from settled exchange data
-PARTIAL = "PARTIAL"    # at least one component is an estimate
+EXACT = "EXACT"  # every component came from settled exchange data
+PARTIAL = "PARTIAL"  # at least one component is an estimate
 ESTIMATED = "ESTIMATED"  # gross is real but all costs are estimated
 
 
@@ -31,8 +32,9 @@ class PnlBreakdown:
     estimate_quality: str
 
 
-def estimate_commission(notional: float, *, rate: float = DEFAULT_TAKER_RATE,
-                        round_trip: bool = True) -> float:
+def estimate_commission(
+    notional: float, *, rate: float = DEFAULT_TAKER_RATE, round_trip: bool = True
+) -> float:
     """Estimated commission for a notional. round_trip charges entry + exit."""
     legs = 2 if round_trip else 1
     return abs(notional) * rate * legs
@@ -79,10 +81,15 @@ def compute_net_pnl(
         quality = PARTIAL
 
     return PnlBreakdown(
-        gross_pnl=round(gross_pnl, 8), commission=round(commission, 8),
-        funding_fee=round(funding_fee, 8), slippage=round(slippage, 8),
-        net_pnl=round(net_pnl, 8), net_roe=round(net_roe, 4),
-        total_fees=round(total_fees, 8), estimate_quality=quality)
+        gross_pnl=round(gross_pnl, 8),
+        commission=round(commission, 8),
+        funding_fee=round(funding_fee, 8),
+        slippage=round(slippage, 8),
+        net_pnl=round(net_pnl, 8),
+        net_roe=round(net_roe, 4),
+        total_fees=round(total_fees, 8),
+        estimate_quality=quality,
+    )
 
 
 def holding_seconds(opened_at, closed_at) -> int:

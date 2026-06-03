@@ -6,6 +6,7 @@ failures, applies a bounded retry policy, prevents duplicate entries via an
 idempotency key, and trips a per-user circuit breaker. Call
 setup_order_failures(app) from create_app().
 """
+
 from __future__ import annotations
 
 from fastapi import FastAPI, Request

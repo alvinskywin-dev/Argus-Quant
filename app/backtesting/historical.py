@@ -25,6 +25,7 @@ Performance
 Higher-TF snapshot caching + early 1D trend exit reduces full pipeline calls
 to roughly 15–25% of the total candle count.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -55,15 +56,16 @@ _MAX_HOLD = 200
 # Milliseconds per interval (used to compute warm-up start time)
 _INTERVAL_MS: Dict[str, int] = {
     "15m": 15 * 60 * 1000,
-    "1h":  60 * 60 * 1000,
-    "4h":  4 * 60 * 60 * 1000,
-    "1d":  24 * 60 * 60 * 1000,
+    "1h": 60 * 60 * 1000,
+    "4h": 4 * 60 * 60 * 1000,
+    "1d": 24 * 60 * 60 * 1000,
 }
 
 WIN_STATUSES = ("TP1", "TP2", "TP3")
 
 
 # ── data classes ──────────────────────────────────────────────────────────────
+
 
 @dataclass
 class BtTrade:
@@ -83,27 +85,27 @@ class BtTrade:
     entry_score: float = 0.0
     exit_price: float = 0.0
     exit_time: Optional[datetime] = None
-    status: str = "OPEN"      # TP1 | TP2 | TP3 | SL | EXPIRED
+    status: str = "OPEN"  # TP1 | TP2 | TP3 | SL | EXPIRED
     pnl_pct: float = 0.0
     hold_candles: int = 0
 
     def to_dict(self) -> dict:
         return {
-            "symbol":          self.symbol,
-            "side":            self.side,
-            "entry_price":     round(self.entry_price, 6),
-            "entry_time":      self.entry_time.isoformat() if self.entry_time else None,
-            "exit_price":      round(self.exit_price, 6),
-            "exit_time":       self.exit_time.isoformat() if self.exit_time else None,
-            "status":          self.status,
-            "pnl_pct":         round(self.pnl_pct, 3),
-            "confidence":      round(self.confidence, 1),
-            "risk_reward":     round(self.risk_reward, 2),
-            "hold_candles":    self.hold_candles,
-            "trend_score":     round(self.trend_score, 1),
+            "symbol": self.symbol,
+            "side": self.side,
+            "entry_price": round(self.entry_price, 6),
+            "entry_time": self.entry_time.isoformat() if self.entry_time else None,
+            "exit_price": round(self.exit_price, 6),
+            "exit_time": self.exit_time.isoformat() if self.exit_time else None,
+            "status": self.status,
+            "pnl_pct": round(self.pnl_pct, 3),
+            "confidence": round(self.confidence, 1),
+            "risk_reward": round(self.risk_reward, 2),
+            "hold_candles": self.hold_candles,
+            "trend_score": round(self.trend_score, 1),
             "structure_score": round(self.structure_score, 1),
-            "setup_score":     round(self.setup_score, 1),
-            "entry_score":     round(self.entry_score, 1),
+            "setup_score": round(self.setup_score, 1),
+            "entry_score": round(self.entry_score, 1),
         }
 
 
@@ -139,10 +141,12 @@ class BtResult:
 
     def to_dict(self) -> dict:
         import dataclasses
+
         return dataclasses.asdict(self)
 
 
 # ── exit simulator ────────────────────────────────────────────────────────────
+
 
 def _simulate_exit(
     i_start: int,
@@ -194,6 +198,7 @@ def _simulate_exit(
 
 # ── metrics builder ───────────────────────────────────────────────────────────
 
+
 def _compute_metrics(
     trades: List[BtTrade],
     symbol: str,
@@ -217,33 +222,33 @@ def _compute_metrics(
         return res
 
     closed = [t for t in trades if t.status != "OPEN"]
-    wins   = [t for t in closed if t.status in WIN_STATUSES]
+    wins = [t for t in closed if t.status in WIN_STATUSES]
     losses = [t for t in closed if t.status == "SL"]
-    exps   = [t for t in closed if t.status == "EXPIRED"]
+    exps = [t for t in closed if t.status == "EXPIRED"]
 
     res.total_trades = len(closed)
-    res.wins    = len(wins)
-    res.losses  = len(losses)
+    res.wins = len(wins)
+    res.losses = len(losses)
     res.expired = len(exps)
     res.win_rate = round(len(wins) / max(1, len(closed)) * 100, 1)
 
     pnls = [t.pnl_pct for t in closed]
-    rrs  = [t.risk_reward for t in closed]
+    rrs = [t.risk_reward for t in closed]
 
-    res.avg_pnl         = round(sum(pnls) / max(1, len(pnls)), 3)
-    res.avg_rr          = round(sum(rrs)  / max(1, len(rrs)),  2)
-    res.best_trade_pnl  = round(max(pnls, default=0.0), 3)
+    res.avg_pnl = round(sum(pnls) / max(1, len(pnls)), 3)
+    res.avg_rr = round(sum(rrs) / max(1, len(rrs)), 2)
+    res.best_trade_pnl = round(max(pnls, default=0.0), 3)
     res.worst_trade_pnl = round(min(pnls, default=0.0), 3)
-    res.total_pnl       = round(sum(pnls), 3)
+    res.total_pnl = round(sum(pnls), 3)
 
-    gross_win  = sum(p for p in pnls if p > 0)
+    gross_win = sum(p for p in pnls if p > 0)
     gross_loss = abs(sum(p for p in pnls if p < 0))
     res.profit_factor = round(gross_win / gross_loss, 2) if gross_loss > 0 else None
 
     # Sharpe (population std)
     if len(pnls) > 1:
         mean = sum(pnls) / len(pnls)
-        std  = math.sqrt(sum((p - mean) ** 2 for p in pnls) / len(pnls))
+        std = math.sqrt(sum((p - mean) ** 2 for p in pnls) / len(pnls))
         res.sharpe_ratio = round(mean / max(1e-9, std), 2)
 
     # Equity curve + max drawdown
@@ -257,11 +262,12 @@ def _compute_metrics(
         dd = peak - cum
         if dd > max_dd:
             max_dd = dd
-    res.equity_curve       = curve[-121:]   # max 121 points (120 trades + start)
-    res.max_drawdown_pct   = round(max_dd, 3)
+    res.equity_curve = curve[-121:]  # max 121 points (120 trades + start)
+    res.max_drawdown_pct = round(max_dd, 3)
 
     # Monthly breakdown
     from collections import defaultdict
+
     mo_map: Dict[str, List[BtTrade]] = defaultdict(list)
     for t in closed:
         if t.entry_time:
@@ -270,21 +276,24 @@ def _compute_metrics(
     for month, mo_trades in sorted(mo_map.items()):
         mo_wins = [t for t in mo_trades if t.status in WIN_STATUSES]
         mo_pnls = [t.pnl_pct for t in mo_trades]
-        mo_n    = max(1, len(mo_trades))
-        mo_gw   = sum(p for p in mo_pnls if p > 0)
-        mo_gl   = abs(sum(p for p in mo_pnls if p < 0))
-        res.monthly.append({
-            "month":         month,
-            "signals":       len(mo_trades),
-            "wins":          len(mo_wins),
-            "losses":        len([t for t in mo_trades if t.status == "SL"]),
-            "win_rate":      round(len(mo_wins) / mo_n * 100, 1),
-            "total_pnl":     round(sum(mo_pnls), 3),
-            "profit_factor": round(mo_gw / mo_gl, 2) if mo_gl > 0 else None,
-        })
+        mo_n = max(1, len(mo_trades))
+        mo_gw = sum(p for p in mo_pnls if p > 0)
+        mo_gl = abs(sum(p for p in mo_pnls if p < 0))
+        res.monthly.append(
+            {
+                "month": month,
+                "signals": len(mo_trades),
+                "wins": len(mo_wins),
+                "losses": len([t for t in mo_trades if t.status == "SL"]),
+                "win_rate": round(len(mo_wins) / mo_n * 100, 1),
+                "total_pnl": round(sum(mo_pnls), 3),
+                "profit_factor": round(mo_gw / mo_gl, 2) if mo_gl > 0 else None,
+            }
+        )
 
     # RR distribution
     from collections import Counter
+
     rr_buckets: Counter = Counter()
     for rr in rrs:
         b = f"{math.floor(rr * 2) / 2:.1f}"
@@ -301,6 +310,7 @@ def _compute_metrics(
 
 
 # ── main engine ───────────────────────────────────────────────────────────────
+
 
 class HistoricalBacktestEngine:
     """
@@ -334,31 +344,35 @@ class HistoricalBacktestEngine:
         """
         try:
             start_dt = datetime.strptime(start_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-            end_dt   = (
-                datetime.strptime(end_str,   "%Y-%m-%d").replace(tzinfo=timezone.utc)
-                + timedelta(days=1)
-            )
+            end_dt = datetime.strptime(end_str, "%Y-%m-%d").replace(
+                tzinfo=timezone.utc
+            ) + timedelta(days=1)
         except ValueError as exc:
             return BtResult(
-                symbol=symbol, start_date=start_str, end_date=end_str,
+                symbol=symbol,
+                start_date=start_str,
+                end_date=end_str,
                 error=f"bad date format: {exc}",
             )
 
         if end_dt <= start_dt:
             return BtResult(
-                symbol=symbol, start_date=start_str, end_date=end_str,
+                symbol=symbol,
+                start_date=start_str,
+                end_date=end_str,
                 error="end_date must be after start_date",
             )
 
         if (end_dt - start_dt).days > 366:
             return BtResult(
-                symbol=symbol, start_date=start_str, end_date=end_str,
+                symbol=symbol,
+                start_date=start_str,
+                end_date=end_str,
                 error="date range exceeds 366 days maximum",
             )
 
         logger.info(
-            f"backtest start  symbol={symbol} "
-            f"{start_str}→{end_str} strategy={strategy_version}"
+            f"backtest start  symbol={symbol} " f"{start_str}→{end_str} strategy={strategy_version}"
         )
 
         try:
@@ -366,7 +380,9 @@ class HistoricalBacktestEngine:
         except Exception as exc:  # noqa: BLE001
             logger.exception(f"backtest data fetch failed: {exc}")
             return BtResult(
-                symbol=symbol, start_date=start_str, end_date=end_str,
+                symbol=symbol,
+                start_date=start_str,
+                end_date=end_str,
                 error=f"data fetch failed: {exc}",
             )
 
@@ -374,9 +390,7 @@ class HistoricalBacktestEngine:
         loop = asyncio.get_event_loop()
         result: BtResult = await loop.run_in_executor(
             None,
-            lambda: self._replay(
-                symbol.upper(), start_dt, end_dt, dfs, strategy_version
-            ),
+            lambda: self._replay(symbol.upper(), start_dt, end_dt, dfs, strategy_version),
         )
         logger.info(
             f"backtest done   symbol={symbol} "
@@ -420,9 +434,9 @@ class HistoricalBacktestEngine:
         strategy_version: str,
     ) -> BtResult:
         m15_df = dfs.get("15m", pd.DataFrame())
-        h1_df  = dfs.get("1h",  pd.DataFrame())
-        h4_df  = dfs.get("4h",  pd.DataFrame())
-        d1_df  = dfs.get("1d",  pd.DataFrame())
+        h1_df = dfs.get("1h", pd.DataFrame())
+        h4_df = dfs.get("4h", pd.DataFrame())
+        d1_df = dfs.get("1d", pd.DataFrame())
 
         _empty = BtResult(
             symbol=symbol,
@@ -438,28 +452,28 @@ class HistoricalBacktestEngine:
             return _empty
 
         # ── Pre-extract numpy arrays for fast indexed access ───────────────
-        m15_close_times = m15_df["close_time"].values   # numpy datetime64
-        h1_close_times  = h1_df["close_time"].values
-        h4_close_times  = h4_df["close_time"].values
-        d1_close_times  = d1_df["close_time"].values
+        m15_close_times = m15_df["close_time"].values  # numpy datetime64
+        h1_close_times = h1_df["close_time"].values
+        h4_close_times = h4_df["close_time"].values
+        d1_close_times = d1_df["close_time"].values
 
-        m15_high_arr   = m15_df["high"].values.astype(float)
-        m15_low_arr    = m15_df["low"].values.astype(float)
-        m15_close_arr  = m15_df["close"].values.astype(float)
+        m15_high_arr = m15_df["high"].values.astype(float)
+        m15_low_arr = m15_df["low"].values.astype(float)
+        m15_close_arr = m15_df["close"].values.astype(float)
         m15_open_times = m15_df["open_time"].values
 
         n15 = len(m15_df)
 
         # ── Locate test-window boundaries in 15M index ─────────────────────
         start_ts64 = np.datetime64(start_dt.replace(tzinfo=None), "ms")
-        end_ts64   = np.datetime64(end_dt.replace(tzinfo=None),   "ms")
+        end_ts64 = np.datetime64(end_dt.replace(tzinfo=None), "ms")
 
         # First 15M candle that CLOSES on or after start_dt
         raw_start_i = int(np.searchsorted(m15_close_times, start_ts64, side="left"))
         # Ensure we have enough warm-up history
         start_i = max(raw_start_i, _SNAP_WINDOW)
-        end_i   = int(np.searchsorted(m15_close_times, end_ts64, side="left"))
-        end_i   = min(end_i, n15)
+        end_i = int(np.searchsorted(m15_close_times, end_ts64, side="left"))
+        end_i = min(end_i, n15)
 
         if start_i >= end_i:
             _empty.error = "test window too narrow or no data in range"
@@ -470,7 +484,7 @@ class HistoricalBacktestEngine:
         snap_d1 = snap_h4 = snap_h1 = None
 
         trades: List[BtTrade] = []
-        active_trade_end_i = -1   # resume signal search after this index
+        active_trade_end_i = -1  # resume signal search after this index
 
         candles_scanned = signals_generated = 0
 
@@ -488,7 +502,7 @@ class HistoricalBacktestEngine:
             if new_d1_idx != cur_d1_idx:
                 cur_d1_idx = new_d1_idx
                 if new_d1_idx >= 60:
-                    sl = d1_df.iloc[max(0, new_d1_idx - _SNAP_WINDOW): new_d1_idx]
+                    sl = d1_df.iloc[max(0, new_d1_idx - _SNAP_WINDOW) : new_d1_idx]
                     snap_d1 = build_snapshot(symbol, "1d", sl.reset_index(drop=True))
                 else:
                     snap_d1 = None
@@ -507,7 +521,7 @@ class HistoricalBacktestEngine:
             if new_h4_idx != cur_h4_idx:
                 cur_h4_idx = new_h4_idx
                 if new_h4_idx >= 60:
-                    sl = h4_df.iloc[max(0, new_h4_idx - _SNAP_WINDOW): new_h4_idx]
+                    sl = h4_df.iloc[max(0, new_h4_idx - _SNAP_WINDOW) : new_h4_idx]
                     snap_h4 = build_snapshot(symbol, "4h", sl.reset_index(drop=True))
                 else:
                     snap_h4 = None
@@ -520,7 +534,7 @@ class HistoricalBacktestEngine:
             if new_h1_idx != cur_h1_idx:
                 cur_h1_idx = new_h1_idx
                 if new_h1_idx >= 60:
-                    sl = h1_df.iloc[max(0, new_h1_idx - _SNAP_WINDOW): new_h1_idx]
+                    sl = h1_df.iloc[max(0, new_h1_idx - _SNAP_WINDOW) : new_h1_idx]
                     snap_h1 = build_snapshot(symbol, "1h", sl.reset_index(drop=True))
                 else:
                     snap_h1 = None
@@ -529,7 +543,7 @@ class HistoricalBacktestEngine:
                 continue
 
             # ── Build 15M snapshot every qualifying candle ─────────────────
-            s15 = m15_df.iloc[max(0, i15 - _SNAP_WINDOW + 1): i15 + 1]
+            s15 = m15_df.iloc[max(0, i15 - _SNAP_WINDOW + 1) : i15 + 1]
             snap_15m = build_snapshot(symbol, "15m", s15.reset_index(drop=True))
             if snap_15m is None:
                 continue
@@ -574,10 +588,16 @@ class HistoricalBacktestEngine:
 
             # ── Simulate TP/SL exit ────────────────────────────────────────
             exit_i, exit_status, exit_price = _simulate_exit(
-                i15 + 1, n15,
+                i15 + 1,
+                n15,
                 decision.side,
-                levels.tp1, levels.tp2, levels.tp3, levels.stop_loss,
-                m15_high_arr, m15_low_arr, m15_close_arr,
+                levels.tp1,
+                levels.tp2,
+                levels.tp3,
+                levels.stop_loss,
+                m15_high_arr,
+                m15_low_arr,
+                m15_close_arr,
             )
 
             raw_exit_ts = m15_open_times[exit_i]
@@ -586,9 +606,9 @@ class HistoricalBacktestEngine:
             else:
                 exit_time = pd.Timestamp(raw_exit_ts).to_pydatetime().replace(tzinfo=timezone.utc)
 
-            trade.exit_price   = exit_price
-            trade.exit_time    = exit_time
-            trade.status       = exit_status
+            trade.exit_price = exit_price
+            trade.exit_time = exit_time
+            trade.status = exit_status
             trade.hold_candles = exit_i - i15
 
             if decision.side == "LONG":
@@ -597,10 +617,11 @@ class HistoricalBacktestEngine:
                 trade.pnl_pct = round((entry_price - exit_price) / entry_price * 100, 3)
 
             trades.append(trade)
-            active_trade_end_i = exit_i   # block new signals until trade closes
+            active_trade_end_i = exit_i  # block new signals until trade closes
 
         return _compute_metrics(
-            trades, symbol,
+            trades,
+            symbol,
             start_dt.strftime("%Y-%m-%d"),
             (end_dt - timedelta(days=1)).strftime("%Y-%m-%d"),
             strategy_version,

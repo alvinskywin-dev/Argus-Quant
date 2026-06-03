@@ -5,6 +5,7 @@ Computes rolling win-rate statistics across multiple dimensions
 (side, confidence bucket, RR bucket, timeframe, funding class, OI trend).
 Called on-demand by the dashboard API — no background task needed.
 """
+
 from __future__ import annotations
 
 import json
@@ -23,25 +24,25 @@ _CONF_BUCKETS = [
     ("75-80", 75.0, 80.0),
     ("80-85", 80.0, 85.0),
     ("85-90", 85.0, 90.0),
-    ("90+",   90.0, 101.0),
+    ("90+", 90.0, 101.0),
 ]
 
 _RR_BUCKETS = [
     ("1.5-2.0", 1.5, 2.0),
     ("2.0-2.5", 2.0, 2.5),
     ("2.5-3.0", 2.5, 3.0),
-    ("3.0+",    3.0, 99.0),
+    ("3.0+", 3.0, 99.0),
 ]
 
 _TF_BUCKETS = ["15m", "1h", "4h", "1d"]
 
 # Stop-Loss Engine V2 — winrate by SL distance and SL method.
 _SL_DIST_BUCKETS = [
-    ("0-2%",  0.0,  2.0),
-    ("2-4%",  2.0,  4.0),
-    ("4-6%",  4.0,  6.0),
-    ("6-10%", 6.0,  10.0),
-    ("10%+",  10.0, 1e9),
+    ("0-2%", 0.0, 2.0),
+    ("2-4%", 2.0, 4.0),
+    ("4-6%", 4.0, 6.0),
+    ("6-10%", 6.0, 10.0),
+    ("10%+", 10.0, 1e9),
 ]
 # Methods we surface explicitly (1D support stop / ATR stop / structure stop).
 _SL_METHODS = ["PREV_1D_SUPPORT", "atr", "structure", "liquidity"]
@@ -84,7 +85,7 @@ async def compute_winrate_analysis(limit: int = 500) -> Dict[str, Any]:
         }
 
     # ── Side win rates ────────────────────────────────────────────────────
-    longs  = [s for s in closed if s.side == "LONG"]
+    longs = [s for s in closed if s.side == "LONG"]
     shorts = [s for s in closed if s.side == "SHORT"]
 
     # ── Confidence buckets ────────────────────────────────────────────────
@@ -108,8 +109,8 @@ async def compute_winrate_analysis(limit: int = 500) -> Dict[str, Any]:
     # ── Diagnostics-based breakdowns (funding / OI) ───────────────────────
     funding_pos_sigs: List = []
     funding_neg_sigs: List = []
-    oi_rising_sigs:   List = []
-    oi_falling_sigs:  List = []
+    oi_rising_sigs: List = []
+    oi_falling_sigs: List = []
 
     # Stop-Loss Engine V2 — group closed signals by SL method and SL distance.
     sl_method_groups: Dict[str, List] = {m: [] for m in _SL_METHODS}
@@ -156,25 +157,23 @@ async def compute_winrate_analysis(limit: int = 500) -> Dict[str, Any]:
         return max(valid, key=lambda b: b["winrate"])["label"] if valid else None
 
     return {
-        "sample_size":            len(closed),
-        "long_winrate":           _wr(longs),
-        "short_winrate":          _wr(shorts),
+        "sample_size": len(closed),
+        "long_winrate": _wr(longs),
+        "short_winrate": _wr(shorts),
         "funding_positive_winrate": _wr(funding_pos_sigs),
         "funding_negative_winrate": _wr(funding_neg_sigs),
-        "oi_rising_winrate":      _wr(oi_rising_sigs),
-        "oi_falling_winrate":     _wr(oi_falling_sigs),
+        "oi_rising_winrate": _wr(oi_rising_sigs),
+        "oi_falling_winrate": _wr(oi_falling_sigs),
         "best_confidence_bucket": _best(conf_stats),
-        "best_rr_bucket":         _best(rr_stats),
-        "best_timeframe":         _best(tf_stats),
-        "confidence_buckets":     conf_stats,
-        "rr_buckets":             rr_stats,
-        "timeframe_buckets":      tf_stats,
+        "best_rr_bucket": _best(rr_stats),
+        "best_timeframe": _best(tf_stats),
+        "confidence_buckets": conf_stats,
+        "rr_buckets": rr_stats,
+        "timeframe_buckets": tf_stats,
         # Stop-Loss Engine V2 analytics
-        "sl_method_buckets":      [_bucket_stats(sl_method_groups[m], m) for m in _SL_METHODS],
-        "sl_distance_buckets":    [
+        "sl_method_buckets": [_bucket_stats(sl_method_groups[m], m) for m in _SL_METHODS],
+        "sl_distance_buckets": [
             _bucket_stats(sl_dist_groups[label], label) for label, _, _ in _SL_DIST_BUCKETS
         ],
-        "best_sl_method":         _best([
-            _bucket_stats(sl_method_groups[m], m) for m in _SL_METHODS
-        ]),
+        "best_sl_method": _best([_bucket_stats(sl_method_groups[m], m) for m in _SL_METHODS]),
     }

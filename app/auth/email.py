@@ -5,6 +5,7 @@ If SMTP is not configured (SMTP_HOST blank), the message is logged instead
 of sent. This keeps local/dev deployments fully functional without an SMTP
 server and guarantees we never crash on a missing mail backend.
 """
+
 from __future__ import annotations
 
 from email.message import EmailMessage

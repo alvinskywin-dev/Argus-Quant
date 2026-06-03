@@ -5,6 +5,7 @@ Mounted only when POSITION_RECOVERY_ENABLED=true.
   GET  /api/recovery/status — public aggregate (flag + unsafe/recovered counts)
   POST /api/recovery/run    — authed; recover the caller's positions
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends

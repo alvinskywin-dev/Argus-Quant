@@ -13,6 +13,7 @@ signals product:
 If you later want to swap in an ML model, the inputs are already feature
 vectors — just plug in a sklearn/torch model that returns a probability.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -26,7 +27,7 @@ WEIGHTS: Dict[str, float] = {
     "momentum": 0.14,
     "volume_quality": 0.12,
     "volatility_health": 0.08,
-    "structure": 0.14,        # SMC: BOS / sweeps / MSS — heaviest
+    "structure": 0.14,  # SMC: BOS / sweeps / MSS — heaviest
     "supertrend_align": 0.08,
     "macd_alignment": 0.08,
     "vwap_align": 0.06,
@@ -37,7 +38,7 @@ WEIGHTS: Dict[str, float] = {
 @dataclass
 class Score:
     side: str  # LONG or SHORT
-    confidence: float                # 0..100
+    confidence: float  # 0..100
     components: Dict[str, float] = field(default_factory=dict)
     reasons: List[str] = field(default_factory=list)
     risk_level: str = "MEDIUM"
@@ -53,9 +54,7 @@ def _trend_component(snap: FeatureSnapshot, side: str) -> Tuple[float, str | Non
     # 0..1 based on EMA alignment + ADX strength
     aligned = (
         side == "LONG" and snap.ema_fast > snap.ema_slow and snap.last_close > snap.ema_200
-    ) or (
-        side == "SHORT" and snap.ema_fast < snap.ema_slow and snap.last_close < snap.ema_200
-    )
+    ) or (side == "SHORT" and snap.ema_fast < snap.ema_slow and snap.last_close < snap.ema_200)
     if not aligned:
         return 0.0, None
     strength = _clip01((snap.trend_strength_adx - 15) / 35)  # ADX 15->50 maps 0->1
@@ -67,7 +66,7 @@ def _momentum_component(snap: FeatureSnapshot, side: str) -> Tuple[float, str | 
     if side == "LONG":
         if not snap.momentum_bull:
             return 0.0, None
-        rsi_score = _clip01((snap.rsi_value - 45) / 25)   # 45..70 ideal
+        rsi_score = _clip01((snap.rsi_value - 45) / 25)  # 45..70 ideal
         cross = 0.4 if snap.macd_cross_up else 0.0
         sk = 0.2 if snap.stoch_k > snap.stoch_d else 0.0
         score = min(1.0, rsi_score * 0.6 + cross + sk)
@@ -99,9 +98,9 @@ def _volatility_component(snap: FeatureSnapshot) -> Tuple[float, str | None]:
     # We want HEALTHY volatility — not too dead, not too explosive
     atr_pct = snap.atr_pct
     if atr_pct < 0.2:
-        return 0.1, None   # dead market
+        return 0.1, None  # dead market
     if atr_pct > 6.0:
-        return 0.2, None   # too violent
+        return 0.2, None  # too violent
     if 0.4 <= atr_pct <= 3.0:
         return 1.0, "Healthy volatility"
     return 0.6, None

@@ -1,6 +1,7 @@
 """
 Sprint 20B — unit tests for the paper futures maths (no DB required).
 """
+
 from __future__ import annotations
 
 import pytest

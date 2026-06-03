@@ -14,6 +14,7 @@ Patterns detected:
 liquidity_score: 0-20 total.
 liquidity_score_for_side: 0-20 directional (only counts patterns favoring side).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -30,15 +31,15 @@ class LiquiditySignal:
     equal_highs: bool = False
     equal_lows: bool = False
     eq_high_level: float = 0.0  # price of the equal-highs cluster
-    eq_low_level: float = 0.0   # price of the equal-lows cluster
+    eq_low_level: float = 0.0  # price of the equal-lows cluster
 
     # Directional patterns
-    sweep_up: bool = False            # wick > eq_highs, body closed below
-    sweep_down: bool = False          # wick < eq_lows, body closed above
-    fake_breakout_up: bool = False    # prior bar closed above eq_highs, now reversed
+    sweep_up: bool = False  # wick > eq_highs, body closed below
+    sweep_down: bool = False  # wick < eq_lows, body closed above
+    fake_breakout_up: bool = False  # prior bar closed above eq_highs, now reversed
     fake_breakout_down: bool = False  # prior bar closed below eq_lows, now reversed
-    stop_hunt_bull: bool = False      # aggressive down-wick below swing low (bear trap)
-    stop_hunt_bear: bool = False      # aggressive up-wick above swing high (bull trap)
+    stop_hunt_bull: bool = False  # aggressive down-wick below swing low (bear trap)
+    stop_hunt_bear: bool = False  # aggressive up-wick above swing high (bull trap)
     swing_failure_bull: bool = False  # SFP: new high on wick, bearish close (bull trap)
     swing_failure_bear: bool = False  # SFP: new low on wick, bullish close (bear trap)
 
@@ -135,11 +136,16 @@ def analyze_liquidity(df: pd.DataFrame, lookback: int = 30) -> LiquiditySignal:
 
     # ── Total score (all patterns, non-directional) ───────────────────────
     all_patterns = [
-        sig.equal_highs, sig.equal_lows,
-        sig.sweep_up, sig.sweep_down,
-        sig.fake_breakout_up, sig.fake_breakout_down,
-        sig.stop_hunt_bull, sig.stop_hunt_bear,
-        sig.swing_failure_bull, sig.swing_failure_bear,
+        sig.equal_highs,
+        sig.equal_lows,
+        sig.sweep_up,
+        sig.sweep_down,
+        sig.fake_breakout_up,
+        sig.fake_breakout_down,
+        sig.stop_hunt_bull,
+        sig.stop_hunt_bear,
+        sig.swing_failure_bull,
+        sig.swing_failure_bear,
     ]
     sig.score = min(20, sum(2 for p in all_patterns if p))
 
@@ -155,18 +161,18 @@ def liquidity_score_for_side(sig: LiquiditySignal, side: str) -> int:
     """
     if side == "LONG":
         patterns = [
-            sig.sweep_down,          # bears got their liquidity, reversal likely
+            sig.sweep_down,  # bears got their liquidity, reversal likely
             sig.fake_breakout_down,  # failed breakdown = bullish
-            sig.stop_hunt_bull,      # bear stops flushed, bulls now free
+            sig.stop_hunt_bull,  # bear stops flushed, bulls now free
             sig.swing_failure_bear,  # new low rejected, bulls take over
-            sig.equal_lows,          # demand zone (stops clustered below)
+            sig.equal_lows,  # demand zone (stops clustered below)
         ]
     else:
         patterns = [
-            sig.sweep_up,            # bulls got their liquidity, reversal likely
-            sig.fake_breakout_up,    # failed breakout = bearish
-            sig.stop_hunt_bear,      # bull stops flushed, bears now free
+            sig.sweep_up,  # bulls got their liquidity, reversal likely
+            sig.fake_breakout_up,  # failed breakout = bearish
+            sig.stop_hunt_bear,  # bull stops flushed, bears now free
             sig.swing_failure_bull,  # new high rejected, bears take over
-            sig.equal_highs,         # supply zone (stops clustered above)
+            sig.equal_highs,  # supply zone (stops clustered above)
         ]
     return min(20, sum(2 for p in patterns if p))

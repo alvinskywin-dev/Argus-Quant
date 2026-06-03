@@ -1,6 +1,7 @@
 """
 Sprint 20C — unit tests for vault crypto + mock validation (no DB required).
 """
+
 from __future__ import annotations
 
 import pytest
@@ -12,6 +13,7 @@ from app.exchange_vault.adapters import (
 )
 
 # ── AES-256-GCM crypto ────────────────────────────────────────────
+
 
 def test_encrypt_decrypt_roundtrip():
     secret = "my-super-secret-api-key-1234567890"
@@ -49,6 +51,7 @@ def test_encrypt_optional():
 
 # ── mock validator permission inference ───────────────────────────
 
+
 def test_mock_normal_key_is_trade_futures_no_withdraw():
     p = MockExchangeValidator("binance").validate("GOODKEY123", "secret", None)
     assert p.valid and p.can_trade and p.can_futures and not p.can_withdraw
@@ -80,6 +83,7 @@ def test_mock_passphrase_required_for_okx_bitget():
 def test_get_validator_supported_and_unsupported(monkeypatch):
     # Force MOCK so the test is independent of the deployment's live gate.
     from app.config import settings
+
     monkeypatch.setattr(settings, "mock_exchange_mode", True)
     assert get_validator("binance").name == "mock"
     with pytest.raises(ValueError):

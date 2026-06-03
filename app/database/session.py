@@ -1,6 +1,7 @@
 """
 Async SQLAlchemy engine + session factory.
 """
+
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
@@ -125,9 +126,7 @@ async def init_db() -> None:
         except Exception as exc:
             # Non-fatal: log and continue.  The index/column may already exist
             # or the data may need cleaning up first.
-            logger.warning(
-                f"schema upgrade skipped (non-fatal): {exc!s:.200} | SQL: {stmt[:80]}"
-            )
+            logger.warning(f"schema upgrade skipped (non-fatal): {exc!s:.200} | SQL: {stmt[:80]}")
 
     logger.info("database initialized")
 

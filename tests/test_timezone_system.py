@@ -6,6 +6,7 @@ validation gate. DB-backed persistence of PUT /api/auth/timezone is covered by
 the manual e2e flow; here we exercise the supported/unsupported decision, which
 is what the endpoint enforces before touching the database.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -29,8 +30,12 @@ from app.utils.timezone import (
 # 1) supported timezone list
 def test_supported_timezone_list():
     assert SUPPORTED_TIMEZONES == [
-        "UTC", "Europe/London", "Asia/Phnom_Penh",
-        "Asia/Ho_Chi_Minh", "America/New_York", "America/Los_Angeles",
+        "UTC",
+        "Europe/London",
+        "Asia/Phnom_Penh",
+        "Asia/Ho_Chi_Minh",
+        "America/New_York",
+        "America/Los_Angeles",
     ]
     assert DEFAULT_TIMEZONE == "UTC"
     assert all(is_supported_timezone(tz) for tz in SUPPORTED_TIMEZONES)
@@ -74,35 +79,43 @@ def test_utc_iso_normalization():
 def test_london_dst():
     winter = to_user_timezone("2026-01-01T12:00:00+00:00", "Europe/London")
     summer = to_user_timezone("2026-06-01T12:00:00+00:00", "Europe/London")
-    assert winter.hour == 12          # GMT
-    assert summer.hour == 13          # BST (+1)
-    assert format_datetime_for_timezone("2026-06-01T12:00:00+00:00", "Europe/London") \
+    assert winter.hour == 12  # GMT
+    assert summer.hour == 13  # BST (+1)
+    assert (
+        format_datetime_for_timezone("2026-06-01T12:00:00+00:00", "Europe/London")
         == "01 Jun 2026 13:00:00 Europe/London"
+    )
 
 
 # 6) Asia/Phnom_Penh (+7, no DST)
 def test_phnom_penh_offset():
     pp = to_user_timezone("2026-06-01T12:00:00+00:00", "Asia/Phnom_Penh")
     assert pp.hour == 19
-    assert format_datetime_for_timezone("2026-06-01T12:00:00+00:00", "Asia/Phnom_Penh") \
+    assert (
+        format_datetime_for_timezone("2026-06-01T12:00:00+00:00", "Asia/Phnom_Penh")
         == "01 Jun 2026 19:00:00 Asia/Phnom_Penh"
+    )
 
 
 # 7) America/New_York DST handling
 def test_new_york_dst():
     winter = to_user_timezone("2026-01-01T12:00:00+00:00", "America/New_York")
     summer = to_user_timezone("2026-06-01T12:00:00+00:00", "America/New_York")
-    assert winter.hour == 7           # EST (-5)
-    assert summer.hour == 8           # EDT (-4)
+    assert winter.hour == 7  # EST (-5)
+    assert summer.hour == 8  # EDT (-4)
 
 
 def test_format_helpers_none_safe_and_short():
     assert format_datetime_for_timezone(None, "UTC") is None
     assert format_short_datetime_for_timezone(None, "UTC") is None
-    assert format_short_datetime_for_timezone("2026-06-01T18:06:23+00:00", "UTC") == "01 Jun 18:06 UTC"
+    assert (
+        format_short_datetime_for_timezone("2026-06-01T18:06:23+00:00", "UTC") == "01 Jun 18:06 UTC"
+    )
     # an unsupported zone degrades to UTC rather than raising
-    assert format_datetime_for_timezone("2026-06-01T12:00:00+00:00", "Mars/Phobos") \
+    assert (
+        format_datetime_for_timezone("2026-06-01T12:00:00+00:00", "Mars/Phobos")
         == "01 Jun 2026 12:00:00 UTC"
+    )
 
 
 # 8 & 9) PUT /api/auth/timezone validation gate
@@ -110,6 +123,7 @@ def test_format_helpers_none_safe_and_short():
 async def test_put_timezone_rejects_unsupported():
     from app.auth.router import update_timezone
     from app.auth.schemas import UpdateTimezoneIn
+
     resp = await update_timezone(UpdateTimezoneIn(timezone="Mars/Phobos"), user=None)
     assert resp.status_code == 400
 

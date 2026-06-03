@@ -2,6 +2,7 @@
 Central configuration. All other modules import `settings` from here.
 Values are read from environment / .env via pydantic-settings.
 """
+
 from __future__ import annotations
 
 import sys
@@ -55,7 +56,7 @@ class Settings(BaseSettings):
     anti_duplicate_signal: bool = True
     max_signals_per_hour: int = 12
     min_rr: float = 2.0
-    entry_pass_score: int = 2   # minimum 15M entry factors needed (0-5)
+    entry_pass_score: int = 2  # minimum 15M entry factors needed (0-5)
 
     # --- Duplicate signal prevention ---
     # Block any new signal for a symbol while it still has an OPEN position
@@ -116,9 +117,9 @@ class Settings(BaseSettings):
     # --- Sprint 20 V11 platform feature flags ---
     # Canonical 20B flag (legacy `paper_trading` above stays for back-compat).
     paper_trading_enabled: bool = True
-    exchange_api_vault_enabled: bool = True   # 20C: encrypted exchange-key vault
-    mock_exchange_mode: bool = True           # adapters simulate fills, no real orders
-    default_demo_balance: float = 10_000.0    # starting virtual balance per account
+    exchange_api_vault_enabled: bool = True  # 20C: encrypted exchange-key vault
+    mock_exchange_mode: bool = True  # adapters simulate fills, no real orders
+    default_demo_balance: float = 10_000.0  # starting virtual balance per account
     # AES-256 master key for the exchange-credential vault (20C).
     # Blank -> derived from secret_key. Rotating this invalidates stored keys.
     vault_master_key: str = ""
@@ -142,16 +143,16 @@ class Settings(BaseSettings):
     # gate whether their APIs + startup hooks are active. None of them place,
     # cancel, or modify real orders except emergency_close (admin-triggered,
     # reduce-only) which additionally requires the live execution gate.
-    reconciliation_enabled: bool = False        # 21B: DB↔exchange drift detection API
-    position_recovery_enabled: bool = False     # 21C: rebuild state on startup + API
+    reconciliation_enabled: bool = False  # 21B: DB↔exchange drift detection API
+    position_recovery_enabled: bool = False  # 21C: rebuild state on startup + API
     order_failure_engine_enabled: bool = False  # 21D: failure tracking + retry policy API
-    accounting_enabled: bool = False            # 21E: net-PnL accounting API
-    emergency_close_enabled: bool = False       # allow reduce-only emergency close action
+    accounting_enabled: bool = False  # 21E: net-PnL accounting API
+    emergency_close_enabled: bool = False  # allow reduce-only emergency close action
     # When >0, a user who hits this many live-order failures inside the window
     # below has their auto-trading tripped by the circuit breaker.
     order_failure_breaker_threshold: int = 5
     order_failure_breaker_window_sec: int = 300
-    tp_sl_retry_max: int = 3                    # TP/SL placement retries before UNSAFE
+    tp_sl_retry_max: int = 3  # TP/SL placement retries before UNSAFE
 
     # --- Stop-Loss Engine V2 (previous-1D support/resistance stop) ---
     # When enabled and STOPLOSS_METHOD=PREV_1D_SUPPORT, the LONG stop is placed
@@ -160,12 +161,12 @@ class Settings(BaseSettings):
     # falls back to the legacy 15m ATR/structure stop. Only affects SL + TP/RR
     # derived from risk; signal/scanner/entry decisions are unchanged.
     stoploss_engine_v2_enabled: bool = False
-    stoploss_method: str = "PREV_1D_SUPPORT"     # PREV_1D_SUPPORT | LEGACY
-    stoploss_1d_buffer_atr_mult: float = 0.15    # buffer = mult * ATR(1D)
-    min_sl_distance_percent: float = 2.0         # widen (or reject) if SL closer than this
-    max_sl_distance_percent: float = 10.0        # reject signal if SL farther than this
+    stoploss_method: str = "PREV_1D_SUPPORT"  # PREV_1D_SUPPORT | LEGACY
+    stoploss_1d_buffer_atr_mult: float = 0.15  # buffer = mult * ATR(1D)
+    min_sl_distance_percent: float = 2.0  # widen (or reject) if SL closer than this
+    max_sl_distance_percent: float = 10.0  # reject signal if SL farther than this
     # When the 1D stop is closer than the min floor: "widen" to the floor, or "reject".
-    stoploss_too_close_action: str = "widen"     # widen | reject
+    stoploss_too_close_action: str = "widen"  # widen | reject
 
     # --- Sprint 21F — Binance live/testnet validation (read-only) ---
     # Gate the admin-only Binance preflight endpoint. The preflight is strictly
@@ -195,13 +196,13 @@ class Settings(BaseSettings):
 
     # --- Sprint 20A: Auth / User accounts (SaaS, feature-flagged) ---
     auth_enabled: bool = False
-    jwt_secret: str = ""                     # falls back to secret_key if blank
+    jwt_secret: str = ""  # falls back to secret_key if blank
     jwt_algorithm: str = "HS256"
     access_token_ttl_min: int = 30
     refresh_token_ttl_days: int = 14
     bcrypt_rounds: int = 12
     email_verification_required: bool = True
-    account_lockout_threshold: int = 5       # failed logins before temporary lock
+    account_lockout_threshold: int = 5  # failed logins before temporary lock
     account_lockout_minutes: int = 15
     app_base_url: str = "http://localhost:8010"
     auth_issuer: str = "Argus Quant"
@@ -218,8 +219,8 @@ class Settings(BaseSettings):
 
     # --- Sprint 18: Adaptive Threshold Engine ---
     adaptive_thresholds: bool = False
-    adaptive_min_trades: int = 50    # minimum closed trades before adapting
-    adaptive_lookback: int = 100     # analyze last N closed trades
+    adaptive_min_trades: int = 50  # minimum closed trades before adapting
+    adaptive_lookback: int = 100  # analyze last N closed trades
 
     # --- Misc ---
     production_start_utc: str = ""
@@ -279,6 +280,7 @@ class Settings(BaseSettings):
         # Auto-trading is architecture only — never allow live enabling
         if v:
             import warnings
+
             warnings.warn(
                 "AUTO_TRADING_ENABLED=true is not supported yet — forced to false",
                 stacklevel=2,
@@ -302,7 +304,7 @@ def validate_startup(s: "Settings") -> None:
     if not s.secret_key:
         errors.append(
             "SECRET_KEY is not set. "
-            "Generate a random secret: python -c \"import secrets; print(secrets.token_hex(32))\""
+            'Generate a random secret: python -c "import secrets; print(secrets.token_hex(32))"'
         )
 
     if errors:

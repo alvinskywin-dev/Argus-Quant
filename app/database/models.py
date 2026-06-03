@@ -1,6 +1,7 @@
 """
 SQLAlchemy ORM models — all persistent state lives here.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -46,7 +47,9 @@ class Signal(Base):
     stop_loss: Mapped[float] = mapped_column(Float)
     risk_reward: Mapped[float] = mapped_column(Float)
 
-    status: Mapped[str] = mapped_column(String(16), default="OPEN", index=True)  # OPEN/TP1/TP2/TP3/SL/EXPIRED
+    status: Mapped[str] = mapped_column(
+        String(16), default="OPEN", index=True
+    )  # OPEN/TP1/TP2/TP3/SL/EXPIRED
     pnl_pct: Mapped[float] = mapped_column(Float, default=0.0)
     max_favorable_pct: Mapped[float] = mapped_column(Float, default=0.0)
     max_adverse_pct: Mapped[float] = mapped_column(Float, default=0.0)
@@ -74,9 +77,7 @@ class Signal(Base):
     )
     closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    __table_args__ = (
-        Index("ix_signals_symbol_side_created", "symbol", "side", "created_at"),
-    )
+    __table_args__ = (Index("ix_signals_symbol_side_created", "symbol", "side", "created_at"),)
 
 
 class Watchlist(Base):
@@ -137,6 +138,7 @@ class WeeklyStat(Base):
 
 class AffiliateClick(Base):
     """Tracks affiliate link clicks for monetization reporting."""
+
     __tablename__ = "affiliate_clicks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -154,13 +156,16 @@ class ArchivedSignal(Base):
     Preserves every column from the signals table verbatim, plus two
     archive-specific columns: archive_reason and archived_at.
     """
+
     __tablename__ = "archive_signals"
 
     # ── archive metadata ──────────────────────────────────────────
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     original_id: Mapped[int] = mapped_column(Integer, index=True)
     archive_reason: Mapped[str] = mapped_column(String(64), default="")
-    archived_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    archived_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
     # ── original signals columns (mirrors Signal exactly) ─────────
     symbol: Mapped[str] = mapped_column(String(32))
@@ -210,26 +215,29 @@ class PaperPosition(Base):
     No real funds involved — purely simulated at 10 000 USDT starting balance,
     1% risk per trade.
     """
+
     __tablename__ = "paper_positions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     signal_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("signals.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    symbol:      Mapped[str]   = mapped_column(String(32), index=True)
-    side:        Mapped[str]   = mapped_column(String(8))        # LONG / SHORT
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    side: Mapped[str] = mapped_column(String(8))  # LONG / SHORT
     entry_price: Mapped[float] = mapped_column(Float)
-    stop_loss:   Mapped[float] = mapped_column(Float)
-    tp1:         Mapped[float] = mapped_column(Float)
-    tp2:         Mapped[float] = mapped_column(Float, default=0.0)
-    tp3:         Mapped[float] = mapped_column(Float, default=0.0)
-    size_usdt:   Mapped[float] = mapped_column(Float, default=100.0)
+    stop_loss: Mapped[float] = mapped_column(Float)
+    tp1: Mapped[float] = mapped_column(Float)
+    tp2: Mapped[float] = mapped_column(Float, default=0.0)
+    tp3: Mapped[float] = mapped_column(Float, default=0.0)
+    size_usdt: Mapped[float] = mapped_column(Float, default=100.0)
     # OPEN | TP1 | TP2 | TP3 | SL | CLOSED
-    status:      Mapped[str]   = mapped_column(String(16), default="OPEN")
-    pnl_usdt:    Mapped[float] = mapped_column(Float, default=0.0)
-    pnl_pct:     Mapped[float] = mapped_column(Float, default=0.0)
-    opened_at:   Mapped[datetime]          = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
-    closed_at:   Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="OPEN")
+    pnl_usdt: Mapped[float] = mapped_column(Float, default=0.0)
+    pnl_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    opened_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class FundingRateSnapshot(Base):
@@ -245,9 +253,7 @@ class FundingRateSnapshot(Base):
         DateTime(timezone=True), server_default=func.now(), index=True
     )
 
-    __table_args__ = (
-        Index("ix_funding_snapshots_symbol_created", "symbol", "created_at"),
-    )
+    __table_args__ = (Index("ix_funding_snapshots_symbol_created", "symbol", "created_at"),)
 
 
 class OpenInterestSnapshot(Base):
@@ -265,9 +271,7 @@ class OpenInterestSnapshot(Base):
         DateTime(timezone=True), server_default=func.now(), index=True
     )
 
-    __table_args__ = (
-        Index("ix_oi_snapshots_symbol_created", "symbol", "created_at"),
-    )
+    __table_args__ = (Index("ix_oi_snapshots_symbol_created", "symbol", "created_at"),)
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -282,6 +286,7 @@ class OpenInterestSnapshot(Base):
 
 class AuthUser(Base):
     """A multi-user SaaS account (email + password identity)."""
+
     __tablename__ = "auth_users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -289,8 +294,10 @@ class AuthUser(Base):
     username: Mapped[Optional[str]] = mapped_column(String(64), unique=True, nullable=True)
     password_hash: Mapped[str] = mapped_column(String(255))
 
-    role: Mapped[str] = mapped_column(String(16), default="FREE")       # ADMIN / PREMIUM / FREE
-    status: Mapped[str] = mapped_column(String(16), default="ACTIVE")   # ACTIVE / SUSPENDED / PENDING
+    role: Mapped[str] = mapped_column(String(16), default="FREE")  # ADMIN / PREMIUM / FREE
+    status: Mapped[str] = mapped_column(
+        String(16), default="ACTIVE"
+    )  # ACTIVE / SUSPENDED / PENDING
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Timezone System V1 — display preference only (DB stays UTC). One of the
@@ -308,7 +315,9 @@ class AuthUser(Base):
     # Account lockout / login tracking
     failed_login_count: Mapped[int] = mapped_column(Integer, default=0)
     locked_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -318,13 +327,16 @@ class AuthUser(Base):
 
 class AuthSession(Base):
     """A refresh-token-backed login session for one device."""
+
     __tablename__ = "auth_sessions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(
         ForeignKey("auth_users.id", ondelete="CASCADE"), index=True
     )
-    refresh_token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)  # sha256 hex
+    refresh_token_hash: Mapped[str] = mapped_column(
+        String(64), unique=True, index=True
+    )  # sha256 hex
     ip: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     device: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)  # user-agent
     revoked: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -335,13 +347,14 @@ class AuthSession(Base):
 
 class AuthToken(Base):
     """One-time token for email verification or password reset."""
+
     __tablename__ = "auth_tokens"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(
         ForeignKey("auth_users.id", ondelete="CASCADE"), index=True
     )
-    kind: Mapped[str] = mapped_column(String(16))     # VERIFY / RESET
+    kind: Mapped[str] = mapped_column(String(16))  # VERIFY / RESET
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)  # sha256 hex
     used: Mapped[bool] = mapped_column(Boolean, default=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -350,6 +363,7 @@ class AuthToken(Base):
 
 class LoginHistory(Base):
     """Immutable record of every login attempt (success or failure)."""
+
     __tablename__ = "login_history"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -377,6 +391,7 @@ class LoginHistory(Base):
 
 class PaperAccount(Base):
     """One virtual futures account per SaaS user (default 10,000 USDT)."""
+
     __tablename__ = "paper_accounts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -384,7 +399,7 @@ class PaperAccount(Base):
         ForeignKey("auth_users.id", ondelete="CASCADE"), unique=True, index=True
     )
     initial_balance: Mapped[float] = mapped_column(Float, default=10_000.0)
-    balance: Mapped[float] = mapped_column(Float, default=10_000.0)   # realized wallet balance
+    balance: Mapped[float] = mapped_column(Float, default=10_000.0)  # realized wallet balance
     currency: Mapped[str] = mapped_column(String(8), default="USDT")
     default_leverage: Mapped[int] = mapped_column(Integer, default=10)
     auto_follow: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -396,6 +411,7 @@ class PaperAccount(Base):
 
 class PaperAccountPosition(Base):
     """An open or closed simulated futures position inside a paper account."""
+
     __tablename__ = "paper_account_positions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -406,12 +422,12 @@ class PaperAccountPosition(Base):
         ForeignKey("signals.id", ondelete="SET NULL"), nullable=True, index=True
     )
     symbol: Mapped[str] = mapped_column(String(32), index=True)
-    side: Mapped[str] = mapped_column(String(8))               # LONG / SHORT
+    side: Mapped[str] = mapped_column(String(8))  # LONG / SHORT
     entry_price: Mapped[float] = mapped_column(Float)
-    quantity: Mapped[float] = mapped_column(Float)             # base-asset units
-    notional_usdt: Mapped[float] = mapped_column(Float)        # entry position value
+    quantity: Mapped[float] = mapped_column(Float)  # base-asset units
+    notional_usdt: Mapped[float] = mapped_column(Float)  # entry position value
     leverage: Mapped[int] = mapped_column(Integer, default=10)
-    margin_usdt: Mapped[float] = mapped_column(Float)          # locked isolated margin
+    margin_usdt: Mapped[float] = mapped_column(Float)  # locked isolated margin
     liquidation_price: Mapped[float] = mapped_column(Float, default=0.0)
     stop_loss: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     tp1: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
@@ -422,7 +438,9 @@ class PaperAccountPosition(Base):
     funding_usdt: Mapped[float] = mapped_column(Float, default=0.0)
     # Sprint 20D — managed by the auto-trading engine + protection state.
     auto_managed: Mapped[bool] = mapped_column(Boolean, default=False)
-    protection: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)  # BREAK_EVEN/TRAILING
+    protection: Mapped[Optional[str]] = mapped_column(
+        String(16), nullable=True
+    )  # BREAK_EVEN/TRAILING
     opened_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )
@@ -431,6 +449,7 @@ class PaperAccountPosition(Base):
 
 class PaperOrder(Base):
     """A simulated order. Market orders fill immediately; limit orders rest as NEW."""
+
     __tablename__ = "paper_orders"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -441,7 +460,7 @@ class PaperOrder(Base):
         ForeignKey("paper_account_positions.id", ondelete="SET NULL"), nullable=True, index=True
     )
     symbol: Mapped[str] = mapped_column(String(32), index=True)
-    side: Mapped[str] = mapped_column(String(8))              # LONG / SHORT
+    side: Mapped[str] = mapped_column(String(8))  # LONG / SHORT
     order_type: Mapped[str] = mapped_column(String(8), default="MARKET")  # MARKET / LIMIT
     price: Mapped[float] = mapped_column(Float, default=0.0)
     quantity: Mapped[float] = mapped_column(Float, default=0.0)
@@ -456,6 +475,7 @@ class PaperOrder(Base):
 
 class PaperTrade(Base):
     """Realized close record — the per-account trade history / PnL ledger."""
+
     __tablename__ = "paper_trades"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -472,9 +492,11 @@ class PaperTrade(Base):
     notional_usdt: Mapped[float] = mapped_column(Float)
     leverage: Mapped[int] = mapped_column(Integer, default=10)
     pnl_usdt: Mapped[float] = mapped_column(Float, default=0.0)
-    pnl_pct: Mapped[float] = mapped_column(Float, default=0.0)     # ROE = pnl / margin
+    pnl_pct: Mapped[float] = mapped_column(Float, default=0.0)  # ROE = pnl / margin
     funding_usdt: Mapped[float] = mapped_column(Float, default=0.0)
-    reason: Mapped[str] = mapped_column(String(16), default="MANUAL")  # TP1/2/3/SL/MANUAL/LIQUIDATION
+    reason: Mapped[str] = mapped_column(
+        String(16), default="MANUAL"
+    )  # TP1/2/3/SL/MANUAL/LIQUIDATION
     opened_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     closed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
@@ -496,7 +518,7 @@ class ExchangeAccount(Base):
     user_id: Mapped[int] = mapped_column(
         ForeignKey("auth_users.id", ondelete="CASCADE"), index=True
     )
-    exchange: Mapped[str] = mapped_column(String(16))   # binance / okx / bybit / bitget
+    exchange: Mapped[str] = mapped_column(String(16))  # binance / okx / bybit / bitget
     label: Mapped[str] = mapped_column(String(64), default="default")
 
     # Encrypted credentials (base64 nonce+ciphertext). Never plaintext.
@@ -506,7 +528,9 @@ class ExchangeAccount(Base):
     # Non-sensitive display hint (last 4 chars of the API key).
     api_key_last4: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
 
-    status: Mapped[str] = mapped_column(String(16), default="PENDING")  # CONNECTED/DISCONNECTED/ERROR
+    status: Mapped[str] = mapped_column(
+        String(16), default="PENDING"
+    )  # CONNECTED/DISCONNECTED/ERROR
     can_read: Mapped[bool] = mapped_column(Boolean, default=False)
     can_trade: Mapped[bool] = mapped_column(Boolean, default=False)
     can_futures: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -522,13 +546,12 @@ class ExchangeAccount(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    __table_args__ = (
-        UniqueConstraint("user_id", "exchange", "label", name="uq_exchange_account"),
-    )
+    __table_args__ = (UniqueConstraint("user_id", "exchange", "label", name="uq_exchange_account"),)
 
 
 class ExchangeAuditLog(Base):
     """Audit trail for vault actions (connect/test/disconnect)."""
+
     __tablename__ = "exchange_audit_log"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -536,8 +559,8 @@ class ExchangeAuditLog(Base):
         ForeignKey("auth_users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     exchange: Mapped[str] = mapped_column(String(16))
-    action: Mapped[str] = mapped_column(String(24))    # CONNECT/TEST/DISCONNECT/REJECT
-    result: Mapped[str] = mapped_column(String(16))    # OK / FAIL / REJECTED
+    action: Mapped[str] = mapped_column(String(24))  # CONNECT/TEST/DISCONNECT/REJECT
+    result: Mapped[str] = mapped_column(String(16))  # OK / FAIL / REJECTED
     detail: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     ip: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -552,18 +575,19 @@ class ExchangeAuditLog(Base):
 
 class AutoTradeConfig(Base):
     """Per-user auto-trading settings for the demo engine."""
+
     __tablename__ = "auto_trade_configs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(
         ForeignKey("auth_users.id", ondelete="CASCADE"), unique=True, index=True
     )
-    enabled: Mapped[bool] = mapped_column(Boolean, default=False)        # Auto Trade ON/OFF
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)  # Auto Trade ON/OFF
     max_positions: Mapped[int] = mapped_column(Integer, default=5)
-    max_leverage: Mapped[int] = mapped_column(Integer, default=10)        # Allowed Leverage
+    max_leverage: Mapped[int] = mapped_column(Integer, default=10)  # Allowed Leverage
     risk_per_trade_pct: Mapped[float] = mapped_column(Float, default=1.0)
     allowed_exchanges: Mapped[str] = mapped_column(String(128), default="")  # csv, "" = any
-    allowed_coins: Mapped[str] = mapped_column(String(512), default="")      # csv base coins, "" = any
+    allowed_coins: Mapped[str] = mapped_column(String(512), default="")  # csv base coins, "" = any
     min_confidence: Mapped[float] = mapped_column(Float, default=0.0)
     order_type: Mapped[str] = mapped_column(String(8), default="MARKET")  # MARKET / LIMIT
     # Protection
@@ -579,6 +603,7 @@ class AutoTradeConfig(Base):
 
 class AutoTradeExecution(Base):
     """Audit/statistics record for every auto-engine decision and action."""
+
     __tablename__ = "auto_trade_executions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -589,7 +614,7 @@ class AutoTradeExecution(Base):
     account_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
     position_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
     symbol: Mapped[str] = mapped_column(String(32), default="")
-    action: Mapped[str] = mapped_column(String(16))   # OPEN/SKIP/CLOSE/BREAK_EVEN/TRAIL
+    action: Mapped[str] = mapped_column(String(16))  # OPEN/SKIP/CLOSE/BREAK_EVEN/TRAIL
     reason: Mapped[str] = mapped_column(String(64), default="")
     detail: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -604,6 +629,7 @@ class AutoTradeExecution(Base):
 
 class SafetyConfig(Base):
     """Per-user protective limits applied before any auto open."""
+
     __tablename__ = "safety_configs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -626,6 +652,7 @@ class SafetyConfig(Base):
 
 class SafetyState(Base):
     """Mutable per-user trading-enabled state (kill switch + timed lockouts)."""
+
     __tablename__ = "safety_states"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -633,7 +660,9 @@ class SafetyState(Base):
         ForeignKey("auth_users.id", ondelete="CASCADE"), unique=True, index=True
     )
     kill_switch: Mapped[bool] = mapped_column(Boolean, default=False)  # user emergency stop
-    disabled_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    disabled_until: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     disabled_reason: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -659,15 +688,15 @@ class LiveOrder(Base):
     exchange: Mapped[str] = mapped_column(String(16))
     exchange_order_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     symbol: Mapped[str] = mapped_column(String(32), index=True)
-    side: Mapped[str] = mapped_column(String(8))            # BUY / SELL
-    order_type: Mapped[str] = mapped_column(String(24))     # MARKET/LIMIT/STOP_MARKET/...
+    side: Mapped[str] = mapped_column(String(8))  # BUY / SELL
+    order_type: Mapped[str] = mapped_column(String(24))  # MARKET/LIMIT/STOP_MARKET/...
     price: Mapped[float] = mapped_column(Float, default=0.0)
     quantity: Mapped[float] = mapped_column(Float, default=0.0)
     filled_qty: Mapped[float] = mapped_column(Float, default=0.0)
     avg_price: Mapped[float] = mapped_column(Float, default=0.0)
     reduce_only: Mapped[bool] = mapped_column(Boolean, default=False)
     status: Mapped[str] = mapped_column(String(20), default="NEW")
-    mode: Mapped[str] = mapped_column(String(8), default="MOCK")   # MOCK / LIVE
+    mode: Mapped[str] = mapped_column(String(8), default="MOCK")  # MOCK / LIVE
     error: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
@@ -683,7 +712,7 @@ class LivePosition(Base):
     )
     exchange: Mapped[str] = mapped_column(String(16))
     symbol: Mapped[str] = mapped_column(String(32), index=True)
-    side: Mapped[str] = mapped_column(String(8))            # LONG / SHORT
+    side: Mapped[str] = mapped_column(String(8))  # LONG / SHORT
     quantity: Mapped[float] = mapped_column(Float)
     entry_price: Mapped[float] = mapped_column(Float)
     leverage: Mapped[int] = mapped_column(Integer, default=1)
@@ -699,7 +728,9 @@ class LivePosition(Base):
     requires_review: Mapped[bool] = mapped_column(Boolean, default=False)
     unsafe_reason: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     recovered_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    last_reconciled_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_reconciled_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     opened_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )
@@ -731,6 +762,7 @@ class LiveTrade(Base):
 
 class LiveAuditLog(Base):
     """Audit trail: every order, fill, error, and rejection."""
+
     __tablename__ = "live_audit_log"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -739,8 +771,8 @@ class LiveAuditLog(Base):
     )
     exchange: Mapped[str] = mapped_column(String(16))
     symbol: Mapped[str] = mapped_column(String(32), default="")
-    action: Mapped[str] = mapped_column(String(24))   # OPEN/CLOSE/LEVERAGE/TP_SL/ERROR/REJECT
-    result: Mapped[str] = mapped_column(String(16))   # OK / FAIL / REJECTED
+    action: Mapped[str] = mapped_column(String(24))  # OPEN/CLOSE/LEVERAGE/TP_SL/ERROR/REJECT
+    result: Mapped[str] = mapped_column(String(16))  # OK / FAIL / REJECTED
     mode: Mapped[str] = mapped_column(String(8), default="MOCK")
     detail: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -771,4 +803,3 @@ class SignalMessage(Base):
     )
 
     signal = relationship("Signal")
-

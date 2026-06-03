@@ -9,6 +9,7 @@ pure building blocks the engine uses, so the safety semantics are pinned:
   * DB position gone from exchange    -> CLOSED_UNKNOWN
   * TP/SL missing after a restart     -> UNSAFE / retry
 """
+
 from __future__ import annotations
 
 from app.reconciliation.engine import (
@@ -21,8 +22,14 @@ from app.recovery import tp_sl
 
 
 def _pos(side="LONG", qty=1.0, entry=100.0, lev=5, margin="isolated", status="OPEN"):
-    return {"side": side, "qty": qty, "entry_price": entry,
-            "leverage": lev, "margin_type": margin, "status": status}
+    return {
+        "side": side,
+        "qty": qty,
+        "entry_price": entry,
+        "leverage": lev,
+        "margin_type": margin,
+        "status": status,
+    }
 
 
 def test_orphan_exchange_position_is_recoverable_critical():

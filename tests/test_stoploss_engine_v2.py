@@ -4,6 +4,7 @@ Stop-Loss Engine V2 — previous-1D support/resistance stop.
 Tests the pure SL computation (`compute_prev_1d_stop`) and the prev-1D candle
 extractor (`_extract_prev_1d`). No DB / network required.
 """
+
 from __future__ import annotations
 
 import pandas as pd
@@ -16,9 +17,7 @@ CFG = dict(min_pct=2.0, max_pct=10.0, too_close_action="widen")
 
 
 def _stop(side, entry, low, high, atr_1d, buffer_mult):
-    return compute_prev_1d_stop(
-        side, entry, low, high, atr_1d, buffer_mult=buffer_mult, **CFG
-    )
+    return compute_prev_1d_stop(side, entry, low, high, atr_1d, buffer_mult=buffer_mult, **CFG)
 
 
 # 1. LONG: entry=100, prev_1d_low=95, buffer=1 -> SL=94
@@ -76,8 +75,15 @@ def test_long_too_close_widens_to_floor():
 # 6b. Too close SL with reject action -> reject
 def test_long_too_close_reject_action():
     d = compute_prev_1d_stop(
-        "LONG", 100.0, 99.5, 110.0, 1.0,
-        buffer_mult=0.05, min_pct=2.0, max_pct=10.0, too_close_action="reject",
+        "LONG",
+        100.0,
+        99.5,
+        110.0,
+        1.0,
+        buffer_mult=0.05,
+        min_pct=2.0,
+        max_pct=10.0,
+        too_close_action="reject",
     )
     assert d["sl_valid"] is False
     assert d["sl_reject_reason"] == "sl_too_close"
@@ -102,13 +108,15 @@ def test_buffer_scales_with_atr():
 # _extract_prev_1d uses the previous completed candle (iloc[-2]), not the forming one
 def test_extract_prev_1d_uses_second_to_last():
     n = 30
-    df = pd.DataFrame({
-        "open_time": pd.date_range("2026-01-01", periods=n, freq="D", tz="UTC"),
-        "open":  [100.0] * n,
-        "high":  [101.0 + i for i in range(n)],
-        "low":   [99.0 - i for i in range(n)],
-        "close": [100.0] * n,
-    })
+    df = pd.DataFrame(
+        {
+            "open_time": pd.date_range("2026-01-01", periods=n, freq="D", tz="UTC"),
+            "open": [100.0] * n,
+            "high": [101.0 + i for i in range(n)],
+            "low": [99.0 - i for i in range(n)],
+            "close": [100.0] * n,
+        }
+    )
     prev = _extract_prev_1d(df)
     assert prev is not None
     # iloc[-2] is index n-2

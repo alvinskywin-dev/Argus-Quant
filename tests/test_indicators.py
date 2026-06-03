@@ -2,6 +2,7 @@
 Sanity tests for indicators. Run with:
     pytest -q tests
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -26,7 +27,7 @@ def df() -> pd.DataFrame:
 def test_ema_length(df):
     out = ema(df["close"], 20)
     assert len(out) == len(df)
-    assert not out.iloc[-1] != out.iloc[-1]   # not NaN
+    assert not out.iloc[-1] != out.iloc[-1]  # not NaN
 
 
 def test_rsi_bounds(df):

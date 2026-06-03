@@ -4,6 +4,7 @@ Drives the real server-side engine (on_new_signal / on_signal_event) plus the
 HTTP config/status API: auto-open from a signal, break-even on TP1, close on SL
 at break-even (~0 PnL), and a SKIP via the allowed-coins filter.
 """
+
 import asyncio
 
 import httpx
@@ -17,10 +18,20 @@ from app.database.session import get_session, init_db
 async def _seed_signal(symbol: str) -> int:
     async with get_session() as db:
         sig = Signal(
-            symbol=symbol, side="LONG", timeframe="1h", confidence=90.0,
-            risk_level="LOW", strategy="MTF_SMC_STRICT", reasons="test",
-            entry_low=100.0, entry_high=100.0, tp1=104.0, tp2=108.0, tp3=112.0,
-            stop_loss=98.0, risk_reward=2.0,
+            symbol=symbol,
+            side="LONG",
+            timeframe="1h",
+            confidence=90.0,
+            risk_level="LOW",
+            strategy="MTF_SMC_STRICT",
+            reasons="test",
+            entry_low=100.0,
+            entry_high=100.0,
+            tp1=104.0,
+            tp2=108.0,
+            tp3=112.0,
+            stop_loss=98.0,
+            risk_reward=2.0,
             # CLOSED keeps the seed out of the uq_active_signal_symbol partial
             # index so re-runs on the shared dev DB don't collide; the auto
             # engine acts on the signal regardless of its status.
@@ -36,13 +47,16 @@ async def _purge() -> None:
     from sqlalchemy import delete, select
 
     from app.database.models import AuthUser
+
     async with get_session() as db:
-        u = (await db.execute(
-            select(AuthUser).where(AuthUser.email == "auto@example.com"))).scalar_one_or_none()
+        u = (
+            await db.execute(select(AuthUser).where(AuthUser.email == "auto@example.com"))
+        ).scalar_one_or_none()
         if u:
             await db.delete(u)
-        await db.execute(delete(Signal).where(
-            Signal.strategy == "MTF_SMC_STRICT", Signal.reasons == "test"))
+        await db.execute(
+            delete(Signal).where(Signal.strategy == "MTF_SMC_STRICT", Signal.reasons == "test")
+        )
 
 
 async def main() -> None:
@@ -51,15 +65,27 @@ async def main() -> None:
     app = create_app()
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
-        await c.post("/api/auth/register", json={"email": "auto@example.com", "password": "Sup3rSecret!"})
-        r = await c.post("/api/auth/login", json={"email": "auto@example.com", "password": "Sup3rSecret!"})
+        await c.post(
+            "/api/auth/register", json={"email": "auto@example.com", "password": "Sup3rSecret!"}
+        )
+        r = await c.post(
+            "/api/auth/login", json={"email": "auto@example.com", "password": "Sup3rSecret!"}
+        )
         h = {"Authorization": f"Bearer {r.json()['access_token']}"}
 
         # enable auto-trade for BTC only, with break-even on TP1
-        r = await c.put("/api/auto/config", headers=h, json={
-            "enabled": True, "allowed_coins": "BTC", "use_break_even": True,
-            "break_even_trigger": "TP1", "max_leverage": 10, "risk_per_trade_pct": 1.0,
-        })
+        r = await c.put(
+            "/api/auto/config",
+            headers=h,
+            json={
+                "enabled": True,
+                "allowed_coins": "BTC",
+                "use_break_even": True,
+                "break_even_trigger": "TP1",
+                "max_leverage": 10,
+                "risk_per_trade_pct": 1.0,
+            },
+        )
         print("config", r.status_code, r.json()["enabled"], r.json()["allowed_coins"])
         assert r.status_code == 200 and r.json()["enabled"]
 

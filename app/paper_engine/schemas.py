@@ -1,6 +1,7 @@
 """
 Sprint 20B — request/response models for the paper-trading API.
 """
+
 from __future__ import annotations
 
 from datetime import datetime

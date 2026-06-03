@@ -3,6 +3,7 @@ Lightweight i18n manager for the public dashboard.
 Loads static JSON locale files on first access and caches them in memory.
 Falls back to English for any missing key or unsupported language.
 """
+
 from __future__ import annotations
 
 import json
@@ -19,33 +20,31 @@ RTL_LANGS: frozenset[str] = frozenset({"ar", "ur"})
 
 # Supported languages: code → display name (native)
 SUPPORTED_LANGUAGES: List[Dict[str, str]] = [
-    {"code": "en",  "name": "English"},
-    {"code": "zh",  "name": "中文"},
-    {"code": "hi",  "name": "हिन्दी"},
-    {"code": "es",  "name": "Español"},
-    {"code": "pt",  "name": "Português"},
-    {"code": "ru",  "name": "Русский"},
-    {"code": "vi",  "name": "Tiếng Việt"},
-    {"code": "km",  "name": "ខ្មែរ"},
-    {"code": "id",  "name": "Bahasa Indonesia"},
-    {"code": "ja",  "name": "日本語"},
-    {"code": "ko",  "name": "한국어"},
-    {"code": "tr",  "name": "Türkçe"},
-    {"code": "de",  "name": "Deutsch"},
-    {"code": "fr",  "name": "Français"},
-    {"code": "it",  "name": "Italiano"},
-    {"code": "ar",  "name": "العربية"},
-    {"code": "th",  "name": "ภาษาไทย"},
+    {"code": "en", "name": "English"},
+    {"code": "zh", "name": "中文"},
+    {"code": "hi", "name": "हिन्दी"},
+    {"code": "es", "name": "Español"},
+    {"code": "pt", "name": "Português"},
+    {"code": "ru", "name": "Русский"},
+    {"code": "vi", "name": "Tiếng Việt"},
+    {"code": "km", "name": "ខ្មែរ"},
+    {"code": "id", "name": "Bahasa Indonesia"},
+    {"code": "ja", "name": "日本語"},
+    {"code": "ko", "name": "한국어"},
+    {"code": "tr", "name": "Türkçe"},
+    {"code": "de", "name": "Deutsch"},
+    {"code": "fr", "name": "Français"},
+    {"code": "it", "name": "Italiano"},
+    {"code": "ar", "name": "العربية"},
+    {"code": "th", "name": "ภาษาไทย"},
     {"code": "fil", "name": "Filipino"},
-    {"code": "pl",  "name": "Polski"},
-    {"code": "uk",  "name": "Українська"},
-    {"code": "bn",  "name": "বাংলা"},
-    {"code": "ur",  "name": "اردو"},
+    {"code": "pl", "name": "Polski"},
+    {"code": "uk", "name": "Українська"},
+    {"code": "bn", "name": "বাংলা"},
+    {"code": "ur", "name": "اردو"},
 ]
 
-_SUPPORTED_CODES: frozenset[str] = frozenset(
-    lang["code"] for lang in SUPPORTED_LANGUAGES
-)
+_SUPPORTED_CODES: frozenset[str] = frozenset(lang["code"] for lang in SUPPORTED_LANGUAGES)
 
 
 @lru_cache(maxsize=22)

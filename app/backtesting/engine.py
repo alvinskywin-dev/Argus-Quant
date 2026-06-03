@@ -9,6 +9,7 @@ Usage:
     result = await engine.run(days=90)
     print(result.to_dict())
 """
+
 from __future__ import annotations
 
 import math
@@ -64,6 +65,7 @@ class BacktestResult:
 
     def to_dict(self) -> dict:
         from dataclasses import asdict
+
         d = asdict(self)
         d["trades"] = [
             {k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in t.items()}
@@ -120,26 +122,29 @@ class BacktestEngine:
 
         # Apply additional numeric filters
         signals = [
-            s for s in signals
-            if float(s.confidence or 0) >= min_confidence
-            and float(s.risk_reward or 0) >= min_rr
+            s
+            for s in signals
+            if float(s.confidence or 0) >= min_confidence and float(s.risk_reward or 0) >= min_rr
         ]
 
-        trades = [TradeRecord(
-            signal_id=s.id,
-            symbol=s.symbol,
-            side=s.side,
-            timeframe=s.timeframe,
-            confidence=round(float(s.confidence or 0), 1),
-            risk_reward=round(float(s.risk_reward or 0), 2),
-            entry=round(float(s.entry_low or 0), 6),
-            tp1=round(float(s.tp1 or 0), 6),
-            sl=round(float(s.stop_loss or 0), 6),
-            status=s.status,
-            pnl_pct=round(float(s.pnl_pct or 0), 2),
-            opened_at=s.created_at,
-            closed_at=s.closed_at,
-        ) for s in signals]
+        trades = [
+            TradeRecord(
+                signal_id=s.id,
+                symbol=s.symbol,
+                side=s.side,
+                timeframe=s.timeframe,
+                confidence=round(float(s.confidence or 0), 1),
+                risk_reward=round(float(s.risk_reward or 0), 2),
+                entry=round(float(s.entry_low or 0), 6),
+                tp1=round(float(s.tp1 or 0), 6),
+                sl=round(float(s.stop_loss or 0), 6),
+                status=s.status,
+                pnl_pct=round(float(s.pnl_pct or 0), 2),
+                opened_at=s.created_at,
+                closed_at=s.closed_at,
+            )
+            for s in signals
+        ]
 
         closed = [t for t in trades if t.status != "OPEN"]
         open_t = [t for t in trades if t.status == "OPEN"]
@@ -187,37 +192,59 @@ class BacktestEngine:
         sym_map: Dict[str, list] = {}
         for t in closed:
             sym_map.setdefault(t.symbol, []).append(t)
-        result.by_symbol = sorted([{
-            "symbol": sym,
-            "total": len(ts),
-            "wins": len([t for t in ts if t.status in ("TP1", "TP2", "TP3")]),
-            "win_rate": round(len([t for t in ts if t.status in ("TP1", "TP2", "TP3")]) / max(1, len(ts)) * 100, 1),
-            "avg_pnl": round(sum(t.pnl_pct for t in ts) / max(1, len(ts)), 2),
-        } for sym, ts in sym_map.items()], key=lambda x: x["avg_pnl"], reverse=True)
+        result.by_symbol = sorted(
+            [
+                {
+                    "symbol": sym,
+                    "total": len(ts),
+                    "wins": len([t for t in ts if t.status in ("TP1", "TP2", "TP3")]),
+                    "win_rate": round(
+                        len([t for t in ts if t.status in ("TP1", "TP2", "TP3")])
+                        / max(1, len(ts))
+                        * 100,
+                        1,
+                    ),
+                    "avg_pnl": round(sum(t.pnl_pct for t in ts) / max(1, len(ts)), 2),
+                }
+                for sym, ts in sym_map.items()
+            ],
+            key=lambda x: x["avg_pnl"],
+            reverse=True,
+        )
 
         # By timeframe
         tf_map: Dict[str, list] = {}
         for t in closed:
             tf_map.setdefault(t.timeframe, []).append(t)
-        result.by_timeframe = [{
-            "timeframe": tf,
-            "total": len(ts),
-            "wins": len([t for t in ts if t.status in ("TP1", "TP2", "TP3")]),
-            "win_rate": round(len([t for t in ts if t.status in ("TP1", "TP2", "TP3")]) / max(1, len(ts)) * 100, 1),
-        } for tf, ts in tf_map.items()]
+        result.by_timeframe = [
+            {
+                "timeframe": tf,
+                "total": len(ts),
+                "wins": len([t for t in ts if t.status in ("TP1", "TP2", "TP3")]),
+                "win_rate": round(
+                    len([t for t in ts if t.status in ("TP1", "TP2", "TP3")])
+                    / max(1, len(ts))
+                    * 100,
+                    1,
+                ),
+            }
+            for tf, ts in tf_map.items()
+        ]
 
         # By side
         for sd in ("LONG", "SHORT"):
             sd_ts = [t for t in closed if t.side == sd]
             sd_wins = [t for t in sd_ts if t.status in ("TP1", "TP2", "TP3")]
             sd_pnls = [t.pnl_pct for t in sd_ts]
-            result.by_side.append({
-                "side": sd,
-                "total": len(sd_ts),
-                "wins": len(sd_wins),
-                "win_rate": round(len(sd_wins) / max(1, len(sd_ts)) * 100, 1),
-                "avg_pnl": round(sum(sd_pnls) / max(1, len(sd_pnls)), 2),
-            })
+            result.by_side.append(
+                {
+                    "side": sd,
+                    "total": len(sd_ts),
+                    "wins": len(sd_wins),
+                    "win_rate": round(len(sd_wins) / max(1, len(sd_ts)) * 100, 1),
+                    "avg_pnl": round(sum(sd_pnls) / max(1, len(sd_pnls)), 2),
+                }
+            )
 
         result.trades = trades
         return result

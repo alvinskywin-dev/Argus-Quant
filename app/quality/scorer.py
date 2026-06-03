@@ -11,6 +11,7 @@ For each signal provides a detailed breakdown of component scores:
 
 Total: 0-100 quality points.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -25,8 +26,8 @@ class QualityReport:
     signal_id: Optional[int]
     symbol: str
     side: str
-    total_score: float                # 0-100
-    grade: str                        # A+ / A / B / C / D / F
+    total_score: float  # 0-100
+    grade: str  # A+ / A / B / C / D / F
     trend_score: float = 0.0
     structure_score: float = 0.0
     setup_score: float = 0.0
@@ -90,13 +91,20 @@ class SignalQualityScorer:
         h4 = snaps.get("4h")
         if h4:
             s = h4.structure
-            hits = sum([
-                (decision.side == "LONG" and s.bos_bull) or (decision.side == "SHORT" and s.bos_bear),
-                (decision.side == "LONG" and s.mss_bull) or (decision.side == "SHORT" and s.mss_bear),
-                (decision.side == "LONG" and s.ob_bull)  or (decision.side == "SHORT" and s.ob_bear),
-                (decision.side == "LONG" and s.fvg_bull) or (decision.side == "SHORT" and s.fvg_bear),
-                (decision.side == "LONG" and s.sweep_bull) or (decision.side == "SHORT" and s.sweep_bear),
-            ])
+            hits = sum(
+                [
+                    (decision.side == "LONG" and s.bos_bull)
+                    or (decision.side == "SHORT" and s.bos_bear),
+                    (decision.side == "LONG" and s.mss_bull)
+                    or (decision.side == "SHORT" and s.mss_bear),
+                    (decision.side == "LONG" and s.ob_bull)
+                    or (decision.side == "SHORT" and s.ob_bear),
+                    (decision.side == "LONG" and s.fvg_bull)
+                    or (decision.side == "SHORT" and s.fvg_bear),
+                    (decision.side == "LONG" and s.sweep_bull)
+                    or (decision.side == "SHORT" and s.sweep_bear),
+                ]
+            )
             structure_score = min(20.0, hits * 4.0)
             if hits >= 3:
                 reasons.append(f"Strong 4H structure ({hits}/5 confluences)")
@@ -110,13 +118,19 @@ class SignalQualityScorer:
         h1 = snaps.get("1h")
         if h1:
             s = h1.structure
-            s_hits = sum([
-                (decision.side == "LONG" and s.pullback_bull) or (decision.side == "SHORT" and s.pullback_bear),
-                (decision.side == "LONG" and s.retest_bull) or (decision.side == "SHORT" and s.retest_bear),
-                (decision.side == "LONG" and h1.above_vwap) or (decision.side == "SHORT" and not h1.above_vwap),
-                (decision.side == "LONG" and h1.ema_fast > h1.ema_slow) or (decision.side == "SHORT" and h1.ema_fast < h1.ema_slow),
-                h1.vol_spike_pct > 20.0,
-            ])
+            s_hits = sum(
+                [
+                    (decision.side == "LONG" and s.pullback_bull)
+                    or (decision.side == "SHORT" and s.pullback_bear),
+                    (decision.side == "LONG" and s.retest_bull)
+                    or (decision.side == "SHORT" and s.retest_bear),
+                    (decision.side == "LONG" and h1.above_vwap)
+                    or (decision.side == "SHORT" and not h1.above_vwap),
+                    (decision.side == "LONG" and h1.ema_fast > h1.ema_slow)
+                    or (decision.side == "SHORT" and h1.ema_fast < h1.ema_slow),
+                    h1.vol_spike_pct > 20.0,
+                ]
+            )
             setup_score = min(20.0, s_hits * 4.0)
             if s_hits >= 4:
                 reasons.append(f"High-quality 1H setup ({s_hits}/5)")
@@ -131,21 +145,29 @@ class SignalQualityScorer:
         if m15:
             s15 = m15.structure
             # BOS trigger
-            bos_ok = (decision.side == "LONG" and s15.bos_bull) or (decision.side == "SHORT" and s15.bos_bear)
-            # Alternative entry triggers
-            fvg_ok = (decision.side == "LONG" and s15.fvg_bull) or (decision.side == "SHORT" and s15.fvg_bear)
-            ob_ok = (decision.side == "LONG" and s15.ob_bull) or (decision.side == "SHORT" and s15.ob_bear)
-            vwap_ok = (decision.side == "LONG" and m15.above_vwap) or (decision.side == "SHORT" and not m15.above_vwap)
-            ema_ok = (
-                (decision.side == "LONG" and m15.ema_fast > m15.ema_slow) or
-                (decision.side == "SHORT" and m15.ema_fast < m15.ema_slow)
+            bos_ok = (decision.side == "LONG" and s15.bos_bull) or (
+                decision.side == "SHORT" and s15.bos_bear
             )
-            momentum_ok = (
-                (decision.side == "LONG" and m15.momentum_bull) or
-                (decision.side == "SHORT" and m15.momentum_bear)
+            # Alternative entry triggers
+            fvg_ok = (decision.side == "LONG" and s15.fvg_bull) or (
+                decision.side == "SHORT" and s15.fvg_bear
+            )
+            ob_ok = (decision.side == "LONG" and s15.ob_bull) or (
+                decision.side == "SHORT" and s15.ob_bear
+            )
+            vwap_ok = (decision.side == "LONG" and m15.above_vwap) or (
+                decision.side == "SHORT" and not m15.above_vwap
+            )
+            ema_ok = (decision.side == "LONG" and m15.ema_fast > m15.ema_slow) or (
+                decision.side == "SHORT" and m15.ema_fast < m15.ema_slow
+            )
+            momentum_ok = (decision.side == "LONG" and m15.momentum_bull) or (
+                decision.side == "SHORT" and m15.momentum_bear
             )
             vol_ok = m15.vol_spike_pct > 50.0
-            macd_ok = (decision.side == "LONG" and m15.macd_hist > 0) or (decision.side == "SHORT" and m15.macd_hist < 0)
+            macd_ok = (decision.side == "LONG" and m15.macd_hist > 0) or (
+                decision.side == "SHORT" and m15.macd_hist < 0
+            )
 
             entry_hits = sum([bos_ok, fvg_ok, ob_ok, vwap_ok, ema_ok])
             entry_score = min(12.0, entry_hits * 2.5)
@@ -200,9 +222,13 @@ class SignalQualityScorer:
             risk_score = min(20.0, risk_score)
 
         total = round(
-            trend_score + structure_score + setup_score +
-            entry_score + confidence_score + risk_score,
-            1
+            trend_score
+            + structure_score
+            + setup_score
+            + entry_score
+            + confidence_score
+            + risk_score,
+            1,
         )
         total = min(100.0, total)
 

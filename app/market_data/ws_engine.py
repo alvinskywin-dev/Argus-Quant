@@ -83,8 +83,7 @@ async def ensure_prices(symbols) -> None:
         return
     register_symbols(wanted)
     missing = [
-        s for s in wanted
-        if s not in latest_prices or (price_age(s) or 1e9) > STALE_AFTER_SEC
+        s for s in wanted if s not in latest_prices or (price_age(s) or 1e9) > STALE_AFTER_SEC
     ]
     if not missing:
         return

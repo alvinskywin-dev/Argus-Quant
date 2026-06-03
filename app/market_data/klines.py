@@ -4,6 +4,7 @@ Async OHLCV fetcher with redis caching. Returns pandas DataFrame.
 Cache TTL is short (a fraction of the timeframe) so the data stays fresh but
 we don't slam the REST API.
 """
+
 from __future__ import annotations
 
 import pandas as pd
@@ -26,9 +27,18 @@ _TTL: dict[str, int] = {
 
 def _to_df(rows: list[list]) -> pd.DataFrame:
     cols = [
-        "open_time", "open", "high", "low", "close", "volume",
-        "close_time", "quote_volume", "trades",
-        "taker_base_vol", "taker_quote_vol", "ignore",
+        "open_time",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "close_time",
+        "quote_volume",
+        "trades",
+        "taker_base_vol",
+        "taker_quote_vol",
+        "ignore",
     ]
     df = pd.DataFrame(rows, columns=cols)
     if df.empty:

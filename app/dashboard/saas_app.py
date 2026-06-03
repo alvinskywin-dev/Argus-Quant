@@ -10,6 +10,7 @@ app/dashboard/static/saas/. Pages degrade gracefully when a feature flag is off
 Always mounted (the shell is static); the data behind it stays flag-gated.
 Call setup_saas_app(app) from create_app().
 """
+
 from __future__ import annotations
 
 from fastapi import FastAPI

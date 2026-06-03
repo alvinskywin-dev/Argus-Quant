@@ -13,6 +13,7 @@ Usage:
     # or inside docker:
     docker compose exec bot python -m app.database.migrations.archive_legacy
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -35,10 +36,9 @@ async def run_migration() -> None:
     async with SessionLocal() as session:
         # Identify legacy signals
         result = await session.execute(
-            select(Signal).where(
-                (Signal.timeframe == LEGACY_TF) |
-                (Signal.strategy != NEW_STRATEGY)
-            ).order_by(Signal.id)
+            select(Signal)
+            .where((Signal.timeframe == LEGACY_TF) | (Signal.strategy != NEW_STRATEGY))
+            .order_by(Signal.id)
         )
         legacy: list[Signal] = list(result.scalars().all())
 

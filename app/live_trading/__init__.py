@@ -6,6 +6,7 @@ in MOCK mode; REAL orders still require the execution gate
 (LIVE_TRADING_ENABLED=true AND MOCK_EXCHANGE_MODE=false). Call setup_live(app)
 from create_app().
 """
+
 from __future__ import annotations
 
 from fastapi import FastAPI, Request

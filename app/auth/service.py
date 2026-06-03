@@ -5,6 +5,7 @@ All functions take an AsyncSession and operate on the auth_* tables.
 They raise AuthError (mapped to HTTP status codes by the router) on any
 expected failure; the router never has to know the table layout.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -39,6 +40,7 @@ def _now() -> datetime:
 
 # ── lookups ───────────────────────────────────────────────────────
 
+
 async def get_user_by_id(db: AsyncSession, user_id: int) -> Optional[AuthUser]:
     return await db.get(AuthUser, user_id)
 
@@ -54,6 +56,7 @@ async def get_user_by_username(db: AsyncSession, username: str) -> Optional[Auth
 
 
 # ── registration ──────────────────────────────────────────────────
+
 
 async def register(
     db: AsyncSession,
@@ -92,6 +95,7 @@ async def register(
 
 
 # ── login ─────────────────────────────────────────────────────────
+
 
 async def authenticate(
     db: AsyncSession,
@@ -153,6 +157,7 @@ async def _register_failure(db: AsyncSession, user: AuthUser) -> None:
 
 
 # ── sessions / refresh ────────────────────────────────────────────
+
 
 async def _create_session(
     db: AsyncSession, user: AuthUser, ip: Optional[str], device: Optional[str]
@@ -219,6 +224,7 @@ async def list_sessions(db: AsyncSession, user_id: int) -> list[AuthSession]:
 
 # ── email verification ────────────────────────────────────────────
 
+
 async def verify_email(db: AsyncSession, *, token: str) -> AuthUser:
     rec = await _consume_token(db, token, kind="VERIFY")
     user = await db.get(AuthUser, rec.user_id)
@@ -231,6 +237,7 @@ async def verify_email(db: AsyncSession, *, token: str) -> AuthUser:
 
 
 # ── password reset ────────────────────────────────────────────────
+
 
 async def request_password_reset(db: AsyncSession, *, email: str) -> None:
     user = await get_user_by_email(db, email.strip().lower())
@@ -258,6 +265,7 @@ async def reset_password(db: AsyncSession, *, token: str, new_password: str) -> 
 
 # ── 2FA (TOTP) ────────────────────────────────────────────────────
 
+
 async def begin_2fa_setup(db: AsyncSession, user: AuthUser) -> tuple[str, str]:
     secret = security.generate_totp_secret()
     user.totp_secret = secret
@@ -284,6 +292,7 @@ async def disable_2fa(db: AsyncSession, user: AuthUser, code: str) -> None:
 
 
 # ── one-time token helpers ────────────────────────────────────────
+
 
 async def _issue_token(db: AsyncSession, user_id: int, *, kind: str, ttl: timedelta) -> str:
     raw = security.generate_opaque_token(32)
@@ -313,6 +322,7 @@ async def _consume_token(db: AsyncSession, token: str, *, kind: str) -> AuthToke
 
 
 # ── login history ─────────────────────────────────────────────────
+
 
 async def _record_login(
     db: AsyncSession,

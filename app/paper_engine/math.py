@@ -5,6 +5,7 @@ Pure functions only (no DB, no I/O). Isolated-margin model, USDT-margined
 linear perpetual. All inputs are plain floats so the maths can be unit-tested
 in isolation and reused by the auto-trading engine in later sprints.
 """
+
 from __future__ import annotations
 
 LONG = "LONG"

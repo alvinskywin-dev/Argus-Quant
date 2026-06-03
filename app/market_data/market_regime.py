@@ -10,6 +10,7 @@ Classifies overall market conditions before signals are generated:
 
 Results are cached in Redis for 10 minutes and refreshed once per scan cycle.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -31,17 +32,18 @@ _CACHE_TTL = 600  # 10 minutes — regime is stable within a scan cycle
 
 @dataclass
 class MarketRegime:
-    market_regime: str    # BULL | BEAR | SIDEWAYS | HIGH_VOLATILITY | LOW_VOLATILITY
-    regime_score: int     # 0-100 (50 = neutral)
-    breadth_ema200: float # % of USDT pairs above EMA200
+    market_regime: str  # BULL | BEAR | SIDEWAYS | HIGH_VOLATILITY | LOW_VOLATILITY
+    regime_score: int  # 0-100 (50 = neutral)
+    breadth_ema200: float  # % of USDT pairs above EMA200
     breadth_ema50: float  # % of USDT pairs above EMA50
-    btc_trend: str        # UP | DOWN | NEUTRAL
-    eth_trend: str        # UP | DOWN | NEUTRAL
-    atr_percentile: float # BTC 1D ATR vs 90-bar history (0-100)
-    calculated_at: str    # ISO8601 UTC
+    btc_trend: str  # UP | DOWN | NEUTRAL
+    eth_trend: str  # UP | DOWN | NEUTRAL
+    atr_percentile: float  # BTC 1D ATR vs 90-bar history (0-100)
+    calculated_at: str  # ISO8601 UTC
 
 
 # ── trend helpers ─────────────────────────────────────────────────────────────
+
 
 async def _get_trend(symbol: str, tf: str) -> str:
     """Return UP / DOWN / NEUTRAL based on close vs EMA200."""
@@ -64,6 +66,7 @@ async def _get_trend(symbol: str, tf: str) -> str:
 
 # ── ATR percentile ─────────────────────────────────────────────────────────────
 
+
 async def _get_atr_percentile(symbol: str = "BTCUSDT") -> float:
     """Current BTC 1D ATR as a percentile of the last 90 bars (0-100)."""
     try:
@@ -83,6 +86,7 @@ async def _get_atr_percentile(symbol: str = "BTCUSDT") -> float:
 
 
 # ── breadth calculation ───────────────────────────────────────────────────────
+
 
 async def _get_breadth(max_symbols: int = 50) -> Dict[str, float]:
     """
@@ -130,6 +134,7 @@ async def _get_breadth(max_symbols: int = 50) -> Dict[str, float]:
 
 # ── scoring & classification ──────────────────────────────────────────────────
 
+
 def _classify_regime(
     btc_1d: str,
     eth_1d: str,
@@ -143,28 +148,42 @@ def _classify_regime(
     score = 50  # neutral baseline
 
     # 1D trend: strongest directional signal  (±20)
-    if btc_1d == "UP":     score += 12
-    elif btc_1d == "DOWN": score -= 12
+    if btc_1d == "UP":
+        score += 12
+    elif btc_1d == "DOWN":
+        score -= 12
 
-    if eth_1d == "UP":     score += 8
-    elif eth_1d == "DOWN": score -= 8
+    if eth_1d == "UP":
+        score += 8
+    elif eth_1d == "DOWN":
+        score -= 8
 
     # 4H trend: medium-term momentum  (±10)
-    if btc_4h == "UP":     score += 6
-    elif btc_4h == "DOWN": score -= 6
+    if btc_4h == "UP":
+        score += 6
+    elif btc_4h == "DOWN":
+        score -= 6
 
-    if eth_4h == "UP":     score += 4
-    elif eth_4h == "DOWN": score -= 4
+    if eth_4h == "UP":
+        score += 4
+    elif eth_4h == "DOWN":
+        score -= 4
 
     # 1H trend: short-term bias  (±3)
-    if btc_1h == "UP":     score += 3
-    elif btc_1h == "DOWN": score -= 3
+    if btc_1h == "UP":
+        score += 3
+    elif btc_1h == "DOWN":
+        score -= 3
 
     # Market breadth  (±15)
-    if breadth_ema200 > 70:   score += 10
-    elif breadth_ema200 > 60: score += 5
-    elif breadth_ema200 < 30: score -= 10
-    elif breadth_ema200 < 40: score -= 5
+    if breadth_ema200 > 70:
+        score += 10
+    elif breadth_ema200 > 60:
+        score += 5
+    elif breadth_ema200 < 30:
+        score -= 10
+    elif breadth_ema200 < 40:
+        score -= 5
 
     score = max(0, min(100, score))
 
@@ -183,14 +202,17 @@ def _classify_regime(
 
 # ── public API ────────────────────────────────────────────────────────────────
 
+
 async def calculate_market_regime() -> MarketRegime:
     """
     Full regime calculation. Fetches BTC/ETH multi-TF trends, market breadth,
     and BTC ATR percentile, then classifies and caches the result.
     """
     (
-        btc_1d, eth_1d,
-        btc_4h, eth_4h,
+        btc_1d,
+        eth_1d,
+        btc_4h,
+        eth_4h,
         btc_1h,
         atr_pct,
         breadth,
@@ -208,8 +230,10 @@ async def calculate_market_regime() -> MarketRegime:
     breadth_50 = breadth["breadth_ema50"]
 
     regime_label, score = _classify_regime(
-        btc_1d, eth_1d,
-        btc_4h, eth_4h,
+        btc_1d,
+        eth_1d,
+        btc_4h,
+        eth_4h,
         btc_1h,
         breadth_200,
         atr_pct,

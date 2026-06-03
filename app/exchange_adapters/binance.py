@@ -7,6 +7,7 @@ ALSO guards every network method itself (defense in depth): if
 LIVE_TRADING_ENABLED is false or MOCK_EXCHANGE_MODE is true, it raises instead
 of touching the network.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -60,6 +61,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
 
     async def _client(self):
         import aiohttp
+
         if self._session is None:
             timeout = aiohttp.ClientTimeout(total=15, connect=5)
             self._session = aiohttp.ClientSession(timeout=timeout)
@@ -72,7 +74,9 @@ class BinanceFuturesAdapter(ExchangeAdapter):
 
     # ── signed request ────────────────────────────────────────────
 
-    async def _request(self, method: str, path: str, params: Optional[dict] = None, *, signed: bool = True) -> Any:
+    async def _request(
+        self, method: str, path: str, params: Optional[dict] = None, *, signed: bool = True
+    ) -> Any:
         self._guard()
         params = dict(params or {})
         if signed:
@@ -100,8 +104,11 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         for r in rows:
             if r.get("asset") == asset:
                 return BalanceInfo(
-                    asset=asset, balance=float(r["balance"]),
-                    available=float(r.get("availableBalance", r["balance"])), mode=MODE_LIVE)
+                    asset=asset,
+                    balance=float(r["balance"]),
+                    available=float(r.get("availableBalance", r["balance"])),
+                    mode=MODE_LIVE,
+                )
         return BalanceInfo(asset=asset, balance=0.0, available=0.0, mode=MODE_LIVE)
 
     async def get_positions(self) -> list[PositionInfo]:
@@ -111,16 +118,25 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             amt = float(r.get("positionAmt", 0))
             if amt == 0:
                 continue
-            out.append(PositionInfo(
-                symbol=r["symbol"], side="LONG" if amt > 0 else "SHORT", qty=abs(amt),
-                entry_price=float(r.get("entryPrice", 0)), leverage=int(float(r.get("leverage", 1))),
-                margin_type=r.get("marginType", "cross"),
-                unrealized_pnl=float(r.get("unRealizedProfit", 0)),
-                liquidation_price=float(r.get("liquidationPrice", 0)), mode=MODE_LIVE))
+            out.append(
+                PositionInfo(
+                    symbol=r["symbol"],
+                    side="LONG" if amt > 0 else "SHORT",
+                    qty=abs(amt),
+                    entry_price=float(r.get("entryPrice", 0)),
+                    leverage=int(float(r.get("leverage", 1))),
+                    margin_type=r.get("marginType", "cross"),
+                    unrealized_pnl=float(r.get("unRealizedProfit", 0)),
+                    liquidation_price=float(r.get("liquidationPrice", 0)),
+                    mode=MODE_LIVE,
+                )
+            )
         return out
 
     async def set_leverage(self, symbol: str, leverage: int) -> None:
-        await self._request("POST", "/fapi/v1/leverage", {"symbol": symbol, "leverage": int(leverage)})
+        await self._request(
+            "POST", "/fapi/v1/leverage", {"symbol": symbol, "leverage": int(leverage)}
+        )
 
     async def set_margin_type(self, symbol: str, margin_type: str) -> None:
         mt = "ISOLATED" if margin_type.lower() == "isolated" else "CROSSED"
@@ -134,6 +150,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
     async def _symbol_filters(self, symbol: str):
         """Fetch + cache this symbol's trading filters (public exchangeInfo)."""
         from app.exchange_vault.binance_preflight import parse_symbol_filters
+
         symbol = symbol.upper()
         cached = self._filters.get(symbol)
         if cached is not None and cached.found:
@@ -144,18 +161,28 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         return f
 
     async def open_order(
-        self, *, symbol: str, side: str, qty: float, order_type: str = "MARKET",
-        price: Optional[float] = None, reduce_only: bool = False,
+        self,
+        *,
+        symbol: str,
+        side: str,
+        qty: float,
+        order_type: str = "MARKET",
+        price: Optional[float] = None,
+        reduce_only: bool = False,
     ) -> OrderResult:
         # Round to the symbol's valid step/tick precision before sending so a
         # raw computed quantity never triggers a PRECISION_ERROR / opaque reject.
         from app.exchange_vault.binance_preflight import enforce_order_precision
+
         prec = enforce_order_precision(await self._symbol_filters(symbol), qty, price, order_type)
         if not prec.ok:
             raise AdapterError(f"Binance precision: {prec.reason}")
         qty, price = prec.qty, prec.price
         params: dict[str, Any] = {
-            "symbol": symbol, "side": side, "type": order_type, "quantity": qty,
+            "symbol": symbol,
+            "side": side,
+            "type": order_type,
+            "quantity": qty,
         }
         if reduce_only:
             params["reduceOnly"] = "true"
@@ -167,30 +194,60 @@ class BinanceFuturesAdapter(ExchangeAdapter):
 
     async def close_order(self, *, symbol: str, side: str, qty: float) -> OrderResult:
         return await self.open_order(
-            symbol=symbol, side=opposite_side(side), qty=qty,
-            order_type="MARKET", reduce_only=True)
+            symbol=symbol, side=opposite_side(side), qty=qty, order_type="MARKET", reduce_only=True
+        )
 
     async def set_tp_sl(
-        self, *, symbol: str, side: str, qty: float,
-        take_profit: Optional[float] = None, stop_loss: Optional[float] = None,
+        self,
+        *,
+        symbol: str,
+        side: str,
+        qty: float,
+        take_profit: Optional[float] = None,
+        stop_loss: Optional[float] = None,
         trailing_pct: Optional[float] = None,
     ) -> list[OrderResult]:
         close_side = opposite_side(side)
         out: list[OrderResult] = []
         if take_profit:
-            d = await self._request("POST", "/fapi/v1/order", {
-                "symbol": symbol, "side": close_side, "type": "TAKE_PROFIT_MARKET",
-                "stopPrice": take_profit, "closePosition": "true"})
+            d = await self._request(
+                "POST",
+                "/fapi/v1/order",
+                {
+                    "symbol": symbol,
+                    "side": close_side,
+                    "type": "TAKE_PROFIT_MARKET",
+                    "stopPrice": take_profit,
+                    "closePosition": "true",
+                },
+            )
             out.append(self._to_order(d, symbol, close_side, "TAKE_PROFIT_MARKET", True))
         if stop_loss:
-            d = await self._request("POST", "/fapi/v1/order", {
-                "symbol": symbol, "side": close_side, "type": "STOP_MARKET",
-                "stopPrice": stop_loss, "closePosition": "true"})
+            d = await self._request(
+                "POST",
+                "/fapi/v1/order",
+                {
+                    "symbol": symbol,
+                    "side": close_side,
+                    "type": "STOP_MARKET",
+                    "stopPrice": stop_loss,
+                    "closePosition": "true",
+                },
+            )
             out.append(self._to_order(d, symbol, close_side, "STOP_MARKET", True))
         if trailing_pct:
-            d = await self._request("POST", "/fapi/v1/order", {
-                "symbol": symbol, "side": close_side, "type": "TRAILING_STOP_MARKET",
-                "callbackRate": round(trailing_pct, 1), "quantity": qty, "reduceOnly": "true"})
+            d = await self._request(
+                "POST",
+                "/fapi/v1/order",
+                {
+                    "symbol": symbol,
+                    "side": close_side,
+                    "type": "TRAILING_STOP_MARKET",
+                    "callbackRate": round(trailing_pct, 1),
+                    "quantity": qty,
+                    "reduceOnly": "true",
+                },
+            )
             out.append(self._to_order(d, symbol, close_side, "TRAILING_STOP_MARKET", True))
         return out
 
@@ -198,11 +255,16 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         params = {"symbol": symbol} if symbol else None
         rows = await self._request("GET", "/fapi/v1/openOrders", params)
         out: list[OrderResult] = []
-        for d in (rows or []):
-            out.append(self._to_order(
-                d, d.get("symbol", symbol or ""), d.get("side", ""),
-                d.get("type", d.get("origType", "MARKET")),
-                str(d.get("reduceOnly", "")).lower() == "true"))
+        for d in rows or []:
+            out.append(
+                self._to_order(
+                    d,
+                    d.get("symbol", symbol or ""),
+                    d.get("side", ""),
+                    d.get("type", d.get("origType", "MARKET")),
+                    str(d.get("reduceOnly", "")).lower() == "true",
+                )
+            )
         return out
 
     async def cancel_all_orders(self, symbol: str) -> int:
@@ -211,16 +273,31 @@ class BinanceFuturesAdapter(ExchangeAdapter):
 
     async def get_order_status(self, *, symbol: str, order_id: str) -> OrderResult:
         d = await self._request("GET", "/fapi/v1/order", {"symbol": symbol, "orderId": order_id})
-        return self._to_order(d, symbol, d.get("side", ""), d.get("type", "MARKET"),
-                              str(d.get("reduceOnly", "")).lower() == "true")
+        return self._to_order(
+            d,
+            symbol,
+            d.get("side", ""),
+            d.get("type", "MARKET"),
+            str(d.get("reduceOnly", "")).lower() == "true",
+        )
 
     # ── helpers ───────────────────────────────────────────────────
 
     @staticmethod
-    def _to_order(d: dict, symbol: str, side: str, order_type: str, reduce_only: bool) -> OrderResult:
+    def _to_order(
+        d: dict, symbol: str, side: str, order_type: str, reduce_only: bool
+    ) -> OrderResult:
         return OrderResult(
-            order_id=str(d.get("orderId", "")), symbol=symbol, side=side, type=order_type,
-            status=d.get("status", "NEW"), price=float(d.get("price", 0) or 0),
-            qty=float(d.get("origQty", 0) or 0), filled_qty=float(d.get("executedQty", 0) or 0),
-            avg_price=float(d.get("avgPrice", 0) or 0), reduce_only=reduce_only,
-            mode=MODE_LIVE, raw=d)
+            order_id=str(d.get("orderId", "")),
+            symbol=symbol,
+            side=side,
+            type=order_type,
+            status=d.get("status", "NEW"),
+            price=float(d.get("price", 0) or 0),
+            qty=float(d.get("origQty", 0) or 0),
+            filled_qty=float(d.get("executedQty", 0) or 0),
+            avg_price=float(d.get("avgPrice", 0) or 0),
+            reduce_only=reduce_only,
+            mode=MODE_LIVE,
+            raw=d,
+        )

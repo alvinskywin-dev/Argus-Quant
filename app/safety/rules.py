@@ -4,16 +4,29 @@ Sprint 20E — pure safety-rule maths (no DB, no I/O).
 Decisions only, so every branch is unit-testable. DB aggregation and state
 mutation live in app.safety.service.
 """
+
 from __future__ import annotations
 
 # Correlation clusters — positions in the same cluster + same side count as
 # correlated for the max-correlated-positions cap. Anything unlisted is "ALT".
 _CLUSTERS: dict[str, str] = {
-    "BTC": "MAJOR", "ETH": "MAJOR",
-    "SOL": "L1", "AVAX": "L1", "ADA": "L1", "DOT": "L1", "NEAR": "L1",
-    "BNB": "L1", "APT": "L1", "SUI": "L1",
-    "DOGE": "MEME", "SHIB": "MEME", "PEPE": "MEME", "WIF": "MEME", "BONK": "MEME",
-    "1000PEPE": "MEME", "1000SHIB": "MEME",
+    "BTC": "MAJOR",
+    "ETH": "MAJOR",
+    "SOL": "L1",
+    "AVAX": "L1",
+    "ADA": "L1",
+    "DOT": "L1",
+    "NEAR": "L1",
+    "BNB": "L1",
+    "APT": "L1",
+    "SUI": "L1",
+    "DOGE": "MEME",
+    "SHIB": "MEME",
+    "PEPE": "MEME",
+    "WIF": "MEME",
+    "BONK": "MEME",
+    "1000PEPE": "MEME",
+    "1000SHIB": "MEME",
 }
 
 

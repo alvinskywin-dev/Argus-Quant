@@ -8,6 +8,7 @@ any open; the API lets users/admins configure limits and trigger emergency stops
 Feature-flagged behind SAFETY_LAYER_ENABLED (on by default). Call
 setup_safety(app) from create_app().
 """
+
 from __future__ import annotations
 
 from fastapi import FastAPI, Request

@@ -1,6 +1,7 @@
 """
 Sprint 20D — request/response models for the auto-trading API.
 """
+
 from __future__ import annotations
 
 from datetime import datetime

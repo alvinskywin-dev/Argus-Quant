@@ -1,11 +1,13 @@
 """
 Tests for the Sprint 11A Open Interest Engine.
 """
+
 from __future__ import annotations
 
 from app.market_data.open_interest import OISnapshot, compute_oi_score
 
 # ── compute_oi_score ──────────────────────────────────────────────────────────
+
 
 class TestComputeOIScore:
     def test_long_price_up_oi_up_returns_plus15(self):
@@ -42,6 +44,7 @@ class TestComputeOIScore:
 
 
 # ── OISnapshot dataclass ──────────────────────────────────────────────────────
+
 
 class TestOISnapshot:
     def _make(self, **kwargs) -> OISnapshot:
@@ -80,6 +83,7 @@ class TestOISnapshot:
 
 
 # ── confidence adjustment bounds ─────────────────────────────────────────────
+
 
 class TestConfidenceAdjustment:
     """Verify that OI score adjustment clamps correctly at 0 and 100."""

@@ -3,6 +3,7 @@
 Proves: correlated-position cap, loss-streak lockout, resume, user kill switch,
 and admin GLOBAL emergency stop — all gating the demo auto engine.
 """
+
 import asyncio
 
 import httpx
@@ -16,10 +17,20 @@ from app.database.session import get_session, init_db
 async def _seed(symbol: str, side: str = "LONG") -> int:
     async with get_session() as db:
         sig = Signal(
-            symbol=symbol, side=side, timeframe="1h", confidence=90.0,
-            risk_level="LOW", strategy="MTF_SMC_STRICT", reasons="test",
-            entry_low=100.0, entry_high=100.0, tp1=104.0, tp2=108.0, tp3=112.0,
-            stop_loss=98.0, risk_reward=2.0,
+            symbol=symbol,
+            side=side,
+            timeframe="1h",
+            confidence=90.0,
+            risk_level="LOW",
+            strategy="MTF_SMC_STRICT",
+            reasons="test",
+            entry_low=100.0,
+            entry_high=100.0,
+            tp1=104.0,
+            tp2=108.0,
+            tp3=112.0,
+            stop_loss=98.0,
+            risk_reward=2.0,
             # CLOSED keeps these out of the active-signal unique index so the
             # same symbol can be reused across phases; the engine ignores status.
             status="CLOSED",
@@ -40,9 +51,9 @@ async def _promote(email):
     from sqlalchemy import select
 
     from app.database.models import AuthUser
+
     async with get_session() as db:
-        u = (await db.execute(
-            select(AuthUser).where(AuthUser.email == email.lower()))).scalar_one()
+        u = (await db.execute(select(AuthUser).where(AuthUser.email == email.lower()))).scalar_one()
         u.role = "ADMIN"
 
 
@@ -60,12 +71,13 @@ async def _purge(emails) -> None:
     from sqlalchemy import delete, select
 
     from app.database.models import AuthUser, Signal, SystemSetting
+
     async with get_session() as db:
         for email in emails:
             # auth stores emails lowercased
-            u = (await db.execute(
-                select(AuthUser).where(AuthUser.email == email.lower())
-            )).scalar_one_or_none()
+            u = (
+                await db.execute(select(AuthUser).where(AuthUser.email == email.lower()))
+            ).scalar_one_or_none()
             if u:
                 await db.delete(u)
         gk = await db.get(SystemSetting, "trading_global_kill")
@@ -84,29 +96,41 @@ async def main() -> None:
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
         hA = await _register(c, "safeA@example.com")
-        hB = await _register(c, "safeB@example.com")    # FREE
+        hB = await _register(c, "safeB@example.com")  # FREE
         # Promote A to ADMIN explicitly — on the shared dev DB the first-ever
         # account (not safeA) holds ADMIN, so don't rely on registration order.
         await _promote("safeA@example.com")
 
         # auto config: BE off so SL is a real loss; all coins; high pos cap
-        auto = {"enabled": True, "use_break_even": False, "max_positions": 10,
-                "allowed_coins": "", "risk_per_trade_pct": 1.0}
+        auto = {
+            "enabled": True,
+            "use_break_even": False,
+            "max_positions": 10,
+            "allowed_coins": "",
+            "risk_per_trade_pct": 1.0,
+        }
         await c.put("/api/auto/config", headers=hA, json=auto)
         await c.put("/api/auto/config", headers=hB, json={**auto, "enabled": False})
 
         # ---------- Phase 1: correlated cap (user A only) ----------
         # Assert on user A's own open positions (on_new_signal is multi-user).
-        rc = await c.put("/api/safety/config", headers=hA, json={
-            "max_correlated_positions": 1, "loss_streak_limit": 50,
-            "max_daily_loss_pct": 99, "max_weekly_loss_pct": 99})
+        rc = await c.put(
+            "/api/safety/config",
+            headers=hA,
+            json={
+                "max_correlated_positions": 1,
+                "loss_streak_limit": 50,
+                "max_daily_loss_pct": 99,
+                "max_weekly_loss_pct": 99,
+            },
+        )
         assert rc.status_code == 200, rc.text
         assert rc.json()["max_correlated_positions"] == 1
-        await on_new_signal(await _seed("BTCUSDT"))                 # MAJOR long -> opens
+        await on_new_signal(await _seed("BTCUSDT"))  # MAJOR long -> opens
         assert await _open_count(c, hA) == 1
-        await on_new_signal(await _seed("ETHUSDT"))                 # MAJOR long -> blocked
+        await on_new_signal(await _seed("ETHUSDT"))  # MAJOR long -> blocked
         assert await _open_count(c, hA) == 1, "correlated MAJOR should be blocked"
-        await on_new_signal(await _seed("SOLUSDT"))                 # L1 -> allowed
+        await on_new_signal(await _seed("SOLUSDT"))  # L1 -> allowed
         assert await _open_count(c, hA) == 2
         assert await _has_skip(c, hA, "correlated"), "expected a max-correlated SKIP"
         print("correlated cap OK — A open positions:", await _open_count(c, hA))
@@ -115,9 +139,16 @@ async def main() -> None:
 
         # ---------- Phase 2: loss-streak lockout (user B) ----------
         await c.put("/api/auto/config", headers=hB, json={"enabled": True})
-        rc = await c.put("/api/safety/config", headers=hB, json={
-            "loss_streak_limit": 2, "max_daily_loss_pct": 99, "max_weekly_loss_pct": 99,
-            "max_correlated_positions": 99})
+        rc = await c.put(
+            "/api/safety/config",
+            headers=hB,
+            json={
+                "loss_streak_limit": 2,
+                "max_daily_loss_pct": 99,
+                "max_weekly_loss_pct": 99,
+                "max_correlated_positions": 99,
+            },
+        )
         assert rc.status_code == 200, rc.text
         assert rc.json()["loss_streak_limit"] == 2
 
@@ -125,12 +156,19 @@ async def main() -> None:
             sid = await _seed(sym)
             await on_new_signal(sid)
             assert await _open_count(c, hB) == 1
-            await on_signal_event(sid, "SL")     # close at 98 -> ~-100 loss
+            await on_signal_event(sid, "SL")  # close at 98 -> ~-100 loss
             assert await _open_count(c, hB) == 0
 
         r = await c.get("/api/safety/status", headers=hB)
-        print("after 2 losses:", "enabled=", r.json()["trading_enabled"],
-              "streak=", r.json()["loss_streak"], "daily=", r.json()["daily_pnl"])
+        print(
+            "after 2 losses:",
+            "enabled=",
+            r.json()["trading_enabled"],
+            "streak=",
+            r.json()["loss_streak"],
+            "daily=",
+            r.json()["daily_pnl"],
+        )
         assert r.json()["loss_streak"] == 2
 
         # 3rd signal must be blocked by loss-streak protection (no position opens)

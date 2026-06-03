@@ -9,6 +9,7 @@ global emergency stop rather than duplicating it.
 Feature-flagged behind ADMIN_DASHBOARD_ENABLED (default off). Call
 setup_admin(app) from create_app().
 """
+
 from __future__ import annotations
 
 from fastapi import FastAPI, Request

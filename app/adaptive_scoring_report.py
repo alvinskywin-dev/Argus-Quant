@@ -14,7 +14,9 @@ async def main():
 
     if prod_start_raw:
         try:
-            since = datetime.strptime(prod_start_raw, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+            since = datetime.strptime(prod_start_raw, "%Y-%m-%d %H:%M:%S").replace(
+                tzinfo=timezone.utc
+            )
             since_filter = "AND created_at >= :since"
             params["since"] = since
         except Exception:

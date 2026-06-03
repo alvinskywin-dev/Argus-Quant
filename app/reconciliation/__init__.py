@@ -5,6 +5,7 @@ Feature-flagged behind RECONCILIATION_ENABLED. Detection is strictly read-only:
 it inspects positions/open-orders and records ReconciliationIssue rows. It never
 opens, closes, or cancels orders. Call setup_reconciliation(app) from create_app.
 """
+
 from __future__ import annotations
 
 from fastapi import FastAPI, Request

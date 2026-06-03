@@ -5,6 +5,7 @@ Feature-flagged: inactive unless EXCHANGE_API_VAULT_ENABLED=true. Endpoints
 require an authenticated user (Sprint 20A). Call setup_exchange_vault(app)
 from create_app().
 """
+
 from __future__ import annotations
 
 from fastapi import FastAPI, Request

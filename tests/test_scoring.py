@@ -1,6 +1,7 @@
 """
 Sanity tests for AI scoring + feature snapshot.
 """
+
 from __future__ import annotations
 
 import numpy as np

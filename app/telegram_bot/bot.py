@@ -7,6 +7,7 @@ Telegram bot.
 - Auto publishes new signals to the configured channel/group.
 - Edits the signal message in-place when TP/SL events occur.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -45,16 +46,17 @@ from app.utils.logger import logger
 # ---------- constants ----------
 
 LEVERAGE_MAP: dict[str, str] = {
-    "5m":  "10x",
+    "5m": "10x",
     "15m": "7x",
-    "1h":  "5x",
-    "4h":  "3x",
-    "1d":  "2x",
+    "1h": "5x",
+    "4h": "3x",
+    "1d": "2x",
 }
 
 PAUSE_KEY = "broadcasts_paused"
 
 # ---------- helpers ----------
+
 
 def _env_float(key: str, default: float) -> float:
     try:
@@ -80,8 +82,8 @@ def _signal_tier(sig: dict) -> str:
 
     # Tier thresholds — match MTF pipeline scoring
     # 95-100 = ELITE | 85-94 = VIP | 75-84 = PUBLIC | <75 = reject
-    elite_min  = _env_float("ELITE_MIN_CONFIDENCE",  95.0)
-    vip_min    = _env_float("VIP_MIN_CONFIDENCE",    85.0)
+    elite_min = _env_float("ELITE_MIN_CONFIDENCE", 95.0)
+    vip_min = _env_float("VIP_MIN_CONFIDENCE", 85.0)
     public_min = _env_float("PUBLIC_MIN_CONFIDENCE", settings.min_confidence)  # 75.0
 
     # Use tier embedded in signal if scanner already classified it
@@ -106,10 +108,10 @@ def _route_signal_chats(sig: dict) -> list[str]:
     """
     tier = _signal_tier(sig)
 
-    elite_chat  = _env_str("ELITE_VIP_CHAT_ID")
-    vip_chat    = _env_str("VIP_CHAT_ID")
+    elite_chat = _env_str("ELITE_VIP_CHAT_ID")
+    vip_chat = _env_str("VIP_CHAT_ID")
     public_chat = _env_str("PUBLIC_CHAT_ID")
-    fallback    = (settings.telegram_signal_chat_id or "").strip()
+    fallback = (settings.telegram_signal_chat_id or "").strip()
 
     def _pick(*candidates: str) -> str:
         for c in candidates:
@@ -129,7 +131,9 @@ def _route_signal_chats(sig: dict) -> list[str]:
         chosen = fallback
 
     if not chosen:
-        logger.warning(f"no broadcast target for {sig.get('symbol')} tier={tier} — set TELEGRAM_SIGNAL_CHAT_ID")
+        logger.warning(
+            f"no broadcast target for {sig.get('symbol')} tier={tier} — set TELEGRAM_SIGNAL_CHAT_ID"
+        )
         return []
 
     # Support comma-separated multi-channel routing
@@ -152,7 +156,9 @@ async def _tg_send_with_retry(coro_factory, *, max_attempts: int = 4) -> any:
         except (TimedOut, NetworkError) as exc:
             if attempt == max_attempts:
                 raise
-            logger.warning(f"telegram transient error ({exc}), retry in {delay:.1f}s (attempt {attempt})")
+            logger.warning(
+                f"telegram transient error ({exc}), retry in {delay:.1f}s (attempt {attempt})"
+            )
             await asyncio.sleep(delay)
             delay = min(delay * 2, 30)
         except Exception:
@@ -162,13 +168,19 @@ async def _tg_send_with_retry(coro_factory, *, max_attempts: int = 4) -> any:
 
 def _main_keyboard() -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton("🔍 Scan Now", callback_data="scan"),
-         InlineKeyboardButton("📊 Market", callback_data="market")],
-        [InlineKeyboardButton("🚀 Top Longs", callback_data="toplong"),
-         InlineKeyboardButton("🔻 Top Shorts", callback_data="topshort")],
+        [
+            InlineKeyboardButton("🔍 Scan Now", callback_data="scan"),
+            InlineKeyboardButton("📊 Market", callback_data="market"),
+        ],
+        [
+            InlineKeyboardButton("🚀 Top Longs", callback_data="toplong"),
+            InlineKeyboardButton("🔻 Top Shorts", callback_data="topshort"),
+        ],
         [InlineKeyboardButton("📈 Stats", callback_data="stats")],
-        [InlineKeyboardButton("⏸ Pause", callback_data="pause"),
-         InlineKeyboardButton("▶️ Resume", callback_data="resume")],
+        [
+            InlineKeyboardButton("⏸ Pause", callback_data="pause"),
+            InlineKeyboardButton("▶️ Resume", callback_data="resume"),
+        ],
     ]
     return InlineKeyboardMarkup(rows)
 
@@ -285,8 +297,12 @@ class TelegramBot:
             return
         lines = ["🚀 <b>Top Long Setups</b>\n"]
         for s in items:
-            lines.append(f"• <code>{s['symbol']}</code>  conf <code>{s['confidence']}%</code>  RR <code>1:{s['risk_reward']}</code>")
-        await update.effective_message.reply_text("\n".join(lines), parse_mode=constants.ParseMode.HTML)
+            lines.append(
+                f"• <code>{s['symbol']}</code>  conf <code>{s['confidence']}%</code>  RR <code>1:{s['risk_reward']}</code>"
+            )
+        await update.effective_message.reply_text(
+            "\n".join(lines), parse_mode=constants.ParseMode.HTML
+        )
 
     async def cmd_topshort(self, update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         items = self._top_short[:10]
@@ -295,31 +311,45 @@ class TelegramBot:
             return
         lines = ["🔻 <b>Top Short Setups</b>\n"]
         for s in items:
-            lines.append(f"• <code>{s['symbol']}</code>  conf <code>{s['confidence']}%</code>  RR <code>1:{s['risk_reward']}</code>")
-        await update.effective_message.reply_text("\n".join(lines), parse_mode=constants.ParseMode.HTML)
+            lines.append(
+                f"• <code>{s['symbol']}</code>  conf <code>{s['confidence']}%</code>  RR <code>1:{s['risk_reward']}</code>"
+            )
+        await update.effective_message.reply_text(
+            "\n".join(lines), parse_mode=constants.ParseMode.HTML
+        )
 
     async def cmd_market(self, update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         wr = await repo.winrate_summary(days=7)
-        text = format_market_overview({
-            "gainers": universe.gainers(5),
-            "losers": universe.losers(5),
-            "winrate": wr,
-        })
+        text = format_market_overview(
+            {
+                "gainers": universe.gainers(5),
+                "losers": universe.losers(5),
+                "winrate": wr,
+            }
+        )
         await update.effective_message.reply_text(text, parse_mode=constants.ParseMode.HTML)
 
     async def cmd_gainers(self, update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         items = universe.gainers(10)
         lines = ["📈 <b>Top Gainers (24h)</b>\n"]
         for g in items:
-            lines.append(f"• <code>{g['symbol']}</code>  +{g['change_pct']:.2f}%  vol ${g['quote_volume']/1e6:.0f}M")
-        await update.effective_message.reply_text("\n".join(lines), parse_mode=constants.ParseMode.HTML)
+            lines.append(
+                f"• <code>{g['symbol']}</code>  +{g['change_pct']:.2f}%  vol ${g['quote_volume']/1e6:.0f}M"
+            )
+        await update.effective_message.reply_text(
+            "\n".join(lines), parse_mode=constants.ParseMode.HTML
+        )
 
     async def cmd_losers(self, update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         items = universe.losers(10)
         lines = ["📉 <b>Top Losers (24h)</b>\n"]
         for g in items:
-            lines.append(f"• <code>{g['symbol']}</code>  {g['change_pct']:.2f}%  vol ${g['quote_volume']/1e6:.0f}M")
-        await update.effective_message.reply_text("\n".join(lines), parse_mode=constants.ParseMode.HTML)
+            lines.append(
+                f"• <code>{g['symbol']}</code>  {g['change_pct']:.2f}%  vol ${g['quote_volume']/1e6:.0f}M"
+            )
+        await update.effective_message.reply_text(
+            "\n".join(lines), parse_mode=constants.ParseMode.HTML
+        )
 
     async def cmd_signal_history(self, update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         sigs = await repo.get_recent_signals(10)
@@ -333,7 +363,9 @@ class TelegramBot:
                 f"{emo} <code>{s.symbol}</code> {s.side} {s.confidence}% → <b>{s.status}</b> "
                 f"({s.pnl_pct:+.2f}%)"
             )
-        await update.effective_message.reply_text("\n".join(lines), parse_mode=constants.ParseMode.HTML)
+        await update.effective_message.reply_text(
+            "\n".join(lines), parse_mode=constants.ParseMode.HTML
+        )
 
     async def cmd_stats(self, update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         wr = await repo.winrate_summary(days=7)
@@ -357,7 +389,9 @@ class TelegramBot:
             lines.append(
                 f"{i}. <code>{r['symbol']}</code>  avg <code>{r['avg_pnl']:+.2f}%</code>  ({r['signals']} signals)"
             )
-        await update.effective_message.reply_text("\n".join(lines), parse_mode=constants.ParseMode.HTML)
+        await update.effective_message.reply_text(
+            "\n".join(lines), parse_mode=constants.ParseMode.HTML
+        )
 
     async def cmd_settings(self, update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         text = (
@@ -475,9 +509,7 @@ class TelegramBot:
         if self.app is None:
             return
         text = (
-            "🚨 <b>ARGUS QUANT ALERT</b>\n\n"
-            f"<b>{title}</b>\n"
-            f"<code>{message[:1200]}</code>"
+            "🚨 <b>ARGUS QUANT ALERT</b>\n\n" f"<b>{title}</b>\n" f"<code>{message[:1200]}</code>"
         )
         for admin_id in settings.admin_ids:
             try:
@@ -509,11 +541,12 @@ class TelegramBot:
         # Uses has_active_signal_excluding() so we don't block the signal
         # that was JUST created (its ID is passed via _signal_id).
         if settings.block_same_symbol_while_open:
-            symbol     = sig.get("symbol", "")
-            signal_id  = sig.get("_signal_id")
+            symbol = sig.get("symbol", "")
+            signal_id = sig.get("_signal_id")
             if symbol and signal_id is not None:
                 try:
                     from app.database.repo import has_active_signal_excluding
+
                     if await has_active_signal_excluding(symbol, int(signal_id)):
                         logger.warning(
                             f"SKIP_DUPLICATE_ACTIVE_SIGNAL symbol={symbol} "
@@ -536,9 +569,9 @@ class TelegramBot:
         tier = _signal_tier(sig)
         tier_title = {
             "HIGH_PRIORITY": "🚨 <b>HIGH PRIORITY ELITE SIGNAL</b>",
-            "ELITE":         "🔥 <b>ELITE SIGNAL</b>",
-            "VIP":           "💎 <b>VIP SIGNAL</b>",
-            "PUBLIC":        "⚡ <b>ARGUS QUANT</b>",
+            "ELITE": "🔥 <b>ELITE SIGNAL</b>",
+            "VIP": "💎 <b>VIP SIGNAL</b>",
+            "PUBLIC": "⚡ <b>ARGUS QUANT</b>",
         }.get(tier, "⚡ <b>ARGUS QUANT</b>")
 
         caption = (
@@ -561,13 +594,16 @@ class TelegramBot:
         try:
             card_path = make_signal_card(sig)
         except Exception as exc:  # noqa: BLE001
-            logger.warning(f"signal card generation failed for {sig.get('symbol')}: {exc} — using text fallback")
+            logger.warning(
+                f"signal card generation failed for {sig.get('symbol')}: {exc} — using text fallback"
+            )
 
         sent_messages: list[dict] = []
 
         for chat_id in chats:
             try:
                 if card_path:
+
                     async def _send_photo(cid=chat_id):
                         with open(card_path, "rb") as photo:
                             return await self.app.bot.send_photo(
@@ -576,23 +612,28 @@ class TelegramBot:
                                 caption=caption,
                                 parse_mode=constants.ParseMode.HTML,
                             )
+
                     msg = await _tg_send_with_retry(_send_photo)
                 else:
                     # text-only fallback (also used when image fails mid-send)
                     text_body = format_signal(sig)
+
                     async def _send_text(cid=chat_id, tb=text_body):
                         return await self.app.bot.send_message(
                             chat_id=cid,
                             text=tb,
                             parse_mode=constants.ParseMode.HTML,
                         )
+
                     msg = await _tg_send_with_retry(_send_text)
 
                 if msg:
-                    sent_messages.append({
-                        "chat_id": str(chat_id),
-                        "message_id": int(msg.message_id),
-                    })
+                    sent_messages.append(
+                        {
+                            "chat_id": str(chat_id),
+                            "message_id": int(msg.message_id),
+                        }
+                    )
                     logger.info(
                         f"📤 signal broadcast → {chat_id} "
                         f"{sig.get('symbol')} {sig.get('side')} "
@@ -605,18 +646,22 @@ class TelegramBot:
                 if card_path:
                     try:
                         text_body = format_signal(sig)
+
                         async def _fallback(cid=chat_id, tb=text_body):
                             return await self.app.bot.send_message(
                                 chat_id=cid,
                                 text=tb,
                                 parse_mode=constants.ParseMode.HTML,
                             )
+
                         msg = await _tg_send_with_retry(_fallback, max_attempts=2)
                         if msg:
-                            sent_messages.append({
-                                "chat_id": str(chat_id),
-                                "message_id": int(msg.message_id),
-                            })
+                            sent_messages.append(
+                                {
+                                    "chat_id": str(chat_id),
+                                    "message_id": int(msg.message_id),
+                                }
+                            )
                             logger.info(f"📤 text fallback sent → {chat_id}")
                     except Exception as exc2:  # noqa: BLE001
                         logger.exception(f"text fallback also failed for {chat_id}: {exc2}")
@@ -669,6 +714,7 @@ class TelegramBot:
             chat_id = item["chat_id"]
             reply_to = item.get("reply_to")
             try:
+
                 async def _send(cid=chat_id, rt=reply_to):
                     return await self.app.bot.send_message(
                         chat_id=cid,
@@ -676,16 +722,21 @@ class TelegramBot:
                         parse_mode=constants.ParseMode.HTML,
                         reply_to_message_id=rt,
                     )
+
                 await _tg_send_with_retry(_send)
             except Exception as reply_exc:  # noqa: BLE001
-                logger.warning(f"reply event failed for {chat_id}: {reply_exc} — sending standalone")
+                logger.warning(
+                    f"reply event failed for {chat_id}: {reply_exc} — sending standalone"
+                )
                 try:
+
                     async def _standalone(cid=chat_id):
                         return await self.app.bot.send_message(
                             chat_id=cid,
                             text=text,
                             parse_mode=constants.ParseMode.HTML,
                         )
+
                     await _tg_send_with_retry(_standalone, max_attempts=2)
                 except Exception as exc:  # noqa: BLE001
                     logger.exception(f"event broadcast failed for {chat_id}: {exc}")

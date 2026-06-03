@@ -4,6 +4,7 @@ Signal message templating for Telegram.
 Output: clean Markdown that renders well on mobile + desktop and looks like a
 premium commercial signal product.
 """
+
 from __future__ import annotations
 
 from app.utils.helpers import fmt_pct, fmt_price
@@ -25,21 +26,23 @@ def _quality_label(conf: float) -> str:
 def _funding_line(sig: dict) -> str:
     """Return a compact funding line if funding data is available in the signal."""
     rate = sig.get("_funding_rate")
-    cls  = sig.get("_funding_class")
+    cls = sig.get("_funding_class")
     score = sig.get("_funding_score")
     if rate is None or cls is None:
         return ""
     rate_pct = rate * 100
     label_map = {
-        "neutral":          "Neutral",
-        "positive":         "Positive",
-        "negative":         "Negative / Contrarian",
+        "neutral": "Neutral",
+        "positive": "Positive",
+        "negative": "Negative / Contrarian",
         "extreme_positive": "Extreme Positive ⚠️",
         "extreme_negative": "Extreme Negative ⚠️",
     }
     label = label_map.get(cls, cls.replace("_", " ").title())
     score_str = f"{score:+d}" if score is not None else ""
-    return f"💰 <b>Funding</b> • <code>{rate_pct:.4f}%</code>  {label}  Score <code>{score_str}</code>"
+    return (
+        f"💰 <b>Funding</b> • <code>{rate_pct:.4f}%</code>  {label}  Score <code>{score_str}</code>"
+    )
 
 
 def format_signal(sig: dict) -> str:
@@ -55,28 +58,23 @@ def format_signal(sig: dict) -> str:
 
     body = (
         "⚡ <b>ARGUS QUANT</b>\n\n"
-
         f"{side_icon} <code>{sig['symbol']}</code> <b>{side}</b>\n"
         "━━━━━━━━━━━━━━\n\n"
-
         f"<b>ENTRY</b> • "
         f"<code>{fmt_price(sig['entry_low'])} → {fmt_price(sig['entry_high'])}</code>\n"
-
         f"<b>TARGET</b> • "
         f"<code>{fmt_price(sig['tp1'])}</code> • "
         f"<code>{fmt_price(sig['tp2'])}</code> • "
         f"<code>{fmt_price(sig['tp3'])}</code>\n"
-
         f"<b>STOP</b> • <code>{fmt_price(sig['stop_loss'])}</code>\n\n"
-
         f"⚡ <b>RR</b> • <code>1 : {sig['risk_reward']}</code>\n"
         f"📊 <b>CONFIDENCE</b> • <code>{sig['confidence']}%</code>\n\n"
-
         f"{ai}"
     )
     if funding_line:
         body += f"\n\n{funding_line}"
     return body
+
 
 def format_event(payload: dict) -> str:
     event = payload["event"]
@@ -91,11 +89,7 @@ def format_event(payload: dict) -> str:
     else:
         head = "🔔 *UPDATE*"
     pnl = payload.get("pnl_pct", 0.0)
-    return (
-        f"{head}\n"
-        f"`{payload['symbol']}` · {payload['side']}\n"
-        f"PnL: *{fmt_pct(pnl)}*"
-    )
+    return f"{head}\n" f"`{payload['symbol']}` · {payload['side']}\n" f"PnL: *{fmt_pct(pnl)}*"
 
 
 def format_market_overview(data: dict) -> str:

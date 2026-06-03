@@ -12,6 +12,7 @@ Boots PostgreSQL schema, starts:
 
 Startup self-diagnostics verify all critical connections before serving.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -38,6 +39,7 @@ from app.utils.helpers import run_forever
 from app.utils.logger import logger
 
 # ---------- startup diagnostics ----------
+
 
 async def _check_binance() -> bool:
     try:
@@ -124,6 +126,7 @@ async def _startup_report(bot: TelegramBot) -> None:
 
 # ---------- application ----------
 
+
 class App:
     def __init__(self) -> None:
         self.bot = TelegramBot()
@@ -150,31 +153,33 @@ class App:
                 return
 
         try:
-            persisted = await repo.create_signal({
-                "symbol":         sig["symbol"],
-                "side":           sig["side"],
-                "timeframe":      sig["timeframe"],
-                "confidence":     sig["confidence"],
-                "risk_level":     sig["risk_level"],
-                "strategy":       sig["strategy"],
-                "reasons":        sig["reasons"],
-                "entry_low":      sig["entry_low"],
-                "entry_high":     sig["entry_high"],
-                "tp1":            sig["tp1"],
-                "tp2":            sig["tp2"],
-                "tp3":            sig["tp3"],
-                "stop_loss":      sig["stop_loss"],
-                "risk_reward":    sig["risk_reward"],
-                "status":         "OPEN",
-                "trend_score":    sig.get("trend_score"),
-                "structure_score":sig.get("structure_score"),
-                "setup_score":    sig.get("setup_score"),
-                "entry_score":    sig.get("entry_score"),
-                # Sprint 16A — signal diagnostics
-                "diagnostics":    sig.get("diagnostics"),
-                # Sprint 16C — dynamic RR method
-                "rr_method":      sig.get("rr_method"),
-            })
+            persisted = await repo.create_signal(
+                {
+                    "symbol": sig["symbol"],
+                    "side": sig["side"],
+                    "timeframe": sig["timeframe"],
+                    "confidence": sig["confidence"],
+                    "risk_level": sig["risk_level"],
+                    "strategy": sig["strategy"],
+                    "reasons": sig["reasons"],
+                    "entry_low": sig["entry_low"],
+                    "entry_high": sig["entry_high"],
+                    "tp1": sig["tp1"],
+                    "tp2": sig["tp2"],
+                    "tp3": sig["tp3"],
+                    "stop_loss": sig["stop_loss"],
+                    "risk_reward": sig["risk_reward"],
+                    "status": "OPEN",
+                    "trend_score": sig.get("trend_score"),
+                    "structure_score": sig.get("structure_score"),
+                    "setup_score": sig.get("setup_score"),
+                    "entry_score": sig.get("entry_score"),
+                    # Sprint 16A — signal diagnostics
+                    "diagnostics": sig.get("diagnostics"),
+                    # Sprint 16C — dynamic RR method
+                    "rr_method": sig.get("rr_method"),
+                }
+            )
         except Exception as exc:  # noqa: BLE001
             logger.exception(f"💾 persist signal FAILED {sig.get('symbol')}: {exc}")
             await self.bot.alert_admin("Persist Signal Failed", str(exc))
@@ -193,6 +198,7 @@ class App:
         # Open a paper position for every valid MTF signal (no real funds)
         try:
             from app.paper.trading import open_paper_position
+
             await open_paper_position(persisted)
             logger.info(f"📊 paper position opened for signal #{persisted.id} {sig['symbol']}")
         except Exception as exc:  # noqa: BLE001
@@ -203,6 +209,7 @@ class App:
         if settings.auto_trade_demo_enabled:
             try:
                 from app.auto_engine.engine import on_new_signal
+
                 await on_new_signal(persisted.id)
             except Exception as exc:  # noqa: BLE001
                 logger.warning(f"auto-engine open failed #{persisted.id}: {exc}")
@@ -225,9 +232,7 @@ class App:
                     item["chat_id"],
                     item["message_id"],
                 )
-            logger.info(
-                f"📤 signal #{persisted.id} BROADCAST to {len(sent_messages)} chat(s)"
-            )
+            logger.info(f"📤 signal #{persisted.id} BROADCAST to {len(sent_messages)} chat(s)")
         else:
             logger.warning(
                 f"📤 signal #{persisted.id} NOT broadcast — "
@@ -242,10 +247,11 @@ class App:
         if event in ("TP1", "TP2", "TP3", "SL"):
             try:
                 from app.paper.trading import on_signal_event
+
                 await on_signal_event(
-                    signal_id = int(payload["signal_id"]),
-                    event     = event,
-                    pnl_pct   = float(payload.get("pnl_pct") or 0),
+                    signal_id=int(payload["signal_id"]),
+                    event=event,
+                    pnl_pct=float(payload.get("pnl_pct") or 0),
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(f"paper position update failed ({event}): {exc}")
@@ -255,10 +261,11 @@ class App:
             if settings.auto_trade_demo_enabled:
                 try:
                     from app.auto_engine.engine import on_signal_event as auto_event
+
                     await auto_event(
-                        signal_id = int(payload["signal_id"]),
-                        event     = event,
-                        pnl_pct   = float(payload.get("pnl_pct") or 0),
+                        signal_id=int(payload["signal_id"]),
+                        event=event,
+                        pnl_pct=float(payload.get("pnl_pct") or 0),
                     )
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(f"auto-engine update failed ({event}): {exc}")
@@ -296,6 +303,7 @@ class App:
         # POSITION_RECOVERY_ENABLED; never opens positions; never raises).
         try:
             from app.recovery import run_startup_recovery
+
             self._tasks.append(asyncio.create_task(run_startup_recovery()))
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"startup recovery not scheduled (non-fatal): {exc!r}")

@@ -6,6 +6,7 @@ Retention and size caps are configurable via:
   LOG_RETENTION_DAYS (default 30)
   LOG_MAX_SIZE_MB    (default 100)
 """
+
 from __future__ import annotations
 
 import os
@@ -96,9 +97,9 @@ def setup_logging() -> None:
     sub_size = f"{max(10, settings.log_max_size_mb // 2)} MB"
     sub_retention = f"{max(7, settings.log_retention_days // 4)} days"
     _subsystems = {
-        "scanner.log":   "app.scanner",
-        "telegram.log":  "app.telegram_bot",
-        "database.log":  "app.database",
+        "scanner.log": "app.scanner",
+        "telegram.log": "app.telegram_bot",
+        "database.log": "app.database",
         "websocket.log": "app.market_data.ws_engine",
     }
     for filename, module_prefix in _subsystems.items():

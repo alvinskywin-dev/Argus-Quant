@@ -5,19 +5,27 @@ The DB service (record_failure, circuit_breaker_tripped) is exercised manually;
 the safety-critical decisions — how to classify an error and whether/when to
 retry — are pure and fully covered here.
 """
+
 from __future__ import annotations
 
 from app.order_failures import policy as p
 
 # ── classification ─────────────────────────────────────────────────
 
+
 def test_classify_insufficient_balance():
-    assert p.classify_error("Account has insufficient balance for requested action") == p.INSUFFICIENT_BALANCE
+    assert (
+        p.classify_error("Account has insufficient balance for requested action")
+        == p.INSUFFICIENT_BALANCE
+    )
     assert p.classify_error("margin is insufficient", code=-2019) == p.INSUFFICIENT_BALANCE
 
 
 def test_classify_precision():
-    assert p.classify_error("Precision is over the maximum defined for this asset") == p.PRECISION_ERROR
+    assert (
+        p.classify_error("Precision is over the maximum defined for this asset")
+        == p.PRECISION_ERROR
+    )
     assert p.classify_error("LOT_SIZE / step size", code=-1111) == p.PRECISION_ERROR
 
 
@@ -48,6 +56,7 @@ def test_classify_tp_sl_flag_and_unknown():
 
 # ── retry policy ────────────────────────────────────────────────────
 
+
 def test_insufficient_balance_is_terminal_no_retry():
     d = p.decide_retry(p.INSUFFICIENT_BALANCE, 0)
     assert not d.should_retry and d.terminal and d.final_state == p.FAILED
@@ -74,7 +83,7 @@ def test_network_timeout_needs_reconcile_and_backs_off():
     d0 = p.decide_retry(p.NETWORK_TIMEOUT, 0)
     d2 = p.decide_retry(p.NETWORK_TIMEOUT, 2)
     assert d0.should_retry and d0.needs_reconcile
-    assert d2.delay_sec > d0.delay_sec   # exponential backoff
+    assert d2.delay_sec > d0.delay_sec  # exponential backoff
 
 
 def test_reduce_only_requires_reconcile_no_blind_retry():
@@ -107,12 +116,19 @@ def test_backoff_is_capped():
 
 # ── idempotency + circuit breaker ───────────────────────────────────
 
+
 def test_idempotency_key_is_stable_and_distinct():
-    a = p.idempotency_key(user_id=1, exchange="binance", symbol="BTCUSDT", side="LONG", signal_id=42)
-    b = p.idempotency_key(user_id=1, exchange="BINANCE", symbol="btcusdt", side="long", signal_id=42)
-    c = p.idempotency_key(user_id=1, exchange="binance", symbol="BTCUSDT", side="SHORT", signal_id=42)
-    assert a == b          # case-insensitive, stable
-    assert a != c          # different side -> different key
+    a = p.idempotency_key(
+        user_id=1, exchange="binance", symbol="BTCUSDT", side="LONG", signal_id=42
+    )
+    b = p.idempotency_key(
+        user_id=1, exchange="BINANCE", symbol="btcusdt", side="long", signal_id=42
+    )
+    c = p.idempotency_key(
+        user_id=1, exchange="binance", symbol="BTCUSDT", side="SHORT", signal_id=42
+    )
+    assert a == b  # case-insensitive, stable
+    assert a != c  # different side -> different key
 
 
 def test_circuit_breaker_trips_within_window():

@@ -4,6 +4,7 @@ Sprint 20F — unit tests for the exchange adapter layer (no network).
 The most safety-critical property is exercised here: resolve_adapter must NEVER
 return a real (LIVE) adapter unless the live-trading gate is fully open.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -33,17 +34,25 @@ def gate():
 
 # ── Binance HMAC signature (documented test vector) ───────────────
 
+
 def test_binance_signature_matches_documented_vector():
     secret = "NhqPtmdSJYdKjVHjA7PZj4Mge3R5YNiP1e3UZjInClVN65XAbvqqM6A7H5fATj0j"
     params = {
-        "symbol": "LTCBTC", "side": "BUY", "type": "LIMIT", "timeInForce": "GTC",
-        "quantity": 1, "price": "0.1", "recvWindow": 5000, "timestamp": 1499827319559,
+        "symbol": "LTCBTC",
+        "side": "BUY",
+        "type": "LIMIT",
+        "timeInForce": "GTC",
+        "quantity": 1,
+        "price": "0.1",
+        "recvWindow": 5000,
+        "timestamp": 1499827319559,
     }
     expected = "c8db56825ae71d6d79447849e617115f4a920fa2acdcab2b053c4b2838bd6b71"
     assert sign_query(secret, params) == expected
 
 
 # ── the gate ──────────────────────────────────────────────────────
+
 
 def test_resolve_returns_mock_by_default(gate):
     gate.live_trading_enabled = False
@@ -91,6 +100,7 @@ def test_unknown_exchange_falls_back_to_mock(gate):
 
 # ── defense in depth: real adapter refuses when gate closed ───────
 
+
 def test_binance_guard_raises_when_gate_closed(gate):
     gate.live_trading_enabled = False
     gate.mock_exchange_mode = True
@@ -106,6 +116,7 @@ def test_binance_guard_passes_when_gate_open(gate):
 
 # ── mock adapter behaviour ────────────────────────────────────────
 
+
 def test_mock_adapter_open_close():
     async def run():
         a = MockExchangeAdapter("binance")
@@ -114,9 +125,20 @@ def test_mock_adapter_open_close():
         assert o.status == "FILLED" and o.mode == MODE_MOCK and o.filled_qty == 0.1
         c = await a.close_order(symbol="BTCUSDT", side="BUY", qty=0.1)
         assert c.reduce_only and c.side == "SELL"
-        tpsl = await a.set_tp_sl(symbol="BTCUSDT", side="BUY", qty=0.1,
-                                 take_profit=55000, stop_loss=48000, trailing_pct=1.0)
-        assert {r.type for r in tpsl} == {"TAKE_PROFIT_MARKET", "STOP_MARKET", "TRAILING_STOP_MARKET"}
+        tpsl = await a.set_tp_sl(
+            symbol="BTCUSDT",
+            side="BUY",
+            qty=0.1,
+            take_profit=55000,
+            stop_loss=48000,
+            trailing_pct=1.0,
+        )
+        assert {r.type for r in tpsl} == {
+            "TAKE_PROFIT_MARKET",
+            "STOP_MARKET",
+            "TRAILING_STOP_MARKET",
+        }
+
     asyncio.run(run())
 
 
@@ -125,6 +147,7 @@ def test_mock_adapter_open_close():
 # Each exchange signs a different prehash string; these tests lock the exact
 # concatenation order (the #1 source of silent auth failures) by recomputing
 # the expected digest independently from the documented format.
+
 
 def test_okx_signature_format_and_order():
     secret, ts = "topsecret", "2026-05-31T00:00:00.000Z"
@@ -137,14 +160,18 @@ def test_okx_signature_format_and_order():
 def test_bybit_signature_format_and_order():
     secret, ts, key, rw = "topsecret", "1700000000000", "mykey", "5000"
     payload = '{"category":"linear"}'
-    expected = hmac.new(secret.encode(), f"{ts}{key}{rw}{payload}".encode(), hashlib.sha256).hexdigest()
+    expected = hmac.new(
+        secret.encode(), f"{ts}{key}{rw}{payload}".encode(), hashlib.sha256
+    ).hexdigest()
     assert sign_bybit(secret, ts, key, rw, payload) == expected
 
 
 def test_bitget_signature_format_and_order():
     secret, ts = "topsecret", "1700000000000"
     expected = base64.b64encode(
-        hmac.new(secret.encode(), f"{ts}GET/api/v2/mix/account/accounts".encode(), hashlib.sha256).digest()
+        hmac.new(
+            secret.encode(), f"{ts}GET/api/v2/mix/account/accounts".encode(), hashlib.sha256
+        ).digest()
     ).decode()
     assert sign_bitget(secret, ts, "get", "/api/v2/mix/account/accounts", "") == expected
 
@@ -156,12 +183,17 @@ def test_okx_inst_id_mapping():
 
 # ── routing: resolve_adapter returns the right LIVE adapter ────────
 
+
 def test_resolve_routes_to_each_live_adapter(gate):
     gate.live_trading_enabled = True
     gate.mock_exchange_mode = False
-    assert isinstance(resolve_adapter("okx", api_key="k", api_secret="s", passphrase="p"), OKXAdapter)
+    assert isinstance(
+        resolve_adapter("okx", api_key="k", api_secret="s", passphrase="p"), OKXAdapter
+    )
     assert isinstance(resolve_adapter("bybit", api_key="k", api_secret="s"), BybitAdapter)
-    assert isinstance(resolve_adapter("bitget", api_key="k", api_secret="s", passphrase="p"), BitgetAdapter)
+    assert isinstance(
+        resolve_adapter("bitget", api_key="k", api_secret="s", passphrase="p"), BitgetAdapter
+    )
 
 
 def test_resolve_20g_adapters_mock_when_gate_closed(gate):
@@ -176,10 +208,13 @@ def test_passphrase_threaded_to_okx_and_bitget(gate):
     gate.live_trading_enabled = True
     gate.mock_exchange_mode = False
     assert resolve_adapter("okx", api_key="k", api_secret="s", passphrase="pp")._passphrase == "pp"
-    assert resolve_adapter("bitget", api_key="k", api_secret="s", passphrase="pp")._passphrase == "pp"
+    assert (
+        resolve_adapter("bitget", api_key="k", api_secret="s", passphrase="pp")._passphrase == "pp"
+    )
 
 
 # ── defense in depth: every 20G adapter guards the gate ────────────
+
 
 def test_20g_guards_raise_when_gate_closed(gate):
     gate.live_trading_enabled = False
@@ -198,6 +233,7 @@ def test_20g_guards_pass_when_gate_open(gate):
 
 
 # ── auto-routing (Signal → connected exchange) ────────────────────
+
 
 class _Acct:
     def __init__(self, exchange, status="CONNECTED"):

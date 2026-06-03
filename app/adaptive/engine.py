@@ -15,6 +15,7 @@ The engine writes adapted values to the system_settings table.
 The scanner reads those values at runtime (if adaptive_thresholds=true).
 Adaptation step is ±2.5 for confidence, ±0.5 for RR, ±1 for entry_pass.
 """
+
 from __future__ import annotations
 
 import logging
@@ -39,7 +40,11 @@ RR_MIN, RR_MAX = 1.5, 4.0
 
 # Confidence buckets used for analysis
 _BUCKETS: List[Tuple[float, float]] = [
-    (70, 75), (75, 80), (80, 85), (85, 90), (90, 95),
+    (70, 75),
+    (75, 80),
+    (80, 85),
+    (85, 90),
+    (90, 95),
 ]
 
 
@@ -96,9 +101,7 @@ async def run_adaptive_cycle() -> Dict[str, Any]:
     changes: Dict[str, Any] = {}
 
     # ── MIN_CONFIDENCE adaptation ─────────────────────────────────────────
-    cur_bucket = next(
-        (b for b in _BUCKETS if b[0] <= cur_conf < b[1]), None
-    )
+    cur_bucket = next((b for b in _BUCKETS if b[0] <= cur_conf < b[1]), None)
 
     if cur_bucket and cur_bucket in bucket_wr and len(bucket_sigs[cur_bucket]) >= 5:
         cur_wr = bucket_wr[cur_bucket]
@@ -113,7 +116,11 @@ async def run_adaptive_cycle() -> Dict[str, Any]:
             new_conf = min(CONF_MAX, cur_conf + 2.5)
             if new_conf != cur_conf:
                 await set_setting("adaptive_min_confidence", str(new_conf))
-                changes["min_confidence"] = {"from": cur_conf, "to": new_conf, "reason": "higher bucket outperforms"}
+                changes["min_confidence"] = {
+                    "from": cur_conf,
+                    "to": new_conf,
+                    "reason": "higher bucket outperforms",
+                }
 
         # If current bucket underperforms (<40% WR) and lower bucket is better, lower threshold
         elif cur_wr < 40.0 and not changes.get("min_confidence"):
@@ -127,7 +134,11 @@ async def run_adaptive_cycle() -> Dict[str, Any]:
                 new_conf = max(CONF_MIN, cur_conf - 2.5)
                 if new_conf != cur_conf:
                     await set_setting("adaptive_min_confidence", str(new_conf))
-                    changes["min_confidence"] = {"from": cur_conf, "to": new_conf, "reason": "current bucket underperforms"}
+                    changes["min_confidence"] = {
+                        "from": cur_conf,
+                        "to": new_conf,
+                        "reason": "current bucket underperforms",
+                    }
 
     # ── MIN_RR adaptation ─────────────────────────────────────────────────
     # Compare win rate for signals with rr >= cur_rr + 0.5 vs all closed
@@ -147,16 +158,23 @@ async def run_adaptive_cycle() -> Dict[str, Any]:
             new_rr = max(RR_MIN, cur_rr - 0.5)
             if new_rr != cur_rr:
                 await set_setting("adaptive_min_rr", str(new_rr))
-                changes["min_rr"] = {"from": cur_rr, "to": new_rr, "reason": "overall WR poor, relaxing RR"}
+                changes["min_rr"] = {
+                    "from": cur_rr,
+                    "to": new_rr,
+                    "reason": "overall WR poor, relaxing RR",
+                }
 
     summary = {
         "sample_size": len(closed),
         "overall_winrate": round(overall_wr, 1),
-        "current_thresholds": {"min_confidence": cur_conf, "entry_pass_score": cur_entry, "min_rr": cur_rr},
+        "current_thresholds": {
+            "min_confidence": cur_conf,
+            "entry_pass_score": cur_entry,
+            "min_rr": cur_rr,
+        },
         "changes": changes,
         "bucket_winrates": {
-            f"{int(lo)}-{int(hi)}": round(wr, 1)
-            for (lo, hi), wr in bucket_wr.items()
+            f"{int(lo)}-{int(hi)}": round(wr, 1) for (lo, hi), wr in bucket_wr.items()
         },
     }
     if changes:

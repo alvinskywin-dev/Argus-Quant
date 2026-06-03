@@ -9,6 +9,7 @@ adapter is returned ONLY when the live-trading gate is fully open:
 In every other case (the default), a MockExchangeAdapter is returned and no
 real order can be placed. 20G registers OKX/Bybit/Bitget here.
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -47,15 +48,19 @@ def resolve_adapter(
     if live_gate_open() and exchange in _LIVE_ADAPTERS and api_key and api_secret:
         if exchange == "binance":
             from app.exchange_adapters.binance import BinanceFuturesAdapter
+
             return BinanceFuturesAdapter(api_key, api_secret)
         if exchange == "okx":
             from app.exchange_adapters.okx import OKXAdapter
+
             return OKXAdapter(api_key, api_secret, passphrase or "")
         if exchange == "bybit":
             from app.exchange_adapters.bybit import BybitAdapter
+
             return BybitAdapter(api_key, api_secret)
         if exchange == "bitget":
             from app.exchange_adapters.bitget import BitgetAdapter
+
             return BitgetAdapter(api_key, api_secret, passphrase or "")
 
     # Default, safe path: simulate everything.

@@ -11,6 +11,7 @@ Rejects low-quality SHORT signals via 5 sequential filters:
 
 Rejection counts are tracked in Redis for the analytics endpoint.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -32,6 +33,7 @@ class ShortProtectionResult:
 
 # ── Redis stat helpers ────────────────────────────────────────────────────────
 
+
 async def _increment_stat(field: str, amount: int = 1) -> None:
     try:
         stats: Dict[str, int] = await cache_get(_STATS_KEY) or {}
@@ -48,10 +50,10 @@ async def get_short_protection_stats() -> Dict[str, Any]:
         candidates = int(stats.get("candidates", 0))
         rejected = int(stats.get("rejected", 0))
         reasons = {
-            "Bull regime":    int(stats.get("reject_bull_regime", 0)),
-            "Funding":        int(stats.get("reject_funding", 0)),
-            "OI":             int(stats.get("reject_oi", 0)),
-            "Liquidity":      int(stats.get("reject_liquidity", 0)),
+            "Bull regime": int(stats.get("reject_bull_regime", 0)),
+            "Funding": int(stats.get("reject_funding", 0)),
+            "OI": int(stats.get("reject_oi", 0)),
+            "Liquidity": int(stats.get("reject_liquidity", 0)),
             "Trend mismatch": int(stats.get("reject_trend", 0)),
         }
         top_reason = max(reasons, key=lambda k: reasons[k]) if any(reasons.values()) else None
@@ -76,11 +78,12 @@ async def get_short_protection_stats() -> Dict[str, Any]:
 
 # ── core filter logic (synchronous) ──────────────────────────────────────────
 
+
 def check_short_protection(
     snaps: dict,
-    regime: Optional[Any],         # MarketRegime | None
+    regime: Optional[Any],  # MarketRegime | None
     funding_class: Optional[str],
-    oi_snap: Optional[Any],        # OISnapshot | None
+    oi_snap: Optional[Any],  # OISnapshot | None
     liquidity_score: int,
     adjusted_confidence: float,
 ) -> ShortProtectionResult:
@@ -89,8 +92,8 @@ def check_short_protection(
     Returns immediately on the first failure with the rejection reason.
     LONG signals are never passed here — use apply_short_protection().
     """
-    snap_1d  = snaps.get("1d")
-    snap_1h  = snaps.get("1h")
+    snap_1d = snaps.get("1d")
+    snap_1h = snaps.get("1h")
     snap_15m = snaps.get("15m")
 
     # Filter #1: Bull regime — SHORT needs meaningfully higher confidence
@@ -116,11 +119,7 @@ def check_short_protection(
         )
 
     # Filter #3: Rising price with rising OI confirms long momentum — reject SHORT
-    if (
-        oi_snap is not None
-        and oi_snap.price_change_pct > 0
-        and oi_snap.oi_change_15m > 0
-    ):
+    if oi_snap is not None and oi_snap.price_change_pct > 0 and oi_snap.oi_change_15m > 0:
         return ShortProtectionResult(
             passed=False,
             rejection_reason="Price rising + OI rising",
@@ -128,9 +127,7 @@ def check_short_protection(
 
     # Filter #4: No bearish liquidity sweep and low liquidity score
     has_bearish_sweep = bool(
-        snap_15m is not None
-        and snap_15m.structure is not None
-        and snap_15m.structure.sweep_bear
+        snap_15m is not None and snap_15m.structure is not None and snap_15m.structure.sweep_bear
     )
     if not has_bearish_sweep and liquidity_score < 8:
         return ShortProtectionResult(
@@ -159,6 +156,7 @@ def check_short_protection(
 
 
 # ── async wrapper with stats tracking ────────────────────────────────────────
+
 
 async def apply_short_protection(
     side: str,

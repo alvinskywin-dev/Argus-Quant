@@ -11,6 +11,7 @@ is open (LIVE_TRADING_ENABLED=true AND MOCK_EXCHANGE_MODE=false). The gate is
 enforced centrally in app.live_trading.service.resolve_adapter and again,
 defensively, inside each real adapter.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -28,9 +29,9 @@ class AdapterError(Exception):
 class OrderResult:
     order_id: str
     symbol: str
-    side: str            # BUY / SELL
-    type: str            # MARKET / LIMIT / STOP_MARKET / TAKE_PROFIT_MARKET / TRAILING_STOP_MARKET
-    status: str          # NEW / FILLED / PARTIALLY_FILLED / CANCELED / REJECTED
+    side: str  # BUY / SELL
+    type: str  # MARKET / LIMIT / STOP_MARKET / TAKE_PROFIT_MARKET / TRAILING_STOP_MARKET
+    status: str  # NEW / FILLED / PARTIALLY_FILLED / CANCELED / REJECTED
     price: float = 0.0
     qty: float = 0.0
     filled_qty: float = 0.0
@@ -51,11 +52,11 @@ class BalanceInfo:
 @dataclass
 class PositionInfo:
     symbol: str
-    side: str            # LONG / SHORT / FLAT
+    side: str  # LONG / SHORT / FLAT
     qty: float
     entry_price: float
     leverage: int
-    margin_type: str     # isolated / cross
+    margin_type: str  # isolated / cross
     unrealized_pnl: float = 0.0
     liquidation_price: float = 0.0
     mode: str = MODE_MOCK
@@ -109,8 +110,14 @@ class ExchangeAdapter:
         raise NotImplementedError
 
     async def open_order(
-        self, *, symbol: str, side: str, qty: float, order_type: str = "MARKET",
-        price: Optional[float] = None, reduce_only: bool = False,
+        self,
+        *,
+        symbol: str,
+        side: str,
+        qty: float,
+        order_type: str = "MARKET",
+        price: Optional[float] = None,
+        reduce_only: bool = False,
     ) -> OrderResult:
         raise NotImplementedError
 
@@ -119,8 +126,13 @@ class ExchangeAdapter:
         raise NotImplementedError
 
     async def set_tp_sl(
-        self, *, symbol: str, side: str, qty: float,
-        take_profit: Optional[float] = None, stop_loss: Optional[float] = None,
+        self,
+        *,
+        symbol: str,
+        side: str,
+        qty: float,
+        take_profit: Optional[float] = None,
+        stop_loss: Optional[float] = None,
         trailing_pct: Optional[float] = None,
     ) -> list[OrderResult]:
         raise NotImplementedError

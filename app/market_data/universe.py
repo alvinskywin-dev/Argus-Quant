@@ -6,6 +6,7 @@ Maintains the active USDT-M Futures symbol universe. Filters out:
 
 Refreshes on a timer.
 """
+
 from __future__ import annotations
 
 import asyncio

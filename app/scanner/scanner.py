@@ -20,6 +20,7 @@ Sprint 18:  adaptive threshold cycle runs after every full scan.
 Sprint 19A: market regime engine — classifies BULL/BEAR/SIDEWAYS/HV/LV.
 Sprint 19B: short protection layer — rejects low-quality SHORT signals.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -61,8 +62,7 @@ def _fmt_entry_diag(
 ) -> str:
     """Format a one-line setup diagnostic for any signal that reached entry evaluation."""
     factor_str = " ".join(
-        f"{k.split()[0][0:3].upper()}={'✓' if v else '✗'}"
-        for k, v in factors.items()
+        f"{k.split()[0][0:3].upper()}={'✓' if v else '✗'}" for k, v in factors.items()
     )
     return (
         f"🔍 DIAG {symbol:>12} {side:<5} | "
@@ -110,23 +110,24 @@ class MarketScanner:
 
             if rejection is not None:
                 stage = rejection.stage
-                side  = rejection.side
+                side = rejection.side
 
                 if stage == "no_data":
                     logger.debug(f"⏭ {symbol} skipped: {rejection.detail}")
                     return {"_DIAG_": True, "stage": "no_data"}
 
                 stage_label = {
-                    "trend":     "Trend failed",
+                    "trend": "Trend failed",
                     "structure": "Structure failed",
-                    "setup":     "Setup failed",
-                    "entry":     "Entry failed",
+                    "setup": "Setup failed",
+                    "entry": "Entry failed",
                 }.get(stage, f"{stage.capitalize()} failed")
 
                 if stage == "entry" and rejection.entry_factors:
                     logger.info(
                         _fmt_entry_diag(
-                            symbol, side,
+                            symbol,
+                            side,
                             rejection.trend_score,
                             rejection.structure_score,
                             rejection.setup_score,
@@ -136,9 +137,7 @@ class MarketScanner:
                         )
                     )
                 elif settings.log_rejection_detail:
-                    logger.info(
-                        f"⛔ {symbol} {side} — {stage_label}: {rejection.detail}"
-                    )
+                    logger.info(f"⛔ {symbol} {side} — {stage_label}: {rejection.detail}")
                 return {"_DIAG_": True, "stage": stage, "side": side}
 
             # ── Market quality filters ───────────────────────────────────
@@ -146,7 +145,8 @@ class MarketScanner:
 
             logger.info(
                 _fmt_entry_diag(
-                    symbol, decision.side,
+                    symbol,
+                    decision.side,
                     decision.trend_score,
                     decision.structure_score,
                     decision.setup_score,
@@ -165,8 +165,10 @@ class MarketScanner:
                         f"filter={reason}"
                     )
                 return {
-                    "_DIAG_": True, "stage": "confidence",
-                    "side": decision.side, "conf": decision.confidence,
+                    "_DIAG_": True,
+                    "stage": "confidence",
+                    "side": decision.side,
+                    "conf": decision.confidence,
                 }
 
             # ── Sprint 17: Liquidity Sweep Engine (optional) ─────────────
@@ -178,6 +180,7 @@ class MarketScanner:
                         analyze_liquidity,
                         liquidity_score_for_side,
                     )
+
                     liq_signal = analyze_liquidity(dfs["15m"])
                     liquidity_score = liquidity_score_for_side(liq_signal, decision.side)
                     if liquidity_score > 0:
@@ -207,8 +210,10 @@ class MarketScanner:
                         f"rr={levels.risk_reward:.2f} < {settings.min_rr}"
                     )
                 return {
-                    "_DIAG_": True, "stage": "rr",
-                    "side": decision.side, "rr": levels.risk_reward,
+                    "_DIAG_": True,
+                    "stage": "rr",
+                    "side": decision.side,
+                    "rr": levels.risk_reward,
                 }
 
             # ── Active-signal guard ──────────────────────────────────────
@@ -289,15 +294,17 @@ class MarketScanner:
                 logger.info(f"📊 {symbol} {decision.side} | {oi_diag}")
                 try:
                     async with SessionLocal() as db:
-                        db.add(OpenInterestSnapshot(
-                            symbol=symbol,
-                            open_interest=oi_snap.open_interest,
-                            oi_change_5m=oi_snap.oi_change_5m,
-                            oi_change_15m=oi_snap.oi_change_15m,
-                            oi_change_1h=oi_snap.oi_change_1h,
-                            price_change_pct=oi_snap.price_change_pct,
-                            oi_score=oi_score,
-                        ))
+                        db.add(
+                            OpenInterestSnapshot(
+                                symbol=symbol,
+                                open_interest=oi_snap.open_interest,
+                                oi_change_5m=oi_snap.oi_change_5m,
+                                oi_change_15m=oi_snap.oi_change_15m,
+                                oi_change_1h=oi_snap.oi_change_1h,
+                                price_change_pct=oi_snap.price_change_pct,
+                                oi_score=oi_score,
+                            )
+                        )
                         await db.commit()
                 except Exception as exc:
                     logger.debug(f"OI DB save failed for {symbol}: {exc}")
@@ -309,9 +316,7 @@ class MarketScanner:
             if settings.funding_enabled:
                 funding_data = await fetch_funding_rate(symbol)
                 if funding_data:
-                    funding_fs = score_funding_for_side(
-                        funding_data.classification, decision.side
-                    )
+                    funding_fs = score_funding_for_side(funding_data.classification, decision.side)
                     funding_diag = (
                         f"Funding: rate={funding_data.funding_rate * 100:.4f}% "
                         f"class={funding_data.classification} "
@@ -322,6 +327,7 @@ class MarketScanner:
                     )
                     try:
                         from app.database.repo import save_funding_snapshot
+
                         await save_funding_snapshot(
                             symbol=symbol,
                             funding_rate=funding_data.funding_rate,
@@ -337,7 +343,13 @@ class MarketScanner:
 
             # ── Base confidence after OI, funding, and liquidity ─────────
             adjusted_confidence = round(
-                max(0.0, min(100.0, decision.confidence + oi_score + funding_score + (liquidity_score * 0.5))),
+                max(
+                    0.0,
+                    min(
+                        100.0,
+                        decision.confidence + oi_score + funding_score + (liquidity_score * 0.5),
+                    ),
+                ),
                 1,
             )
 
@@ -368,8 +380,10 @@ class MarketScanner:
                         f"conf={adjusted_confidence:.1f}% after regime_delta={regime_delta:+d}"
                     )
                 return {
-                    "_DIAG_": True, "stage": "confidence",
-                    "side": decision.side, "conf": adjusted_confidence,
+                    "_DIAG_": True,
+                    "stage": "confidence",
+                    "side": decision.side,
+                    "conf": adjusted_confidence,
                 }
 
             # ── Sprint 19B: Short protection layer ───────────────────────
@@ -383,11 +397,10 @@ class MarketScanner:
                 adjusted_confidence=adjusted_confidence,
             )
             if not short_protection.passed:
-                logger.info(
-                    f"🛡 SHORT REJECTED {symbol} — {short_protection.rejection_reason}"
-                )
+                logger.info(f"🛡 SHORT REJECTED {symbol} — {short_protection.rejection_reason}")
                 return {
-                    "_DIAG_": True, "stage": "short_protection",
+                    "_DIAG_": True,
+                    "stage": "short_protection",
                     "side": decision.side,
                     "reason": short_protection.rejection_reason,
                 }
@@ -403,65 +416,67 @@ class MarketScanner:
             )
 
             # ── Sprint 16A / 19A: Build diagnostics object ───────────────
-            diagnostics = json.dumps({
-                "trend_score":      round(float(decision.trend_score), 1),
-                "structure_score":  round(float(decision.structure_score), 1),
-                "setup_score":      round(float(decision.setup_score), 1),
-                "entry_score":      round(float(decision.entry_score_pts), 1),
-                "funding_score":    funding_score,
-                "oi_score":         oi_score,
-                "liquidity_score":  liquidity_score,
-                "base_confidence":  round(float(decision.confidence), 1),
-                "total_score":      adjusted_confidence,
-                "rr_method":        levels.rr_method,
-                "funding_class":    funding_class,
-                "tier":             decision.tier,
-                # Sprint 19A
-                "market_regime":    regime.market_regime if regime else None,
-                "regime_score":     regime.regime_score if regime else None,
-                "regime_delta":     regime_delta,
-                # Sprint 19B
-                "short_protection_pass":    short_protection.passed,
-                "short_rejection_reason":   short_protection.rejection_reason,
-                # Stop-Loss Engine V2 — SL placement diagnostics
-                **levels.sl_diag,
-            })
+            diagnostics = json.dumps(
+                {
+                    "trend_score": round(float(decision.trend_score), 1),
+                    "structure_score": round(float(decision.structure_score), 1),
+                    "setup_score": round(float(decision.setup_score), 1),
+                    "entry_score": round(float(decision.entry_score_pts), 1),
+                    "funding_score": funding_score,
+                    "oi_score": oi_score,
+                    "liquidity_score": liquidity_score,
+                    "base_confidence": round(float(decision.confidence), 1),
+                    "total_score": adjusted_confidence,
+                    "rr_method": levels.rr_method,
+                    "funding_class": funding_class,
+                    "tier": decision.tier,
+                    # Sprint 19A
+                    "market_regime": regime.market_regime if regime else None,
+                    "regime_score": regime.regime_score if regime else None,
+                    "regime_delta": regime_delta,
+                    # Sprint 19B
+                    "short_protection_pass": short_protection.passed,
+                    "short_rejection_reason": short_protection.rejection_reason,
+                    # Stop-Loss Engine V2 — SL placement diagnostics
+                    **levels.sl_diag,
+                }
+            )
 
             return {
-                "symbol":          symbol,
-                "side":            decision.side,
-                "timeframe":       "15m",
-                "confidence":      adjusted_confidence,
-                "risk_level":      decision.risk_level,
-                "strategy":        "MTF_SMC_STRICT",
-                "reasons":         " | ".join(
+                "symbol": symbol,
+                "side": decision.side,
+                "timeframe": "15m",
+                "confidence": adjusted_confidence,
+                "risk_level": decision.risk_level,
+                "strategy": "MTF_SMC_STRICT",
+                "reasons": " | ".join(
                     r for r in [*decision.reasons[:6], oi_diag, funding_diag] if r
                 ),
-                "entry_low":       levels.entry_low,
-                "entry_high":      levels.entry_high,
-                "tp1":             levels.tp1,
-                "tp2":             levels.tp2,
-                "tp3":             levels.tp3,
-                "stop_loss":       levels.stop_loss,
-                "risk_reward":     levels.risk_reward,
-                "rr_method":       levels.rr_method,
-                "status":          "OPEN",
-                "trend_score":     decision.trend_score,
+                "entry_low": levels.entry_low,
+                "entry_high": levels.entry_high,
+                "tp1": levels.tp1,
+                "tp2": levels.tp2,
+                "tp3": levels.tp3,
+                "stop_loss": levels.stop_loss,
+                "risk_reward": levels.risk_reward,
+                "rr_method": levels.rr_method,
+                "status": "OPEN",
+                "trend_score": decision.trend_score,
                 "structure_score": decision.structure_score,
-                "setup_score":     decision.setup_score,
-                "entry_score":     decision.entry_score_pts,
-                "diagnostics":     diagnostics,
+                "setup_score": decision.setup_score,
+                "entry_score": decision.entry_score_pts,
+                "diagnostics": diagnostics,
                 # Sprint 19A — stored on the Signal row
-                "market_regime":   regime.market_regime if regime else None,
-                "regime_score":    regime.regime_score if regime else None,
-                "_snapshot":           primary_snap,
-                "_contributing_tfs":   decision.contributing_tfs,
-                "_detected_at":        utcnow(),
-                "_tier":               decision.tier,
-                "_funding_rate":       funding_data.funding_rate if funding_data else None,
-                "_funding_class":      funding_class,
-                "_funding_score":      funding_score,
-                "_funding_reason":     funding_fs.reason if funding_fs else "",
+                "market_regime": regime.market_regime if regime else None,
+                "regime_score": regime.regime_score if regime else None,
+                "_snapshot": primary_snap,
+                "_contributing_tfs": decision.contributing_tfs,
+                "_detected_at": utcnow(),
+                "_tier": decision.tier,
+                "_funding_rate": funding_data.funding_rate if funding_data else None,
+                "_funding_class": funding_class,
+                "_funding_score": funding_score,
+                "_funding_reason": funding_fs.reason if funding_fs else "",
             }
 
     async def scan_once(self) -> int:
@@ -480,20 +495,20 @@ class MarketScanner:
         emitted = 0
 
         counters: Dict[str, int] = {
-            "analyzed":        len(symbols),
-            "no_data":         0,
-            "trend":           0,
-            "structure":       0,
-            "setup":           0,
-            "entry":           0,
-            "confidence":      0,
-            "rr":              0,
-            "duplicate_active":0,
+            "analyzed": len(symbols),
+            "no_data": 0,
+            "trend": 0,
+            "structure": 0,
+            "setup": 0,
+            "entry": 0,
+            "confidence": 0,
+            "rr": 0,
+            "duplicate_active": 0,
             "post_close_cooldown": 0,
-            "cooldown":        0,
-            "rate_limit":      0,
+            "cooldown": 0,
+            "rate_limit": 0,
             "short_protection": 0,
-            "error":           0,
+            "error": 0,
         }
 
         for fut in asyncio.as_completed(tasks):
@@ -518,12 +533,12 @@ class MarketScanner:
 
         # ── End-of-scan summary ─────────────────────────────────────────
         c = counters
-        trend_pass     = c["analyzed"] - c["no_data"] - c["trend"]
-        structure_pass = trend_pass    - c["structure"]
-        setup_pass     = structure_pass - c["setup"]
-        entry_pass     = setup_pass    - c["entry"]
-        conf_pass      = entry_pass    - c["confidence"]
-        rr_pass        = conf_pass     - c["rr"]
+        trend_pass = c["analyzed"] - c["no_data"] - c["trend"]
+        structure_pass = trend_pass - c["structure"]
+        setup_pass = structure_pass - c["setup"]
+        entry_pass = setup_pass - c["entry"]
+        conf_pass = entry_pass - c["confidence"]
+        rr_pass = conf_pass - c["rr"]
 
         dup_skip = c["duplicate_active"] + c["post_close_cooldown"]
         logger.info(
@@ -546,6 +561,7 @@ class MarketScanner:
         if settings.adaptive_thresholds:
             try:
                 from app.adaptive.engine import run_adaptive_cycle
+
                 await run_adaptive_cycle()
             except Exception as exc:
                 logger.debug(f"adaptive cycle failed: {exc}")

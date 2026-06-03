@@ -1,6 +1,7 @@
 """
 Sprint 20A — request/response models for the auth API.
 """
+
 from __future__ import annotations
 
 from datetime import datetime

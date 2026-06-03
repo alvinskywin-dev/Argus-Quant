@@ -4,6 +4,7 @@ Sprint 20C — exchange vault API.
 Mounted only when EXCHANGE_API_VAULT_ENABLED=true. All routes require an
 authenticated user (Sprint 20A). Responses NEVER include decrypted secrets.
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
@@ -71,8 +72,11 @@ async def test(body: AccountRef, request: Request, user: AuthUser = Depends(get_
     try:
         async with get_session() as db:
             acc, result = await service.test_connection(
-                db, user_id=user.id, exchange=body.exchange,
-                label=body.label, ip=client_ip(request),
+                db,
+                user_id=user.id,
+                exchange=body.exchange,
+                label=body.label,
+                ip=client_ip(request),
             )
             return TestResultOut(
                 exchange=acc.exchange,
@@ -92,12 +96,17 @@ async def test(body: AccountRef, request: Request, user: AuthUser = Depends(get_
 
 
 @router.post("/disconnect", response_model=MessageOut)
-async def disconnect(body: AccountRef, request: Request, user: AuthUser = Depends(get_current_user)):
+async def disconnect(
+    body: AccountRef, request: Request, user: AuthUser = Depends(get_current_user)
+):
     try:
         async with get_session() as db:
             await service.disconnect(
-                db, user_id=user.id, exchange=body.exchange,
-                label=body.label, ip=client_ip(request),
+                db,
+                user_id=user.id,
+                exchange=body.exchange,
+                label=body.label,
+                ip=client_ip(request),
             )
         return MessageOut(detail=f"{body.exchange}/{body.label} disconnected")
     except service.VaultError as exc:

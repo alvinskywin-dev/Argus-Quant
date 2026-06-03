@@ -10,6 +10,7 @@ Implements deterministic detectors for liquid futures pairs:
 - Pullback — recent counter-trend retracement inside a larger trend
 - Retest — price returning to test a freshly broken level
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -22,8 +23,8 @@ import pandas as pd
 class StructureSignal:
     bos_bull: bool = False
     bos_bear: bool = False
-    mss_bull: bool = False    # Change of Character bullish
-    mss_bear: bool = False    # Change of Character bearish
+    mss_bull: bool = False  # Change of Character bullish
+    mss_bear: bool = False  # Change of Character bearish
     sweep_bull: bool = False
     sweep_bear: bool = False
     fvg_bull: bool = False

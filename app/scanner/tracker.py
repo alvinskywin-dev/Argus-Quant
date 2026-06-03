@@ -4,6 +4,7 @@ Track open signals — poll prices, mark TP1/TP2/TP3/SL hits, compute PnL.
 Lives separately from the scanner so it can run on its own cadence and survive
 restarts (state is persisted in PostgreSQL).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -29,9 +30,9 @@ class SignalTracker:
         payload = {
             "id": sig.id,
             "signal_id": sig.id,
-                "symbol": sig.symbol,
+            "symbol": sig.symbol,
             "side": sig.side,
-            "event": event,            # TP1/TP2/TP3/SL/UPDATE
+            "event": event,  # TP1/TP2/TP3/SL/UPDATE
             "pnl_pct": sig.pnl_pct,
             "telegram_message_id": sig.telegram_message_id,
         }
@@ -71,9 +72,11 @@ class SignalTracker:
         max_fav = max(sig.max_favorable_pct, pnl)
         max_adv = min(sig.max_adverse_pct, pnl)
 
-        fields: dict = {"pnl_pct": round(pnl, 3),
-                        "max_favorable_pct": round(max_fav, 3),
-                        "max_adverse_pct": round(max_adv, 3)}
+        fields: dict = {
+            "pnl_pct": round(pnl, 3),
+            "max_favorable_pct": round(max_fav, 3),
+            "max_adverse_pct": round(max_adv, 3),
+        }
 
         new_status = sig.status
         event = None

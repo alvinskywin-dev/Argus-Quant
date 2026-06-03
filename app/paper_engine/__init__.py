@@ -4,6 +4,7 @@ Sprint 20B — per-user paper (demo) futures trading.
 Feature-flagged: inactive unless PAPER_TRADING_ENABLED=true. Endpoints require
 an authenticated user (Sprint 20A). Call setup_paper(app) from create_app().
 """
+
 from __future__ import annotations
 
 from fastapi import FastAPI, Request

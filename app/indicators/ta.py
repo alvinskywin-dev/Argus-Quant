@@ -3,6 +3,7 @@ Technical indicators implemented in vectorized NumPy/Pandas.
 All functions take a DataFrame with columns: open, high, low, close, volume.
 Return a Series (or dict of Series) aligned with the input index.
 """
+
 from __future__ import annotations
 
 from typing import Dict
@@ -31,8 +32,9 @@ def rsi(close: pd.Series, length: int = 14) -> pd.Series:
     return 100 - 100 / (1 + rs)
 
 
-def stoch_rsi(close: pd.Series, rsi_len: int = 14, stoch_len: int = 14,
-              k_smooth: int = 3, d_smooth: int = 3) -> Dict[str, pd.Series]:
+def stoch_rsi(
+    close: pd.Series, rsi_len: int = 14, stoch_len: int = 14, k_smooth: int = 3, d_smooth: int = 3
+) -> Dict[str, pd.Series]:
     r = rsi(close, rsi_len)
     min_r = r.rolling(stoch_len).min()
     max_r = r.rolling(stoch_len).max()
@@ -130,8 +132,12 @@ def adx(df: pd.DataFrame, length: int = 14) -> Dict[str, pd.Series]:
     tr = true_range(df)
     atr_ = tr.ewm(alpha=1 / length, adjust=False).mean()
 
-    plus_di = 100 * pd.Series(plus_dm, index=df.index).ewm(alpha=1 / length, adjust=False).mean() / atr_
-    minus_di = 100 * pd.Series(minus_dm, index=df.index).ewm(alpha=1 / length, adjust=False).mean() / atr_
+    plus_di = (
+        100 * pd.Series(plus_dm, index=df.index).ewm(alpha=1 / length, adjust=False).mean() / atr_
+    )
+    minus_di = (
+        100 * pd.Series(minus_dm, index=df.index).ewm(alpha=1 / length, adjust=False).mean() / atr_
+    )
 
     dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
     adx_ = dx.ewm(alpha=1 / length, adjust=False).mean()
@@ -154,8 +160,12 @@ def volume_spike_pct(volume: pd.Series, length: int = 20) -> pd.Series:
 def swing_pivots(df: pd.DataFrame, left: int = 3, right: int = 3) -> Dict[str, pd.Series]:
     highs = df["high"]
     lows = df["low"]
-    pivot_high = highs[(highs.shift(left).rolling(left).max() < highs) &
-                       (highs.shift(-right).rolling(right).max() < highs)]
-    pivot_low = lows[(lows.shift(left).rolling(left).min() > lows) &
-                     (lows.shift(-right).rolling(right).min() > lows)]
+    pivot_high = highs[
+        (highs.shift(left).rolling(left).max() < highs)
+        & (highs.shift(-right).rolling(right).max() < highs)
+    ]
+    pivot_low = lows[
+        (lows.shift(left).rolling(left).min() > lows)
+        & (lows.shift(-right).rolling(right).min() > lows)
+    ]
     return {"pivot_high": pivot_high, "pivot_low": pivot_low}

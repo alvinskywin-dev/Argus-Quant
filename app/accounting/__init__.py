@@ -5,6 +5,7 @@ Feature-flagged behind ACCOUNTING_ENABLED. Computes gross/commission/funding/
 slippage/net PnL per trade and rolls daily aggregates, keeping MOCK and LIVE
 separate. Call setup_accounting(app) from create_app().
 """
+
 from __future__ import annotations
 
 from fastapi import FastAPI, Request

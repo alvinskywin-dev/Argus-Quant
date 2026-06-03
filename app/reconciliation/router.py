@@ -6,6 +6,7 @@ Mounted only when RECONCILIATION_ENABLED=true. Detection is read-only.
   GET  /api/reconciliation/issues  — authed; the caller's own issues
   POST /api/reconciliation/run     — authed; reconcile the caller's accounts
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query
@@ -32,8 +33,11 @@ async def status():
 
 
 @router.get("/issues")
-async def issues(resolved: str = Query(default=""), limit: int = Query(default=200, le=1000),
-                 user: AuthUser = Depends(get_current_user)):
+async def issues(
+    resolved: str = Query(default=""),
+    limit: int = Query(default=200, le=1000),
+    user: AuthUser = Depends(get_current_user),
+):
     resolved_filter = None if resolved == "" else resolved.lower() in ("1", "true", "yes")
     async with get_session() as db:
         return await report.list_issues(db, user_id=user.id, resolved=resolved_filter, limit=limit)

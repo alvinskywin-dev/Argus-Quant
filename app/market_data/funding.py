@@ -13,6 +13,7 @@ Score rules (applied to adjusted_confidence):
     LONG:  neutral=+5  negative=+8  extreme_negative=+10  positive=-5  extreme_positive=-15
     SHORT: neutral=+5  positive=+8  extreme_positive=+10  negative=-5  extreme_negative=-15
 """
+
 from __future__ import annotations
 
 import os
@@ -25,6 +26,7 @@ from app.utils.logger import logger
 
 # ── config helpers ─────────────────────────────────────────────────────────
 
+
 def _env_float(key: str, default: float) -> float:
     try:
         return float(os.getenv(key, str(default)))
@@ -34,9 +36,9 @@ def _env_float(key: str, default: float) -> float:
 
 def _get_thresholds() -> dict:
     return {
-        "positive":         _env_float("FUNDING_POSITIVE",         0.0003),
-        "negative":         _env_float("FUNDING_NEGATIVE",        -0.0003),
-        "extreme_positive": _env_float("FUNDING_EXTREME_POSITIVE",  0.0008),
+        "positive": _env_float("FUNDING_POSITIVE", 0.0003),
+        "negative": _env_float("FUNDING_NEGATIVE", -0.0003),
+        "extreme_positive": _env_float("FUNDING_EXTREME_POSITIVE", 0.0008),
         "extreme_negative": _env_float("FUNDING_EXTREME_NEGATIVE", -0.0008),
     }
 
@@ -47,13 +49,14 @@ _BATCH_CACHE_KEY = "funding:batch"
 
 # ── data types ─────────────────────────────────────────────────────────────
 
+
 @dataclass
 class FundingData:
     symbol: str
     funding_rate: float
-    funding_time: Optional[int]       # Unix ms
+    funding_time: Optional[int]  # Unix ms
     next_funding_time: Optional[int]  # Unix ms
-    classification: str               # neutral/positive/negative/extreme_positive/extreme_negative
+    classification: str  # neutral/positive/negative/extreme_positive/extreme_negative
 
 
 @dataclass
@@ -64,6 +67,7 @@ class FundingScore:
 
 
 # ── classification ─────────────────────────────────────────────────────────
+
 
 def classify_funding(funding_rate: float) -> str:
     """
@@ -86,34 +90,34 @@ def classify_funding(funding_rate: float) -> str:
 
 _SCORE_TABLE: Dict[str, Dict[str, int]] = {
     "LONG": {
-        "neutral":          5,
-        "negative":         8,
+        "neutral": 5,
+        "negative": 8,
         "extreme_negative": 10,
-        "positive":        -5,
-        "extreme_positive":-15,
+        "positive": -5,
+        "extreme_positive": -15,
     },
     "SHORT": {
-        "neutral":          5,
-        "positive":         8,
+        "neutral": 5,
+        "positive": 8,
         "extreme_positive": 10,
-        "negative":        -5,
-        "extreme_negative":-15,
+        "negative": -5,
+        "extreme_negative": -15,
     },
 }
 
 _REASON_TABLE: Dict[str, Dict[str, str]] = {
     "LONG": {
-        "neutral":          "Funding neutral; no crowd bias.",
-        "negative":         "Negative funding; contrarian bullish.",
+        "neutral": "Funding neutral; no crowd bias.",
+        "negative": "Negative funding; contrarian bullish.",
         "extreme_negative": "Extreme negative funding; shorts very crowded.",
-        "positive":         "Positive funding; longs crowded; caution.",
+        "positive": "Positive funding; longs crowded; caution.",
         "extreme_positive": "Longs crowded; avoid chasing.",
     },
     "SHORT": {
-        "neutral":          "Funding neutral; no crowd bias.",
-        "positive":         "Positive funding; contrarian bearish.",
+        "neutral": "Funding neutral; no crowd bias.",
+        "positive": "Positive funding; contrarian bearish.",
         "extreme_positive": "Extreme positive funding; longs very crowded.",
-        "negative":         "Negative funding; shorts crowded; caution.",
+        "negative": "Negative funding; shorts crowded; caution.",
         "extreme_negative": "Shorts crowded; avoid chasing.",
     },
 }
@@ -130,6 +134,7 @@ def score_funding_for_side(classification: str, side: str) -> FundingScore:
 
 
 # ── fetch helpers ──────────────────────────────────────────────────────────
+
 
 def _cache_ttl() -> int:
     try:

@@ -6,6 +6,7 @@ so the raw env secret is never used directly as a key. Every encryption uses a
 fresh 96-bit nonce; the stored token is base64(nonce || ciphertext||tag).
 Plaintext secrets are never persisted.
 """
+
 from __future__ import annotations
 
 import base64
@@ -30,9 +31,7 @@ class VaultCryptoError(Exception):
 def _derive_key() -> bytes:
     material = settings.vault_key_material
     if not material:
-        raise VaultCryptoError(
-            "No vault key configured. Set VAULT_MASTER_KEY or SECRET_KEY."
-        )
+        raise VaultCryptoError("No vault key configured. Set VAULT_MASTER_KEY or SECRET_KEY.")
     hkdf = HKDF(algorithm=SHA256(), length=_KEY_BYTES, salt=_HKDF_SALT, info=_HKDF_INFO)
     return hkdf.derive(material.encode("utf-8"))
 

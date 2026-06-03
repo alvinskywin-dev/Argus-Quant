@@ -1,6 +1,7 @@
 """
 Sprint 20A — unit tests for auth primitives (no DB required).
 """
+
 from __future__ import annotations
 
 import pyotp
@@ -9,6 +10,7 @@ import pytest
 from app.auth import security
 
 # ── password hashing ──────────────────────────────────────────────
+
 
 def test_password_hash_roundtrip():
     h = security.hash_password("CorrectHorse9!")
@@ -33,6 +35,7 @@ def test_password_over_72_bytes_does_not_crash():
 
 # ── JWT access tokens ─────────────────────────────────────────────
 
+
 def test_access_token_roundtrip():
     token = security.create_access_token(42, "PREMIUM")
     payload = security.decode_access_token(token)
@@ -55,6 +58,7 @@ def test_tampered_token_rejected():
 
 # ── opaque tokens ─────────────────────────────────────────────────
 
+
 def test_opaque_tokens_unique_and_hashable():
     a = security.generate_opaque_token()
     b = security.generate_opaque_token()
@@ -65,6 +69,7 @@ def test_opaque_tokens_unique_and_hashable():
 
 
 # ── TOTP 2FA ──────────────────────────────────────────────────────
+
 
 def test_totp_verify_accepts_current_code():
     secret = security.generate_totp_secret()

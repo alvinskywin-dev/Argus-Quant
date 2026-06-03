@@ -12,6 +12,7 @@ Run:
     -v "$(pwd)/app:/app/app" -v "$(pwd)/tests:/app/tests" \
     bot python -m tests.e2e_admin_manual
 """
+
 import asyncio
 
 import httpx
@@ -28,16 +29,16 @@ USER_EMAIL = "user20h@example.com"
 async def _purge(*emails):
     async with get_session() as db:
         for email in emails:
-            u = (await db.execute(
-                select(AuthUser).where(AuthUser.email == email.lower()))).scalar_one_or_none()
+            u = (
+                await db.execute(select(AuthUser).where(AuthUser.email == email.lower()))
+            ).scalar_one_or_none()
             if u:
                 await db.delete(u)
 
 
 async def _promote(email):
     async with get_session() as db:
-        u = (await db.execute(
-            select(AuthUser).where(AuthUser.email == email.lower()))).scalar_one()
+        u = (await db.execute(select(AuthUser).where(AuthUser.email == email.lower()))).scalar_one()
         u.role = "ADMIN"
         uid = u.id
     return uid
@@ -48,6 +49,7 @@ async def _register_login(c, email):
     r = await c.post("/api/auth/login", json={"email": email, "password": "Sup3rSecret!"})
     tok = r.json()["access_token"]
     from app.auth.security import decode_access_token
+
     return tok, int(decode_access_token(tok)["sub"])
 
 
@@ -71,15 +73,21 @@ async def main() -> None:
         print("rbac: FREE -> 403 OK")
 
         # Give the user a (mock-validated) exchange key so detail has something to show.
-        r = await c.post("/api/exchange/connect", headers=uh, json={
-            "exchange": "binance", "api_key": "GOODKEYabcd1234", "api_secret": "topsecret"})
+        r = await c.post(
+            "/api/exchange/connect",
+            headers=uh,
+            json={"exchange": "binance", "api_key": "GOODKEYabcd1234", "api_secret": "topsecret"},
+        )
         assert r.status_code == 201, r.text
 
         # Overview rollup.
         r = await c.get("/api/admin/overview", headers=ah)
         assert r.status_code == 200, r.text
         ov = r.json()
-        print("overview:", {k: ov[k] for k in ("users", "exchange_accounts", "global_kill", "live_gate_open")})
+        print(
+            "overview:",
+            {k: ov[k] for k in ("users", "exchange_accounts", "global_kill", "live_gate_open")},
+        )
         assert ov["users"]["total"] >= 2
         assert ov["live_gate_open"] is False
         assert "by_role" in ov["users"]
@@ -98,8 +106,14 @@ async def main() -> None:
         detail = r.json()
         acct = detail["exchange_accounts"][0]
         assert set(acct.keys()) == {
-            "exchange", "label", "status", "api_key_last4",
-            "can_trade", "can_futures", "can_withdraw"}, acct.keys()
+            "exchange",
+            "label",
+            "status",
+            "api_key_last4",
+            "can_trade",
+            "can_futures",
+            "can_withdraw",
+        }, acct.keys()
         assert "api_secret" not in str(detail) and "encrypted" not in str(detail)
         print("detail: no secrets exposed, last4 =", acct["api_key_last4"])
 

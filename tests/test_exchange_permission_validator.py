@@ -4,6 +4,7 @@ Sprint 21A — unit tests for the exchange permission validator.
 Pure-classifier + mock-mapping tests only. No network and no DB: the real
 ``validate_*`` coroutines hit live exchanges and are never exercised in CI.
 """
+
 from __future__ import annotations
 
 from app.exchange_vault.adapters import MockExchangeValidator
@@ -22,45 +23,63 @@ from app.exchange_vault.permission_validator import (
 
 # ── Binance classifier ─────────────────────────────────────────────
 
+
 def test_binance_trade_futures_no_withdraw_is_connected():
-    r = classify_binance({
-        "enableReading": True, "enableFutures": True,
-        "enableSpotAndMarginTrading": True, "enableWithdrawals": False,
-    })
+    r = classify_binance(
+        {
+            "enableReading": True,
+            "enableFutures": True,
+            "enableSpotAndMarginTrading": True,
+            "enableWithdrawals": False,
+        }
+    )
     assert r.ok and r.status == STATUS_CONNECTED
     assert r.can_read and r.can_trade and r.can_futures and r.can_withdraw is False
     assert "FUTURES" in r.permissions
 
 
 def test_binance_withdrawal_key_is_rejected():
-    r = classify_binance({
-        "enableReading": True, "enableFutures": True,
-        "enableSpotAndMarginTrading": True, "enableWithdrawals": True,
-    })
+    r = classify_binance(
+        {
+            "enableReading": True,
+            "enableFutures": True,
+            "enableSpotAndMarginTrading": True,
+            "enableWithdrawals": True,
+        }
+    )
     assert r.status == STATUS_PERMISSION_DENIED
     assert r.can_withdraw is True
     assert "WITHDRAWAL" in r.permission_warning.upper()
 
 
 def test_binance_no_futures_is_permission_denied():
-    r = classify_binance({
-        "enableReading": True, "enableFutures": False,
-        "enableSpotAndMarginTrading": True, "enableWithdrawals": False,
-    })
+    r = classify_binance(
+        {
+            "enableReading": True,
+            "enableFutures": False,
+            "enableSpotAndMarginTrading": True,
+            "enableWithdrawals": False,
+        }
+    )
     assert r.status == STATUS_PERMISSION_DENIED
     assert not r.can_futures
 
 
 def test_binance_no_trade_is_permission_denied():
-    r = classify_binance({
-        "enableReading": True, "enableFutures": False,
-        "enableSpotAndMarginTrading": False, "enableWithdrawals": False,
-    })
+    r = classify_binance(
+        {
+            "enableReading": True,
+            "enableFutures": False,
+            "enableSpotAndMarginTrading": False,
+            "enableWithdrawals": False,
+        }
+    )
     assert r.status == STATUS_PERMISSION_DENIED
     assert not r.can_trade
 
 
 # ── OKX classifier ─────────────────────────────────────────────────
+
 
 def test_okx_trade_perm_connected_withdraw_known_false():
     r = classify_okx({"data": [{"perm": "read_only,trade", "acctLv": "3"}]})
@@ -84,34 +103,51 @@ def test_okx_missing_perm_field_marks_withdraw_undetectable():
 
 # ── Bybit classifier ───────────────────────────────────────────────
 
+
 def test_bybit_contract_trade_connected():
-    r = classify_bybit({"result": {
-        "readOnly": 0,
-        "permissions": {"ContractTrade": ["Order", "Position"], "Wallet": []},
-    }})
+    r = classify_bybit(
+        {
+            "result": {
+                "readOnly": 0,
+                "permissions": {"ContractTrade": ["Order", "Position"], "Wallet": []},
+            }
+        }
+    )
     assert r.status == STATUS_CONNECTED
     assert r.can_futures and r.can_trade and r.can_withdraw is False
 
 
 def test_bybit_withdraw_permission_rejected():
-    r = classify_bybit({"result": {
-        "readOnly": 0,
-        "permissions": {"ContractTrade": ["Order"], "Wallet": ["AccountTransfer", "Withdraw"]},
-    }})
+    r = classify_bybit(
+        {
+            "result": {
+                "readOnly": 0,
+                "permissions": {
+                    "ContractTrade": ["Order"],
+                    "Wallet": ["AccountTransfer", "Withdraw"],
+                },
+            }
+        }
+    )
     assert r.status == STATUS_PERMISSION_DENIED
     assert r.can_withdraw is True
 
 
 def test_bybit_read_only_key_has_no_trade():
-    r = classify_bybit({"result": {
-        "readOnly": 1,
-        "permissions": {"ContractTrade": ["Order"]},
-    }})
+    r = classify_bybit(
+        {
+            "result": {
+                "readOnly": 1,
+                "permissions": {"ContractTrade": ["Order"]},
+            }
+        }
+    )
     assert not r.can_trade
     assert r.status == STATUS_PERMISSION_DENIED
 
 
 # ── Bitget classifier ──────────────────────────────────────────────
+
 
 def test_bitget_reachable_account_connected_withdraw_undetectable():
     r = classify_bitget({"code": "00000", "data": [{"marginCoin": "USDT"}]})
@@ -128,6 +164,7 @@ def test_bitget_unreachable_account_denied():
 
 # ── finalize_status invariants ─────────────────────────────────────
 
+
 def test_finalize_does_not_touch_failed_reads():
     r = ExchangePermissionResult(exchange="binance", ok=False, status=STATUS_INVALID)
     out = finalize_status(r)
@@ -136,12 +173,13 @@ def test_finalize_does_not_touch_failed_reads():
 
 def test_withdraw_true_always_beats_trade_futures():
     r = ExchangePermissionResult(
-        exchange="x", ok=True, can_read=True, can_trade=True,
-        can_futures=True, can_withdraw=True)
+        exchange="x", ok=True, can_read=True, can_trade=True, can_futures=True, can_withdraw=True
+    )
     assert finalize_status(r).status == STATUS_PERMISSION_DENIED
 
 
 # ── mock mapping (drives the offline validator the same way connect does) ──
+
 
 def test_from_mock_normal_key_connected():
     p = MockExchangeValidator("binance").validate("GOODKEY123", "secret", None)

@@ -27,6 +27,7 @@ USAGE
     # Inside running docker stack:
     docker compose exec bot python -m app.database.migrations.archive_legacy_signals
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -38,12 +39,13 @@ from sqlalchemy import func, select
 from app.database.models import ArchivedSignal, Base, Signal
 from app.database.session import SessionLocal, engine
 
-MTF_STRATEGY   = "MTF_SMC_STRICT"
+MTF_STRATEGY = "MTF_SMC_STRICT"
 MTF_TIMEFRAMES = {"15m", "1h", "4h", "1d"}
-LEGACY_TF      = "5m"
+LEGACY_TF = "5m"
 
 
 # ─── helpers ────────────────────────────────────────────────────────────────
+
 
 def _sep(char: str = "─", width: int = 60) -> None:
     print(char * width)
@@ -56,6 +58,7 @@ def _h(title: str) -> None:
 
 
 # ─── audit ──────────────────────────────────────────────────────────────────
+
 
 async def _audit() -> dict:
     """
@@ -136,14 +139,24 @@ def _print_audit(a: dict) -> None:
 
     _sep()
     print("  Tables present in ORM:")
-    for tbl in ["signals", "archive_signals", "daily_stats", "weekly_stats",
-                "watchlist", "users", "system_settings", "affiliate_clicks",
-                "signal_messages", "paper_positions"]:
+    for tbl in [
+        "signals",
+        "archive_signals",
+        "daily_stats",
+        "weekly_stats",
+        "watchlist",
+        "users",
+        "system_settings",
+        "affiliate_clicks",
+        "signal_messages",
+        "paper_positions",
+    ]:
         print(f"    {tbl}")
     _sep()
 
 
 # ─── migration ──────────────────────────────────────────────────────────────
+
 
 async def _archive(dry_run: bool = False) -> tuple[int, int]:
     """
@@ -155,9 +168,7 @@ async def _archive(dry_run: bool = False) -> tuple[int, int]:
         # Fetch all legacy signals
         result = await session.execute(
             select(Signal)
-            .where(
-                (Signal.timeframe == LEGACY_TF) | (Signal.strategy != MTF_STRATEGY)
-            )
+            .where((Signal.timeframe == LEGACY_TF) | (Signal.strategy != MTF_STRATEGY))
             .order_by(Signal.id)
         )
         legacy: list[Signal] = list(result.scalars().all())
@@ -166,13 +177,11 @@ async def _archive(dry_run: bool = False) -> tuple[int, int]:
             return 0, 0
 
         # Fetch IDs already archived (idempotency guard)
-        existing_res = await session.execute(
-            select(ArchivedSignal.original_id)
-        )
+        existing_res = await session.execute(select(ArchivedSignal.original_id))
         already_archived_ids: set[int] = {row[0] for row in existing_res.all()}
 
     to_archive = [s for s in legacy if s.id not in already_archived_ids]
-    skipped    = len(legacy) - len(to_archive)
+    skipped = len(legacy) - len(to_archive)
 
     if dry_run:
         return len(to_archive), skipped
@@ -238,6 +247,7 @@ async def _archive(dry_run: bool = False) -> tuple[int, int]:
 
 
 # ─── main ────────────────────────────────────────────────────────────────────
+
 
 async def run_migration(dry_run: bool = False) -> None:
     print()

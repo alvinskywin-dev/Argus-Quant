@@ -7,6 +7,7 @@ MOCK_EXCHANGE_MODE (the default) no network call is made — validation is
 simulated deterministically so both the accept and the reject (withdrawal-
 enabled) paths are testable without real keys or risk.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

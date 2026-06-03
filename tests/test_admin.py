@@ -6,6 +6,7 @@ The aggregation/query paths are DB-backed and covered by the manual e2e
 validation guards in set_user_status, which run before any DB access, so they
 need no session.
 """
+
 from __future__ import annotations
 
 import asyncio

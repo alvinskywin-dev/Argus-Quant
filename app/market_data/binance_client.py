@@ -14,6 +14,7 @@ Endpoints used:
     GET /fapi/v1/openInterest       — open interest
     GET /futures/data/topLongShortAccountRatio (data API)
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -30,7 +31,11 @@ from tenacity import (
 from app.config import settings
 from app.utils.logger import logger
 
-BASE_URL = "https://fapi.binance.com" if not settings.binance_testnet else "https://testnet.binancefuture.com"
+BASE_URL = (
+    "https://fapi.binance.com"
+    if not settings.binance_testnet
+    else "https://testnet.binancefuture.com"
+)
 DATA_URL = "https://fapi.binance.com"  # data endpoints only live on prod
 
 
@@ -73,7 +78,9 @@ class BinanceClient:
         async for attempt in AsyncRetrying(
             stop=stop_after_attempt(4),
             wait=wait_exponential(multiplier=0.5, min=0.5, max=8),
-            retry=retry_if_exception_type((aiohttp.ClientError, asyncio.TimeoutError, BinanceError)),
+            retry=retry_if_exception_type(
+                (aiohttp.ClientError, asyncio.TimeoutError, BinanceError)
+            ),
             reraise=True,
         ):
             with attempt:
@@ -126,8 +133,11 @@ class BinanceClient:
         cur = start_ms
         while cur < end_ms:
             rows = await self.klines(
-                symbol, interval, limit=batch_size,
-                start_time=cur, end_time=end_ms,
+                symbol,
+                interval,
+                limit=batch_size,
+                start_time=cur,
+                end_time=end_ms,
             )
             if not rows:
                 break
@@ -135,8 +145,8 @@ class BinanceClient:
             # rows[-1][6] is close_time of the last candle in milliseconds
             if rows[-1][6] >= end_ms or len(rows) < batch_size:
                 break
-            cur = rows[-1][0] + 1   # open_time of next batch
-            await asyncio.sleep(0.05)   # gentle rate-limit courtesy pause
+            cur = rows[-1][0] + 1  # open_time of next batch
+            await asyncio.sleep(0.05)  # gentle rate-limit courtesy pause
         return all_rows
 
     async def premium_index(self, symbol: str | None = None) -> Any:

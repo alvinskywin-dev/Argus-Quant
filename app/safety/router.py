@@ -5,6 +5,7 @@ Mounted only when SAFETY_LAYER_ENABLED=true. User routes manage personal limits
 and a personal kill switch; admin routes (ADMIN role) drive the GLOBAL emergency
 stop that halts auto-trading for everyone instantly.
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
@@ -39,6 +40,7 @@ def _config_out(cfg: SafetyConfig) -> SafetyConfigOut:
 
 
 # ── user routes ───────────────────────────────────────────────────
+
 
 @router.get("/config", response_model=SafetyConfigOut)
 async def get_config(user: AuthUser = Depends(get_current_user)):
@@ -75,6 +77,7 @@ async def resume(user: AuthUser = Depends(get_current_user)):
 
 
 # ── admin routes (global emergency stop) ──────────────────────────
+
 
 @admin_router.post("/kill-all", response_model=MessageOut)
 async def kill_all(user: AuthUser = Depends(require_role("ADMIN"))):

@@ -4,6 +4,7 @@ Build a normalized 'feature snapshot' from raw OHLCV for one symbol/timeframe.
 The snapshot feeds the AI scoring engine. Everything downstream consumes this
 object — keeping it strongly-typed makes the system easier to reason about.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -42,7 +43,7 @@ class FeatureSnapshot:
     ema_200: float
     trend_up: bool
     trend_strength_adx: float
-    supertrend_dir: int            # +1 long, -1 short
+    supertrend_dir: int  # +1 long, -1 short
     macd_hist: float
     macd_cross_up: bool
     macd_cross_down: bool
@@ -56,12 +57,12 @@ class FeatureSnapshot:
 
     # Volatility / bands
     atr_value: float
-    atr_pct: float                  # ATR as % of price
+    atr_pct: float  # ATR as % of price
     bb_width: float
-    bb_pos: float                   # where close sits in bb (0 lower, 1 upper)
+    bb_pos: float  # where close sits in bb (0 lower, 1 upper)
 
     # Volume
-    vol_spike_pct: float            # last bar volume vs 20-bar avg
+    vol_spike_pct: float  # last bar volume vs 20-bar avg
     vwap_value: float
     above_vwap: bool
 
@@ -148,7 +149,9 @@ def build_snapshot(symbol: str, timeframe: str, df: pd.DataFrame) -> Optional[Fe
     structure = analyze_structure(df, lookback=20, trend_ema_len=50)
 
     last24 = df.tail(24)
-    range_pct = (last24["high"].max() - last24["low"].min()) / max(last24["close"].iloc[0], 1e-12) * 100.0
+    range_pct = (
+        (last24["high"].max() - last24["low"].min()) / max(last24["close"].iloc[0], 1e-12) * 100.0
+    )
     overextended_long = bb_pos > 0.97 and rsi_val > 78
     overextended_short = bb_pos < 0.03 and rsi_val < 22
 

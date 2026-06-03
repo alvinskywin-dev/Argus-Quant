@@ -14,6 +14,7 @@ Three RR methods are evaluated and the best (highest valid RR) is selected:
 
 The selected rr_method and rr_value are stored on the signal for diagnostics.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -42,6 +43,7 @@ class TradeLevels:
 
 # ---------- helpers ----------
 
+
 def _atr_multiplier(atr_pct: float) -> float:
     """
     Scale the TP2 multiplier based on ATR% of price.
@@ -60,7 +62,7 @@ def _candidates_long(
     price: float,
     risk: float,
     snap: FeatureSnapshot,
-    liq_signal,          # Optional[LiquiditySignal] — avoid circular import
+    liq_signal,  # Optional[LiquiditySignal] — avoid circular import
 ) -> List[Tuple[str, float, float]]:
     """Return list of (method, rr, tp2) for LONG side, best to worst."""
     results: List[Tuple[str, float, float]] = []
@@ -117,6 +119,7 @@ def _candidates_short(
 
 
 # ---------- Stop-Loss Engine V2 (previous-1D support/resistance) ----------
+
 
 def compute_prev_1d_stop(
     side: str,
@@ -238,7 +241,7 @@ def build_levels(
     snap: FeatureSnapshot,
     side: str,
     liq_signal=None,  # Optional[LiquiditySignal]
-    df_1d=None,       # Optional[pd.DataFrame] — 1D klines for the V2 SL engine
+    df_1d=None,  # Optional[pd.DataFrame] — 1D klines for the V2 SL engine
 ) -> Optional[TradeLevels]:
     """
     Compute trade levels with dynamic RR selection.
@@ -259,7 +262,11 @@ def build_levels(
         prev = _extract_prev_1d(df_1d)
         if prev is not None:
             res = compute_prev_1d_stop(
-                side, price, prev["low"], prev["high"], prev["atr_1d"],
+                side,
+                price,
+                prev["low"],
+                prev["high"],
+                prev["atr_1d"],
                 buffer_mult=settings.stoploss_1d_buffer_atr_mult,
                 min_pct=settings.min_sl_distance_percent,
                 max_pct=settings.max_sl_distance_percent,

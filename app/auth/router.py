@@ -4,6 +4,7 @@ Sprint 20A — auth API router.
 Mounted only when AUTH_ENABLED=true (see app/dashboard/server.py:create_app).
 All persistence goes through app.auth.service; this layer only handles HTTP.
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -68,6 +69,7 @@ def _tokens(access: str, refresh: str) -> TokenOut:
 
 
 # ── registration / login ──────────────────────────────────────────
+
 
 @router.post("/register", response_model=UserOut, status_code=201)
 async def register(body: RegisterIn, request: Request):
@@ -139,7 +141,8 @@ async def update_timezone(body: UpdateTimezoneIn, user: AuthUser = Depends(get_c
     if not is_supported_timezone(tz):
         return JSONResponse(
             status_code=400,
-            content={"detail": f"Unsupported timezone. Allowed: {', '.join(SUPPORTED_TIMEZONES)}"})
+            content={"detail": f"Unsupported timezone. Allowed: {', '.join(SUPPORTED_TIMEZONES)}"},
+        )
     async with get_session() as db:
         db_user = await db.get(AuthUser, user.id)
         if db_user is None:
@@ -151,6 +154,7 @@ async def update_timezone(body: UpdateTimezoneIn, user: AuthUser = Depends(get_c
 
 
 # ── email verification ────────────────────────────────────────────
+
 
 @router.post("/verify-email", response_model=MessageOut)
 async def verify_email_post(body: VerifyEmailIn):
@@ -174,6 +178,7 @@ async def verify_email_get(token: str = Query(...)):
 
 # ── password reset ────────────────────────────────────────────────
 
+
 @router.post("/forgot-password", response_model=MessageOut)
 async def forgot_password(body: ForgotPasswordIn):
     async with get_session() as db:
@@ -193,6 +198,7 @@ async def reset_password(body: ResetPasswordIn):
 
 
 # ── 2FA (TOTP) ────────────────────────────────────────────────────
+
 
 @router.post("/2fa/setup", response_model=TwoFactorSetupOut)
 async def setup_2fa(user: AuthUser = Depends(get_current_user)):
@@ -225,6 +231,7 @@ async def disable_2fa(body: Enable2FAVerifyIn, user: AuthUser = Depends(get_curr
 
 
 # ── sessions / login history ──────────────────────────────────────
+
 
 @router.get("/sessions", response_model=list[SessionOut])
 async def sessions(user: AuthUser = Depends(get_current_user)):

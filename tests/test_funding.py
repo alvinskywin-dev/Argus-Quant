@@ -1,6 +1,7 @@
 """
 Tests for the Sprint 11B Funding Rate Engine.
 """
+
 from __future__ import annotations
 
 import os
@@ -14,6 +15,7 @@ from app.market_data.funding import (
 )
 
 # ── classify_funding ──────────────────────────────────────────────────────────
+
 
 class TestClassifyFunding:
     def test_neutral_zero(self):
@@ -55,6 +57,7 @@ class TestClassifyFunding:
 
 
 # ── score_funding_for_side ────────────────────────────────────────────────────
+
 
 class TestScoreFundingForSide:
     # LONG scores
@@ -122,33 +125,39 @@ class TestScoreFundingForSide:
 
 # ── env defaults ──────────────────────────────────────────────────────────────
 
+
 class TestEnvDefaults:
     def test_positive_threshold_default(self):
         from app.market_data.funding import _get_thresholds
+
         os.environ.pop("FUNDING_POSITIVE", None)
         t = _get_thresholds()
         assert t["positive"] == pytest.approx(0.0003)
 
     def test_negative_threshold_default(self):
         from app.market_data.funding import _get_thresholds
+
         os.environ.pop("FUNDING_NEGATIVE", None)
         t = _get_thresholds()
         assert t["negative"] == pytest.approx(-0.0003)
 
     def test_extreme_positive_threshold_default(self):
         from app.market_data.funding import _get_thresholds
+
         os.environ.pop("FUNDING_EXTREME_POSITIVE", None)
         t = _get_thresholds()
         assert t["extreme_positive"] == pytest.approx(0.0008)
 
     def test_extreme_negative_threshold_default(self):
         from app.market_data.funding import _get_thresholds
+
         os.environ.pop("FUNDING_EXTREME_NEGATIVE", None)
         t = _get_thresholds()
         assert t["extreme_negative"] == pytest.approx(-0.0008)
 
     def test_custom_threshold_from_env(self):
         from app.market_data.funding import _get_thresholds
+
         os.environ["FUNDING_EXTREME_POSITIVE"] = "0.0015"
         t = _get_thresholds()
         assert t["extreme_positive"] == pytest.approx(0.0015)
@@ -156,6 +165,7 @@ class TestEnvDefaults:
 
     def test_invalid_env_falls_back_to_default(self):
         from app.market_data.funding import _get_thresholds
+
         os.environ["FUNDING_POSITIVE"] = "not_a_number"
         t = _get_thresholds()
         assert t["positive"] == pytest.approx(0.0003)
@@ -164,12 +174,15 @@ class TestEnvDefaults:
 
 # ── safe missing funding data ──────────────────────────────────────────────────
 
+
 class TestMissingFunding:
     def test_none_funding_data_score_is_zero(self):
         funding_data = None
-        funding_score = 0 if funding_data is None else score_funding_for_side(
-            funding_data.classification, "LONG"
-        ).score
+        funding_score = (
+            0
+            if funding_data is None
+            else score_funding_for_side(funding_data.classification, "LONG").score
+        )
         assert funding_score == 0
 
     def test_confidence_unchanged_when_funding_missing(self):

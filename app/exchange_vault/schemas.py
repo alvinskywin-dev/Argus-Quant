@@ -1,6 +1,7 @@
 """
 Sprint 20C — request/response models for the exchange vault API.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -24,6 +25,7 @@ class AccountRef(BaseModel):
 
 class ExchangeAccountOut(BaseModel):
     """Safe account view — never includes decrypted secrets."""
+
     id: int
     exchange: str
     label: str

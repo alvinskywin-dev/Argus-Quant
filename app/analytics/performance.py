@@ -4,6 +4,7 @@ Performance Analytics Engine.
 Computes win rate, profit factor, Sharpe-like ratio, and per-symbol /
 per-side breakdowns from the closed signal history.
 """
+
 from __future__ import annotations
 
 import math
@@ -41,7 +42,7 @@ class SideStat:
 
 @dataclass
 class MonthStat:
-    month: str       # YYYY-MM
+    month: str  # YYYY-MM
     total: int = 0
     wins: int = 0
     losses: int = 0
@@ -167,16 +168,18 @@ class PerformanceEngine:
             sym_wins = [s for s in sigs if s.status in ("TP1", "TP2", "TP3")]
             sym_pnls = [float(s.pnl_pct or 0) for s in sigs]
             sym_rrs = [float(s.risk_reward or 0) for s in sigs]
-            sym_stats.append(SymbolStat(
-                symbol=sym,
-                total=len(sigs),
-                wins=len(sym_wins),
-                losses=len(sigs) - len(sym_wins),
-                total_pnl=round(sum(sym_pnls), 2),
-                avg_pnl=round(sum(sym_pnls) / max(1, len(sym_pnls)), 2),
-                win_rate=round(len(sym_wins) / max(1, len(sigs)) * 100, 1),
-                avg_rr=round(sum(sym_rrs) / max(1, len(sym_rrs)), 2),
-            ))
+            sym_stats.append(
+                SymbolStat(
+                    symbol=sym,
+                    total=len(sigs),
+                    wins=len(sym_wins),
+                    losses=len(sigs) - len(sym_wins),
+                    total_pnl=round(sum(sym_pnls), 2),
+                    avg_pnl=round(sum(sym_pnls) / max(1, len(sym_pnls)), 2),
+                    win_rate=round(len(sym_wins) / max(1, len(sigs)) * 100, 1),
+                    avg_rr=round(sum(sym_rrs) / max(1, len(sym_rrs)), 2),
+                )
+            )
         report.by_symbol = sorted(sym_stats, key=lambda x: x.avg_pnl, reverse=True)[:20]
 
         # Monthly breakdown
@@ -189,21 +192,24 @@ class PerformanceEngine:
         for month, sigs in sorted(monthly_map.items()):
             m_wins = [s for s in sigs if s.status in ("TP1", "TP2", "TP3")]
             m_pnls = [float(s.pnl_pct or 0) for s in sigs]
-            monthly.append(MonthStat(
-                month=month,
-                total=len(sigs),
-                wins=len(m_wins),
-                losses=len(sigs) - len(m_wins),
-                win_rate=round(len(m_wins) / max(1, len(sigs)) * 100, 1),
-                net_pnl=round(sum(m_pnls), 2),
-                best_pnl=round(max(m_pnls, default=0.0), 2),
-                worst_pnl=round(min(m_pnls, default=0.0), 2),
-            ))
+            monthly.append(
+                MonthStat(
+                    month=month,
+                    total=len(sigs),
+                    wins=len(m_wins),
+                    losses=len(sigs) - len(m_wins),
+                    win_rate=round(len(m_wins) / max(1, len(sigs)) * 100, 1),
+                    net_pnl=round(sum(m_pnls), 2),
+                    best_pnl=round(max(m_pnls, default=0.0), 2),
+                    worst_pnl=round(min(m_pnls, default=0.0), 2),
+                )
+            )
         report.monthly = monthly
 
         return report
 
     async def compute_as_dict(self, days: int = 30) -> dict:
         from dataclasses import asdict
+
         r = await self.compute(days)
         return asdict(r)
