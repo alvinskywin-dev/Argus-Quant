@@ -31,7 +31,11 @@ docker compose logs -f bot
 ```
 
 Full setup, Telegram bot creation, Binance API setup, scaling and backup
-instructions are in **DEPLOYMENT.md**.
+instructions are in **[docs/reports/deployment/DEPLOYMENT.md](docs/reports/deployment/DEPLOYMENT.md)**.
+
+Engineering docs (git/release workflow, architecture, backtesting) live under
+**[docs/engineering/](docs/engineering/)**; historical sprint/fix/audit reports
+are archived under **[docs/reports/](docs/reports/)**.
 
 ## Public Website / Monetization
 
