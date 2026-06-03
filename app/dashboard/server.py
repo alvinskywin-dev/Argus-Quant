@@ -2352,6 +2352,20 @@ def _market_radar_page_html() -> str:
 .mr-24h-val{font-size:22px;font-weight:900}
 @media(max-width:860px){.mr-grid{grid-template-columns:1fr 1fr}.mr-3col{grid-template-columns:1fr}.mr-24h{grid-template-columns:1fr 1fr}}
 @media(max-width:480px){.mr-grid{grid-template-columns:1fr}.mr-24h{grid-template-columns:1fr}}
+/* Regime Adaptive Gate badge (UI only) */
+.mr-gate{background:linear-gradient(180deg,#101827,#0b1320);border:1px solid #17314b;border-radius:13px;padding:13px 18px;margin-bottom:18px;display:flex;flex-wrap:wrap;align-items:center;gap:8px 22px}
+.mr-gate-hd{display:flex;align-items:center;gap:9px;font-size:10px;font-weight:900;letter-spacing:2px;text-transform:uppercase;color:#7fa0c8}
+.mr-gate-pill{display:inline-flex;align-items:center;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:900;border:1px solid}
+.gate-on-relax{color:#20ff80;border-color:#20ff8055;background:#0a3a1f33}
+.gate-on-strict{color:#ff9f43;border-color:#ff9f4355;background:#3a230a33}
+.gate-off{color:#8aa0b8;border-color:#33445a;background:#11202e}
+.mr-gate-item{font-size:12px;color:#c9d8e8;display:flex;gap:6px;align-items:center}
+.mr-gate-item b{color:#eaf2ff;font-weight:800}
+.mr-gate-arrow{color:#7fa0c8}
+.mr-gate-to-relax{color:#20ff80;font-weight:800}
+.mr-gate-to-strict{color:#ff9f43;font-weight:800}
+.mr-gate-regime{color:#8ab4e6;font-weight:800}
+@media(max-width:600px){.mr-gate{flex-direction:column;align-items:flex-start;gap:7px}}
 """
     body = """
 <div class="mr-title">TODAY'S MARKET RADAR</div>
@@ -2387,6 +2401,15 @@ def _market_radar_page_html() -> str:
       <div id="mr-sentiment-lbl" style="font-weight:900;font-size:14px;color:#ffd84d">—</div>
     </div>
   </div>
+</div>
+
+<!-- Regime Adaptive Gate badge (UI only; hidden until loaded) -->
+<div id="mr-gate" class="mr-gate" style="display:none">
+  <div class="mr-gate-hd">Adaptive Gate <span id="mr-gate-pill" class="mr-gate-pill gate-off">OFF</span></div>
+  <div class="mr-gate-item">Regime: <span id="mr-gate-regime" class="mr-gate-regime">—</span></div>
+  <div class="mr-gate-item">RR: <span id="mr-gate-rr"></span></div>
+  <div class="mr-gate-item">SL Max: <span id="mr-gate-sl"></span></div>
+  <div class="mr-gate-item">Confidence: <span id="mr-gate-conf"></span></div>
 </div>
 
 <div class="mr-3col">
@@ -2485,7 +2508,57 @@ async function loadRadar() {
   } catch(e) { console.error(e); }
 }
 
-document.addEventListener('DOMContentLoaded', () => { loadRadar(); setInterval(loadRadar, 45000); });
+// ── Regime Adaptive Gate badge (UI only — reads the public endpoint) ──
+function gateThresh(base, eff, unit, relaxIfLower) {
+  unit = unit || '';
+  if (base === eff) return '<b>' + base + unit + '</b>';
+  const relaxed = relaxIfLower ? (eff < base) : (eff > base);
+  const cls = relaxed ? 'mr-gate-to-relax' : 'mr-gate-to-strict';
+  return '<b>' + base + unit + '</b> <span class="mr-gate-arrow">→</span> '
+       + '<span class="' + cls + '">' + eff + unit + '</span>';
+}
+
+async function loadAdaptiveGate() {
+  const box = document.getElementById('mr-gate');
+  const pill = document.getElementById('mr-gate-pill');
+  try {
+    const r = await fetch('/api/public/regime-adaptive-thresholds');
+    if (!r.ok) throw new Error('http ' + r.status);
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    const base = d.base || {}, eff = d.effective || {};
+    document.getElementById('mr-gate-regime').textContent = d.market_regime || '—';
+    if (!d.enabled) {
+      pill.textContent = 'OFF'; pill.className = 'mr-gate-pill gate-off';
+      document.getElementById('mr-gate-rr').innerHTML = '<b>' + base.min_rr + '</b>';
+      document.getElementById('mr-gate-sl').innerHTML = '<b>' + base.max_sl_distance_percent + '%</b>';
+      document.getElementById('mr-gate-conf').innerHTML = '<b>' + base.min_confidence + '</b>';
+    } else {
+      let score = Math.sign(base.min_rr - eff.min_rr)
+        + Math.sign(eff.max_sl_distance_percent - base.max_sl_distance_percent)
+        + Math.sign(base.min_confidence - eff.min_confidence);
+      if (score >= 0) { pill.textContent = 'ON · RELAXED'; pill.className = 'mr-gate-pill gate-on-relax'; }
+      else { pill.textContent = 'ON · STRICTER'; pill.className = 'mr-gate-pill gate-on-strict'; }
+      document.getElementById('mr-gate-rr').innerHTML = gateThresh(base.min_rr, eff.min_rr, '', true);
+      document.getElementById('mr-gate-sl').innerHTML = gateThresh(base.max_sl_distance_percent, eff.max_sl_distance_percent, '%', false);
+      document.getElementById('mr-gate-conf').innerHTML = gateThresh(base.min_confidence, eff.min_confidence, '', true);
+    }
+    box.style.display = 'flex';
+  } catch (e) {
+    // Graceful: keep the structure, show "unavailable".
+    if (pill) { pill.textContent = 'unavailable'; pill.className = 'mr-gate-pill gate-off'; }
+    ['mr-gate-rr', 'mr-gate-sl', 'mr-gate-conf'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.innerHTML = '';
+    });
+    const reg = document.getElementById('mr-gate-regime'); if (reg) reg.textContent = '—';
+    box.style.display = 'flex';
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  loadRadar(); setInterval(loadRadar, 45000);
+  loadAdaptiveGate(); setInterval(loadAdaptiveGate, 45000);
+});
 """
     return _page_shell("Market Radar", body, extra_css=css, extra_js=js)
 
