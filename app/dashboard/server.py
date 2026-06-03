@@ -105,6 +105,28 @@ _MTF_TIMEFRAMES = ["15m", "1h", "4h", "1d"]
 _MTF_STRATEGY = "MTF_SMC_STRICT"
 
 
+# Content-Security-Policy. Scoped to what the UI actually loads: Chart.js
+# (cdn.jsdelivr.net), the QR widget (cdnjs.cloudflare.com), and Google Fonts.
+# 'unsafe-inline' is required by the server-rendered inline <script>/<style>
+# blocks and inline handlers; output is escaped at the JS layer (esc()).
+# Even so the policy adds real protection: object-src/base-uri/frame-ancestors/
+# form-action lockdown and a same-origin default for every other resource type.
+CONTENT_SECURITY_POLICY = "; ".join(
+    [
+        "default-src 'self'",
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com",
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+        "font-src 'self' https://fonts.gstatic.com",
+        "img-src 'self' data:",
+        "connect-src 'self'",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "frame-ancestors 'none'",
+        "form-action 'self'",
+    ]
+)
+
+
 class _SecurityHeaders(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
@@ -113,6 +135,7 @@ class _SecurityHeaders(BaseHTTPMiddleware):
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        response.headers["Content-Security-Policy"] = CONTENT_SECURITY_POLICY
         return response
 
 
