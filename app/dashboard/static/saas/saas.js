@@ -299,7 +299,7 @@ function renderShell(){
   <div class="scrim" id="scrim"></div>
   <div class="shell">
     <aside class="side" id="side">
-      <div class="brand"><img src="/static/brand/argus-quant-mark.png" alt="Argus Quant" style="width:40px;height:40px;object-fit:contain;border-radius:9px"/><div><b>ARGUS</b><span>QUANT</span></div></div>
+      <div class="brand"><svg class="mark" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Argus Quant"><circle cx="24" cy="24" r="21" stroke="#34d399" stroke-width="2" opacity=".5"/><path d="M6 24c5.2-8.4 30.8-8.4 36 0-5.2 8.4-30.8 8.4-36 0Z" stroke="#eaf6ff" stroke-width="2.4" stroke-linejoin="round"/><circle cx="24" cy="24" r="6.2" fill="#34d399"/><circle cx="24" cy="24" r="2.5" fill="#06140f"/></svg><div><b>ARGUS</b><span>QUANT</span></div></div>
       <nav class="nav">${nav}
         <div class="grp">Links</div>
         <a href="/" ><span class="ic">🌐</span>Public Site</a>
