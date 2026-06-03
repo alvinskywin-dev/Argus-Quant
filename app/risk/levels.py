@@ -17,6 +17,7 @@ The selected rr_method and rr_value are stored on the signal for diagnostics.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
@@ -156,6 +157,14 @@ def compute_prev_1d_stop(
         "sl_valid": False,
         "sl_reject_reason": None,
     }
+
+    # Reject non-finite inputs before any arithmetic. A NaN low/high/ATR
+    # otherwise slips through every guard below (all NaN comparisons are False)
+    # and yields a NaN stop_loss marked sl_valid=True — a silent hazard. Finite
+    # inputs are unaffected, so the valid-path SL math is unchanged.
+    if not all(math.isfinite(x) for x in (entry_price, prev_1d_low, prev_1d_high, atr_1d)):
+        diag["sl_reject_reason"] = "non_finite_input"
+        return diag
 
     if entry_price <= 0:
         diag["sl_reject_reason"] = "invalid_entry_price"

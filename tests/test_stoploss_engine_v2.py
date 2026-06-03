@@ -7,6 +7,8 @@ extractor (`_extract_prev_1d`). No DB / network required.
 
 from __future__ import annotations
 
+import math
+
 import pandas as pd
 import pytest
 
@@ -129,3 +131,35 @@ def test_extract_prev_1d_insufficient_data():
     df = pd.DataFrame({"open_time": [], "open": [], "high": [], "low": [], "close": []})
     assert _extract_prev_1d(df) is None
     assert _extract_prev_1d(None) is None
+
+
+# ── V2 hardening: non-finite inputs must reject, never yield a NaN "valid" SL ──
+# Regression for a silent bug: a NaN low/high/ATR slipped through every guard
+# (NaN comparisons are all False) and produced stop_loss=NaN with sl_valid=True.
+
+
+@pytest.mark.parametrize(
+    "label,entry,low,high,atr",
+    [
+        ("nan_atr", 100.0, 95.0, 110.0, float("nan")),
+        ("inf_atr", 100.0, 95.0, 110.0, float("inf")),
+        ("nan_low", 100.0, float("nan"), 110.0, 5.0),
+        ("nan_high", 100.0, 95.0, float("nan"), 5.0),
+        ("nan_entry", float("nan"), 95.0, 110.0, 5.0),
+        ("inf_entry", float("inf"), 95.0, 110.0, 5.0),
+    ],
+)
+def test_non_finite_inputs_rejected(label, entry, low, high, atr):
+    d = _stop(label and "LONG", entry, low, high, atr, buffer_mult=0.2)
+    assert d["sl_valid"] is False
+    assert d["sl_reject_reason"] == "non_finite_input"
+    # Critically: never emit a NaN stop_loss flagged as usable.
+    sl = d["stop_loss"]
+    assert sl is None or math.isfinite(sl)
+
+
+def test_finite_inputs_still_valid_after_guard():
+    # The guard must not perturb the normal path.
+    d = _stop("LONG", 100.0, 95.0, 110.0, atr_1d=5.0, buffer_mult=0.2)
+    assert d["sl_valid"] is True
+    assert d["stop_loss"] == pytest.approx(94.0)
