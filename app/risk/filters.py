@@ -85,8 +85,16 @@ rate_limiter = HourlyRateLimiter(settings.max_signals_per_hour)
 
 
 # ---------- quality filters ----------
-def passes_market_filters(snap: FeatureSnapshot, decision: MTFDecision) -> tuple[bool, str | None]:
-    """Returns (ok, reject_reason_or_None)."""
+def passes_market_filters(
+    snap: FeatureSnapshot,
+    decision: MTFDecision,
+    min_confidence: float | None = None,
+) -> tuple[bool, str | None]:
+    """Returns (ok, reject_reason_or_None).
+
+    `min_confidence` overrides the static `settings.min_confidence` floor (used
+    by the Regime Adaptive Gate); the rest of the logic is unchanged."""
+    conf_floor = settings.min_confidence if min_confidence is None else min_confidence
     # low volume
     if snap.vol_spike_pct < -50:
         return False, "low_volume"
@@ -143,10 +151,10 @@ def passes_market_filters(snap: FeatureSnapshot, decision: MTFDecision) -> tuple
             decision.confidence -= 4
 
     # confidence floor
-    if decision.confidence < settings.min_confidence:
+    if decision.confidence < conf_floor:
         logger.debug(
             f"CONF_FLOOR {decision.side} final_conf={decision.confidence:.1f} "
-            f"threshold={settings.min_confidence} gap={settings.min_confidence - decision.confidence:.1f}"
+            f"threshold={conf_floor} gap={conf_floor - decision.confidence:.1f}"
         )
         return False, "below_confidence_threshold"
     return True, None

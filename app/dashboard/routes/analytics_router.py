@@ -641,6 +641,43 @@ async def api_public_market_regime():
         return JSONResponse({"error": str(exc)}, status_code=500)
 
 
+@router.get("/api/public/regime-adaptive-thresholds")
+async def api_public_regime_adaptive_thresholds():
+    """Current base vs regime-adapted RR / SL-distance / confidence thresholds."""
+    try:
+        from app.config import settings
+        from app.market_data.market_regime import get_market_regime
+        from app.risk.regime_adaptive_gate import get_effective_thresholds
+
+        regime = await get_market_regime()
+        thr = get_effective_thresholds(
+            base_min_rr=settings.min_rr,
+            base_max_sl_distance_percent=settings.max_sl_distance_percent,
+            base_min_confidence=settings.min_confidence,
+            market_regime=regime.market_regime if regime else None,
+        )
+        return JSONResponse(
+            {
+                "enabled": thr.enabled,
+                "market_regime": thr.market_regime,
+                "base": {
+                    "min_rr": thr.base_min_rr,
+                    "max_sl_distance_percent": thr.base_max_sl_distance_percent,
+                    "min_confidence": thr.base_min_confidence,
+                },
+                "effective": {
+                    "min_rr": thr.effective_min_rr,
+                    "max_sl_distance_percent": thr.effective_max_sl_distance_percent,
+                    "min_confidence": thr.effective_min_confidence,
+                },
+                "confidence_delta": thr.confidence_delta,
+                "reason": thr.reason,
+            }
+        )
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
 @router.get("/api/public/short-protection")
 async def api_public_short_protection():
     """Short protection filter statistics — rejection counts and top reasons."""

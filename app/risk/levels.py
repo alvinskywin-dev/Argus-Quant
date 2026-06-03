@@ -251,12 +251,22 @@ def build_levels(
     side: str,
     liq_signal=None,  # Optional[LiquiditySignal]
     df_1d=None,  # Optional[pd.DataFrame] — 1D klines for the V2 SL engine
+    min_rr: Optional[float] = None,  # override settings.min_rr (Regime Adaptive Gate)
+    max_sl_distance_percent: Optional[float] = None,  # override settings.max_sl_distance_percent
 ) -> Optional[TradeLevels]:
     """
     Compute trade levels with dynamic RR selection.
 
-    Returns None if no candidate RR meets settings.min_rr.
+    Returns None if no candidate RR meets the effective min_rr. `min_rr` and
+    `max_sl_distance_percent` default to the static settings; the Regime
+    Adaptive Gate passes effective values without changing any other logic.
     """
+    eff_min_rr = settings.min_rr if min_rr is None else min_rr
+    eff_max_sl_pct = (
+        settings.max_sl_distance_percent
+        if max_sl_distance_percent is None
+        else max_sl_distance_percent
+    )
     price = snap.last_close
     atr = max(snap.atr_value, price * 0.001)
 
@@ -278,7 +288,7 @@ def build_levels(
                 prev["atr_1d"],
                 buffer_mult=settings.stoploss_1d_buffer_atr_mult,
                 min_pct=settings.min_sl_distance_percent,
-                max_pct=settings.max_sl_distance_percent,
+                max_pct=eff_max_sl_pct,
                 too_close_action=settings.stoploss_too_close_action,
             )
             res["prev_1d_time"] = prev["time"]
@@ -312,7 +322,7 @@ def build_levels(
             return None
 
         candidates = _candidates_long(price, risk, snap, liq_signal)
-        valid = [(m, rr, tp2) for m, rr, tp2 in candidates if rr >= settings.min_rr]
+        valid = [(m, rr, tp2) for m, rr, tp2 in candidates if rr >= eff_min_rr]
         if not valid:
             return None
 
@@ -333,7 +343,7 @@ def build_levels(
             return None
 
         candidates = _candidates_short(price, risk, snap, liq_signal)
-        valid = [(m, rr, tp2) for m, rr, tp2 in candidates if rr >= settings.min_rr]
+        valid = [(m, rr, tp2) for m, rr, tp2 in candidates if rr >= eff_min_rr]
         if not valid:
             return None
 

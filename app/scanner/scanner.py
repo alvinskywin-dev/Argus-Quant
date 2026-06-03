@@ -39,6 +39,7 @@ from app.market_data.funding import fetch_funding_rate, score_funding_for_side
 from app.market_data.market_regime import ensure_regime_fresh, get_market_regime
 from app.market_data.open_interest import fetch_oi_snapshot
 from app.risk import build_levels, cooldown, passes_market_filters, rate_limiter
+from app.risk.regime_adaptive_gate import get_effective_thresholds
 from app.scanner.short_protection import apply_short_protection
 from app.strategies import FeatureSnapshot, build_snapshot
 from app.utils.helpers import utcnow
@@ -156,13 +157,26 @@ class MarketScanner:
                 )
             )
 
-            ok, reason = passes_market_filters(primary_snap, decision)
+            # ── Regime Adaptive Gate: compute effective thresholds (flag-gated;
+            # returns the base values unchanged when disabled). Used by the
+            # confidence, SL-distance and RR checks below — no other logic changes.
+            _gate_regime = await get_market_regime()
+            thr = get_effective_thresholds(
+                base_min_rr=settings.min_rr,
+                base_max_sl_distance_percent=settings.max_sl_distance_percent,
+                base_min_confidence=settings.min_confidence,
+                market_regime=_gate_regime.market_regime if _gate_regime else None,
+            )
+
+            ok, reason = passes_market_filters(
+                primary_snap, decision, min_confidence=thr.effective_min_confidence
+            )
             if not ok:
                 if settings.log_rejection_detail:
                     logger.info(
                         f"⛔ {symbol} {decision.side} — Confidence failed: "
-                        f"conf={decision.confidence:.1f}% (need>={settings.min_confidence}) "
-                        f"filter={reason}"
+                        f"conf={decision.confidence:.1f}% "
+                        f"(need>={thr.effective_min_confidence}) filter={reason}"
                     )
                 return {
                     "_DIAG_": True,
@@ -194,20 +208,28 @@ class MarketScanner:
                     logger.debug(f"liquidity engine failed for {symbol}: {exc}")
 
             # ── Sprint 16C: Dynamic RR ────────────────────────────────────
-            levels = build_levels(primary_snap, decision.side, liq_signal, df_1d=dfs.get("1d"))
+            levels = build_levels(
+                primary_snap,
+                decision.side,
+                liq_signal,
+                df_1d=dfs.get("1d"),
+                min_rr=thr.effective_min_rr,
+                max_sl_distance_percent=thr.effective_max_sl_distance_percent,
+            )
             if levels is None:
                 if settings.log_rejection_detail:
                     logger.info(
-                        f"⛔ {symbol} {decision.side} — RR failed: "
-                        f"build_levels returned None (min_rr={settings.min_rr})"
+                        f"⛔ {symbol} {decision.side} — RR failed: build_levels returned None "
+                        f"(effective_min_rr={thr.effective_min_rr} "
+                        f"effective_max_sl={thr.effective_max_sl_distance_percent})"
                     )
                 return {"_DIAG_": True, "stage": "rr", "side": decision.side}
 
-            if levels.risk_reward < settings.min_rr:
+            if levels.risk_reward < thr.effective_min_rr:
                 if settings.log_rejection_detail:
                     logger.info(
                         f"⛔ {symbol} {decision.side} — RR failed: "
-                        f"rr={levels.risk_reward:.2f} < {settings.min_rr}"
+                        f"rr={levels.risk_reward:.2f} < {thr.effective_min_rr}"
                     )
                 return {
                     "_DIAG_": True,
@@ -373,11 +395,12 @@ class MarketScanner:
                     )
 
             # Secondary confidence gate: regime may have pushed us below threshold
-            if adjusted_confidence < settings.min_confidence:
+            if adjusted_confidence < thr.effective_min_confidence:
                 if settings.log_rejection_detail:
                     logger.info(
                         f"⛔ {symbol} {decision.side} — Regime confidence gate: "
-                        f"conf={adjusted_confidence:.1f}% after regime_delta={regime_delta:+d}"
+                        f"conf={adjusted_confidence:.1f}% after regime_delta={regime_delta:+d} "
+                        f"(need>={thr.effective_min_confidence})"
                     )
                 return {
                     "_DIAG_": True,
@@ -439,6 +462,8 @@ class MarketScanner:
                     "short_rejection_reason": short_protection.rejection_reason,
                     # Stop-Loss Engine V2 — SL placement diagnostics
                     **levels.sl_diag,
+                    # Regime Adaptive Gate — base vs effective thresholds
+                    **thr.to_diagnostics(),
                 }
             )
 
@@ -490,6 +515,27 @@ class MarketScanner:
             await ensure_regime_fresh()
         except Exception as exc:
             logger.warning(f"market regime calculation failed: {exc}")
+
+        # Regime Adaptive Gate — log the effective thresholds once per cycle.
+        if settings.regime_adaptive_gate_enabled:
+            try:
+                _reg = await get_market_regime()
+                _thr = get_effective_thresholds(
+                    base_min_rr=settings.min_rr,
+                    base_max_sl_distance_percent=settings.max_sl_distance_percent,
+                    base_min_confidence=settings.min_confidence,
+                    market_regime=_reg.market_regime if _reg else None,
+                )
+                logger.info(
+                    "REGIME ADAPTIVE GATE: "
+                    f"market_regime={_thr.market_regime} | "
+                    f"min_rr {settings.min_rr} -> {_thr.effective_min_rr} | "
+                    f"max_sl_distance {settings.max_sl_distance_percent} -> "
+                    f"{_thr.effective_max_sl_distance_percent} | "
+                    f"min_confidence {settings.min_confidence} -> {_thr.effective_min_confidence}"
+                )
+            except Exception as exc:  # noqa: BLE001 — logging must never break a scan
+                logger.debug(f"regime adaptive gate log skipped: {exc}")
 
         tasks = [self._analyze_symbol(s) for s in symbols]
         emitted = 0

@@ -194,6 +194,38 @@ class Settings(BaseSettings):
     stoploss_1d_buffer_atr_mult: float = 0.15  # buffer = mult * ATR(1D)
     min_sl_distance_percent: float = 2.0  # widen (or reject) if SL closer than this
     max_sl_distance_percent: float = 10.0  # reject signal if SL farther than this
+
+    # ── Regime Adaptive Gate V1 (feature-flagged; default OFF) ──
+    # Adapts the RR / SL-distance / confidence thresholds to the market regime so
+    # that range/low-volatility markets (where the 1D SL sits far from a 15m
+    # entry) are not blanket-rejected. NEVER forces emission — only relaxes or
+    # tightens the gate within hard clamps. Per-regime values below; NORMAL is
+    # the fallback for unknown regimes.
+    regime_adaptive_gate_enabled: bool = False
+
+    normal_min_rr: float = 1.5
+    normal_max_sl_distance_percent: float = 10.0
+    normal_min_confidence_delta: int = 0
+
+    low_vol_min_rr: float = 1.0
+    low_vol_max_sl_distance_percent: float = 15.0
+    low_vol_min_confidence_delta: int = -3
+
+    high_vol_min_rr: float = 1.8
+    high_vol_max_sl_distance_percent: float = 8.0
+    high_vol_min_confidence_delta: int = 3
+
+    bull_min_rr: float = 1.3
+    bull_max_sl_distance_percent: float = 12.0
+    bull_min_confidence_delta: int = -2
+
+    bear_min_rr: float = 1.3
+    bear_max_sl_distance_percent: float = 12.0
+    bear_min_confidence_delta: int = -2
+
+    sideways_min_rr: float = 1.6
+    sideways_max_sl_distance_percent: float = 8.0
+    sideways_min_confidence_delta: int = 3
     # When the 1D stop is closer than the min floor: "widen" to the floor, or "reject".
     stoploss_too_close_action: str = "widen"  # widen | reject
 
