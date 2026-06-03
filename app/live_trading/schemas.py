@@ -43,6 +43,32 @@ class EmergencyCloseIn(BaseModel):
     confirm: str = Field(min_length=1, max_length=64)
 
 
+# ── Live Pilot ─────────────────────────────────────────────────────
+
+
+class PilotPreflightIn(BaseModel):
+    symbol: str = Field(min_length=2, max_length=32)
+    side: str = Field(default="LONG", pattern="^(LONG|SHORT)$")
+    notional_usdt: float = Field(gt=0)
+    leverage: int = Field(default=2, ge=1, le=125)
+
+
+class PilotOpenIn(BaseModel):
+    symbol: str = Field(min_length=2, max_length=32)
+    side: str = Field(pattern="^(LONG|SHORT)$")
+    notional_usdt: float = Field(gt=0)
+    leverage: int = Field(default=2, ge=1, le=125)
+    stop_loss: float = Field(gt=0)
+    take_profit: float = Field(gt=0)
+    # Must equal the exact phrase "I UNDERSTAND THIS PLACES A REAL ORDER".
+    confirm: str = Field(min_length=1, max_length=80)
+
+
+class PilotEmergencyCloseIn(BaseModel):
+    position_id: int
+    reason: str = Field(min_length=1, max_length=256)
+
+
 class GateStatusOut(BaseModel):
     live_trading_enabled: bool
     mock_exchange_mode: bool

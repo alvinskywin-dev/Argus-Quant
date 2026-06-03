@@ -145,6 +145,17 @@ class Settings(BaseSettings):
     # aggregation + user moderation; never exposes decrypted credentials. Default off.
     admin_dashboard_enabled: bool = False
 
+    # ── Live Pilot — a tiny, gated, Binance-only live run (default OFF) ──
+    # Never auto-executes: every real order needs the manual confirmation phrase
+    # AND the live gate AND all safety checks. One designated user, BTC/ETH only.
+    live_pilot_enabled: bool = False
+    live_pilot_user_id: int = 0
+    live_pilot_max_notional: float = 50.0
+    live_pilot_max_positions: int = 2
+    live_pilot_max_leverage: int = 3
+    live_pilot_allowed_symbols: str = "BTCUSDT,ETHUSDT"
+    live_pilot_require_confirmation: bool = True
+
     # --- Sprint 21 — Live Safety Foundation feature flags (all default OFF) ---
     # These engines are read-only / non-destructive by design; the flags only
     # gate whether their APIs + startup hooks are active. None of them place,

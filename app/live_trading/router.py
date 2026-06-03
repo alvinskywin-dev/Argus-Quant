@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 from app.auth.deps import get_current_user
 from app.database.models import AuthUser, LiveOrder, LivePosition, LiveTrade
 from app.database.session import get_session
-from app.live_trading import service
+from app.live_trading import pilot, service
 from app.live_trading.schemas import (
     CloseLiveIn,
     EmergencyCloseIn,
@@ -24,6 +24,9 @@ from app.live_trading.schemas import (
     LivePositionOut,
     LiveTradeOut,
     OpenLiveIn,
+    PilotEmergencyCloseIn,
+    PilotOpenIn,
+    PilotPreflightIn,
     SetLeverageIn,
 )
 
@@ -132,6 +135,74 @@ async def emergency_close(
                 position_id=position_id,
                 reason=body.reason,
                 actor_user_id=user.id,
+                is_admin=(getattr(user, "role", "") == "ADMIN"),
+            )
+    except service.LiveTradingError as exc:
+        return _err(exc)
+
+
+# ── Live Pilot (gated; never auto-executes) ────────────────────────
+
+
+@router.get("/pilot/config", response_model=dict)
+async def pilot_config(user: AuthUser = Depends(get_current_user)):
+    return pilot.pilot_config()
+
+
+@router.post("/pilot/preflight", response_model=dict)
+async def pilot_preflight(body: PilotPreflightIn, user: AuthUser = Depends(get_current_user)):
+    if not pilot.pilot_enabled():
+        return JSONResponse(status_code=404, content={"detail": "Live pilot is disabled."})
+    try:
+        async with get_session() as db:
+            pf = await pilot.pilot_preflight(
+                db,
+                user_id=user.id,
+                symbol=body.symbol,
+                notional_usdt=body.notional_usdt,
+                leverage=body.leverage,
+                has_stop_loss=True,
+                has_take_profit=True,
+            )
+            return pf.to_dict()
+    except service.LiveTradingError as exc:
+        return _err(exc)
+
+
+@router.post("/pilot/open", response_model=dict, status_code=201)
+async def pilot_open(body: PilotOpenIn, user: AuthUser = Depends(get_current_user)):
+    if not pilot.pilot_enabled():
+        return JSONResponse(status_code=404, content={"detail": "Live pilot is disabled."})
+    try:
+        async with get_session() as db:
+            return await pilot.pilot_open(
+                db,
+                user_id=user.id,
+                symbol=body.symbol,
+                side=body.side,
+                notional_usdt=body.notional_usdt,
+                leverage=body.leverage,
+                stop_loss=body.stop_loss,
+                take_profit=body.take_profit,
+                confirm=body.confirm,
+            )
+    except service.LiveTradingError as exc:
+        return _err(exc)
+
+
+@router.post("/pilot/emergency-close", response_model=dict)
+async def pilot_emergency_close(
+    body: PilotEmergencyCloseIn, user: AuthUser = Depends(get_current_user)
+):
+    if not pilot.pilot_enabled():
+        return JSONResponse(status_code=404, content={"detail": "Live pilot is disabled."})
+    try:
+        async with get_session() as db:
+            return await pilot.pilot_emergency_close(
+                db,
+                position_id=body.position_id,
+                user_id=user.id,
+                reason=body.reason,
                 is_admin=(getattr(user, "role", "") == "ADMIN"),
             )
     except service.LiveTradingError as exc:
