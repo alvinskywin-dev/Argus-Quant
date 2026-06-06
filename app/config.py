@@ -48,6 +48,31 @@ class Settings(BaseSettings):
     telegram_signal_chat_id: str = ""
     telegram_admin_ids: str = ""
 
+    # --- Telegram Community Consolidation (flagship public group) ---
+    # During the engine-optimization / live-validation phase all signal flows are
+    # merged into the single public flagship community (https://t.me/ArgusQuant).
+    # When TELEGRAM_SINGLE_PUBLIC_GROUP is true, every signal routes to
+    # PUBLIC_TELEGRAM_CHAT_ID and tier-specific (VIP/Elite/Premium) sends are off.
+    # Multi-tier segmentation returns later via the *_routing_enabled flags.
+    telegram_community_mode: bool = True
+    telegram_single_public_group: bool = True
+    public_telegram_chat_id: str = ""
+
+    # Per-tier disable switches (default ON during consolidation). DEPRECATED env
+    # vars VIP_TELEGRAM_CHAT_ID / ELITE_TELEGRAM_CHAT_ID / PREMIUM_TELEGRAM_CHAT_ID
+    # are NOT deleted — they remain readable for backward compatibility but are
+    # ignored while these *_disabled flags are true.
+    vip_telegram_disabled: bool = True
+    elite_telegram_disabled: bool = True
+    premium_telegram_disabled: bool = True
+
+    # Future-ready tier routing (default OFF; do not expose now). Re-enabling any
+    # of these AND setting telegram_single_public_group=false restores the legacy
+    # multi-tier broadcast behaviour without code changes.
+    vip_routing_enabled: bool = False
+    elite_routing_enabled: bool = False
+    premium_routing_enabled: bool = False
+
     # --- Database ---
     postgres_user: str = "signals"
     postgres_password: str = "signals"
@@ -92,7 +117,8 @@ class Settings(BaseSettings):
     secret_key: str = ""
 
     # --- Community ---
-    telegram_channel_url: str = ""
+    # Flagship public community — used by the dashboard CTA / nav / hero buttons.
+    telegram_channel_url: str = "https://t.me/ArgusQuant"
     discord_url: str = ""
 
     # --- Donations ---
@@ -328,6 +354,9 @@ class Settings(BaseSettings):
     high_priority_confidence: float = 97.0
     high_priority_rr: float = 3.5
     public_chat_id: str = ""
+    # DEPRECATED (Community Consolidation): tier-specific chats are not used while
+    # telegram_single_public_group is true. Kept for backward compatibility and
+    # future multi-tier reactivation — do not delete.
     vip_chat_id: str = ""
     elite_vip_chat_id: str = ""
 

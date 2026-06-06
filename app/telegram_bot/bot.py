@@ -37,6 +37,7 @@ from app.database import repo
 from app.market_data import universe
 from app.risk import rate_limiter
 from app.telegram_bot.formatter import (
+    format_community_signal,
     format_market_overview,
     format_signal,
 )
@@ -100,18 +101,60 @@ def _signal_tier(sig: dict) -> str:
     return "NONE"
 
 
+def _community_consolidation_active() -> bool:
+    """True while all flows are merged into the single flagship public group."""
+    return bool(settings.telegram_single_public_group or settings.telegram_community_mode)
+
+
+def _public_chat_target() -> str:
+    """
+    The flagship public group chat id, with backward-compatible fallbacks:
+    PUBLIC_TELEGRAM_CHAT_ID → legacy PUBLIC_CHAT_ID → TELEGRAM_SIGNAL_CHAT_ID.
+    """
+    return (
+        (settings.public_telegram_chat_id or "").strip()
+        or _env_str("PUBLIC_TELEGRAM_CHAT_ID")
+        or (settings.public_chat_id or "").strip()
+        or _env_str("PUBLIC_CHAT_ID")
+        or (settings.telegram_signal_chat_id or "").strip()
+    )
+
+
 def _route_signal_chats(sig: dict) -> list[str]:
     """
-    Return list of chat IDs for this signal's tier.
-    Falls back to TELEGRAM_SIGNAL_CHAT_ID so signals always land somewhere
-    even when tier-specific chats are not configured.
+    Return the list of chat IDs this signal should broadcast to.
+
+    Community Consolidation (default): when telegram_single_public_group /
+    telegram_community_mode is on, EVERY signal routes to the single flagship
+    public group (PUBLIC_TELEGRAM_CHAT_ID). VIP / Elite / Premium tier-specific
+    sends and tier filtering are disabled — no tier ever gets its own channel.
+
+    Legacy multi-tier routing is preserved below and only runs when consolidation
+    is off; even then a tier is skipped unless its routing flag is enabled and its
+    *_disabled switch is off. Falls back to TELEGRAM_SIGNAL_CHAT_ID so signals
+    always land somewhere.
     """
+    fallback = (settings.telegram_signal_chat_id or "").strip()
+
+    # ── Single flagship public community ──────────────────────────────
+    if _community_consolidation_active():
+        public = _public_chat_target()
+        if not public:
+            logger.warning(
+                f"no public broadcast target for {sig.get('symbol')} — set "
+                "PUBLIC_TELEGRAM_CHAT_ID or TELEGRAM_SIGNAL_CHAT_ID"
+            )
+            return []
+        return [c.strip() for c in public.split(",") if c.strip()]
+
+    # ── Legacy multi-tier routing (future-ready; off by default) ──────
     tier = _signal_tier(sig)
 
-    elite_chat = _env_str("ELITE_VIP_CHAT_ID")
-    vip_chat = _env_str("VIP_CHAT_ID")
+    elite_on = settings.elite_routing_enabled and not settings.elite_telegram_disabled
+    vip_on = settings.vip_routing_enabled and not settings.vip_telegram_disabled
+    elite_chat = _env_str("ELITE_VIP_CHAT_ID") if elite_on else ""
+    vip_chat = _env_str("VIP_CHAT_ID") if vip_on else ""
     public_chat = _env_str("PUBLIC_CHAT_ID")
-    fallback = (settings.telegram_signal_chat_id or "").strip()
 
     def _pick(*candidates: str) -> str:
         for c in candidates:
@@ -578,28 +621,34 @@ class TelegramBot:
             )
             return []
 
-        tier = _signal_tier(sig)
-        tier_title = {
-            "HIGH_PRIORITY": "🚨 <b>HIGH PRIORITY ELITE SIGNAL</b>",
-            "ELITE": "🔥 <b>ELITE SIGNAL</b>",
-            "VIP": "💎 <b>VIP SIGNAL</b>",
-            "PUBLIC": "⚡ <b>ARGUS QUANT</b>",
-        }.get(tier, "⚡ <b>ARGUS QUANT</b>")
+        # Community Consolidation: every public signal uses the premium +
+        # educational community format (Phase 2). Legacy tier captions are kept
+        # for when multi-tier routing is reactivated.
+        if _community_consolidation_active():
+            caption = format_community_signal(sig)
+        else:
+            tier = _signal_tier(sig)
+            tier_title = {
+                "HIGH_PRIORITY": "🚨 <b>HIGH PRIORITY ELITE SIGNAL</b>",
+                "ELITE": "🔥 <b>ELITE SIGNAL</b>",
+                "VIP": "💎 <b>VIP SIGNAL</b>",
+                "PUBLIC": "⚡ <b>ARGUS QUANT</b>",
+            }.get(tier, "⚡ <b>ARGUS QUANT</b>")
 
-        caption = (
-            f"{tier_title}\n\n"
-            f"{'🟢' if sig['side']=='LONG' else '🔴'} "
-            f"<code>{sig['symbol']}</code> "
-            f"<b>{sig['side']}</b>\n\n"
-            f"ENTRY • "
-            f"<code>{float(sig['entry_low']):.5f} → {float(sig['entry_high']):.5f}</code>\n"
-            f"TARGET • "
-            f"<code>{float(sig['tp1']):.5f} • {float(sig['tp2']):.5f} • {float(sig['tp3']):.5f}</code>\n"
-            f"STOP • <code>{float(sig['stop_loss']):.5f}</code>\n\n"
-            f"⚡ RR • <code>1 : {sig['risk_reward']}</code>\n"
-            f"📊 CONFIDENCE • <code>{sig['confidence']}%</code>\n"
-            f"🚀 LEVERAGE • <code>{LEVERAGE_MAP.get(sig.get('timeframe', '1h'), '3x')}</code>"
-        )
+            caption = (
+                f"{tier_title}\n\n"
+                f"{'🟢' if sig['side']=='LONG' else '🔴'} "
+                f"<code>{sig['symbol']}</code> "
+                f"<b>{sig['side']}</b>\n\n"
+                f"ENTRY • "
+                f"<code>{float(sig['entry_low']):.5f} → {float(sig['entry_high']):.5f}</code>\n"
+                f"TARGET • "
+                f"<code>{float(sig['tp1']):.5f} • {float(sig['tp2']):.5f} • {float(sig['tp3']):.5f}</code>\n"
+                f"STOP • <code>{float(sig['stop_loss']):.5f}</code>\n\n"
+                f"⚡ RR • <code>1 : {sig['risk_reward']}</code>\n"
+                f"📊 CONFIDENCE • <code>{sig['confidence']}%</code>\n"
+                f"🚀 LEVERAGE • <code>{LEVERAGE_MAP.get(sig.get('timeframe', '1h'), '3x')}</code>"
+            )
 
         # Try image card; fall back to text-only on any failure
         card_path: Optional[str] = None
@@ -628,7 +677,11 @@ class TelegramBot:
                     msg = await _tg_send_with_retry(_send_photo)
                 else:
                     # text-only fallback (also used when image fails mid-send)
-                    text_body = format_signal(sig)
+                    text_body = (
+                        format_community_signal(sig)
+                        if _community_consolidation_active()
+                        else format_signal(sig)
+                    )
 
                     async def _send_text(cid=chat_id, tb=text_body):
                         return await self.app.bot.send_message(
@@ -657,7 +710,11 @@ class TelegramBot:
                 # Attempt text-only recovery if image send failed
                 if card_path:
                     try:
-                        text_body = format_signal(sig)
+                        text_body = (
+                            format_community_signal(sig)
+                            if _community_consolidation_active()
+                            else format_signal(sig)
+                        )
 
                         async def _fallback(cid=chat_id, tb=text_body):
                             return await self.app.bot.send_message(

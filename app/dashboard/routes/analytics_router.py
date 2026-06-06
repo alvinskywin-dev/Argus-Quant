@@ -688,6 +688,76 @@ async def api_public_regime_adaptive_thresholds():
         return JSONResponse({"error": str(exc)}, status_code=500)
 
 
+@router.get("/api/public/community-analytics")
+async def api_public_community_analytics():
+    """
+    Community Consolidation analytics (Phase 7).
+
+    Surfaces what the single flagship public group should publish: signal
+    frequency, market-regime distribution, and headline public performance.
+    Telegram growth / engagement / click-through require the Telegram Analytics
+    API and are returned as null placeholders until that source is wired.
+    """
+    try:
+        from app.config import settings
+
+        since = datetime.now(timezone.utc) - timedelta(days=7)
+        async with SessionLocal() as session:
+            rows = list(
+                (
+                    await session.execute(
+                        select(Signal).where(
+                            Signal.created_at >= since,
+                            Signal.strategy == _MTF_STRATEGY,
+                            Signal.timeframe.in_(_MTF_TIMEFRAMES),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
+        WIN_ST = ("TP1", "TP2", "TP3")
+        closed = [s for s in rows if s.status in (*WIN_ST, "SL")]
+        wins = [s for s in closed if s.status in WIN_ST]
+
+        # signal frequency — per UTC day over the window
+        freq: dict[str, int] = {}
+        regime_dist: dict[str, int] = {}
+        for s in rows:
+            if s.created_at:
+                freq[s.created_at.strftime("%Y-%m-%d")] = (
+                    freq.get(s.created_at.strftime("%Y-%m-%d"), 0) + 1
+                )
+            rname = (s.market_regime or "UNKNOWN").upper()
+            regime_dist[rname] = regime_dist.get(rname, 0) + 1
+
+        n = max(1, len(closed))
+        return JSONResponse(
+            {
+                "community_url": settings.telegram_channel_url,
+                "community_mode": settings.telegram_community_mode,
+                "single_public_group": settings.telegram_single_public_group,
+                "window_days": 7,
+                "signal_count": len(rows),
+                "signal_frequency_per_day": dict(sorted(freq.items())),
+                "avg_signals_per_day": round(len(rows) / 7.0, 2),
+                "market_regime_distribution": regime_dist,
+                "public_performance": {
+                    "closed_signals": len(closed),
+                    "wins": len(wins),
+                    "win_rate": round(len(wins) / n * 100, 1),
+                },
+                # Telegram-side metrics — require the Telegram Analytics API.
+                "telegram_growth": None,
+                "signal_engagement": None,
+                "click_through_rate": None,
+            }
+        )
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
 @router.get("/api/public/short-protection")
 async def api_public_short_protection():
     """Short protection filter statistics — rejection counts and top reasons."""

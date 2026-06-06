@@ -7,6 +7,8 @@ premium commercial signal product.
 
 from __future__ import annotations
 
+import json
+
 from app.utils.helpers import fmt_pct, fmt_price
 
 _SIDE_EMOJI = {"LONG": "🚀", "SHORT": "🔻"}
@@ -73,6 +75,83 @@ def format_signal(sig: dict) -> str:
     )
     if funding_line:
         body += f"\n\n{funding_line}"
+    return body
+
+
+_STOPLOSS_MODE_LABELS = {
+    "BALANCED": "BALANCED ATR+STRUCTURE",
+    "ATR_STRUCTURE_BALANCED": "BALANCED ATR+STRUCTURE",
+    "PREV_1D_SUPPORT": "1D SUPPORT/RESISTANCE",
+    "LEGACY_ATR": "ATR",
+}
+
+
+def _signal_diag(sig: dict) -> dict:
+    """Parse the JSON diagnostics blob carried on a signal (best-effort)."""
+    diag = sig.get("diagnostics")
+    if isinstance(diag, dict):
+        return diag
+    if isinstance(diag, str) and diag:
+        try:
+            return json.loads(diag)
+        except Exception:
+            return {}
+    return {}
+
+
+def _stoploss_mode_label(sig: dict) -> str:
+    diag = _signal_diag(sig)
+    mode = (diag.get("stoploss_engine_mode") or diag.get("stoploss_method") or "").upper()
+    return _STOPLOSS_MODE_LABELS.get(mode, mode or "ADAPTIVE")
+
+
+def format_community_signal(sig: dict) -> str:
+    """
+    Premium + educational signal card for the single flagship public community.
+
+    Includes (Phase 2): signal, confidence, RR, market regime, explainability,
+    stop-loss mode, partial-TP / break-even status, and a risk warning.
+    """
+    side = sig["side"]
+    side_icon = "🟢" if side == "LONG" else "🔴"
+
+    reasons = sig.get("reasons", [])
+    if isinstance(reasons, str):
+        reasons = [r.strip() for r in reasons.split("|") if r.strip()]
+    why = "\n".join(f"• {r}" for r in reasons[:4]) or "• Multi-timeframe SMC setup confirmed"
+
+    regime = sig.get("market_regime") or _signal_diag(sig).get("market_regime") or "—"
+    sl_mode = _stoploss_mode_label(sig)
+
+    # Partial-TP / break-even status for a freshly published signal.
+    be_status = sig.get("_breakeven_status") or "Move SL to break-even after TP1"
+
+    targets = [
+        f"TP1: <code>{fmt_price(sig['tp1'])}</code>",
+        f"TP2: <code>{fmt_price(sig['tp2'])}</code>",
+    ]
+    if sig.get("tp3"):
+        targets.append(f"TP3: <code>{fmt_price(sig['tp3'])}</code>")
+
+    body = (
+        "🧠 <b>ARGUS QUANT SIGNAL</b>\n\n"
+        f"{side_icon} <b>{side}</b> — <code>{sig['symbol']}</code>\n"
+        f"Confidence: <b>{sig['confidence']}%</b>\n"
+        f"RR: <b>1 : {sig['risk_reward']}</b>\n"
+        f"Market Regime: <b>{regime}</b>\n"
+        f"StopLoss: <b>{sl_mode}</b>\n\n"
+        "📊 <b>Why this trade?</b>\n"
+        f"{why}\n\n"
+        f"🎯 <b>Entry</b>\n"
+        f"<code>{fmt_price(sig['entry_low'])} → {fmt_price(sig['entry_high'])}</code>\n\n"
+        f"🛑 <b>Stop Loss</b>\n"
+        f"<code>{fmt_price(sig['stop_loss'])}</code>\n\n"
+        f"💰 <b>Targets</b>\n"
+        f"{chr(10).join(targets)}\n\n"
+        f"🔁 <b>Management</b> • {be_status}\n\n"
+        "⚠️ <b>Risk:</b> Use proper risk management. Never overleverage. "
+        "Signals are educational, not financial advice."
+    )
     return body
 
 
