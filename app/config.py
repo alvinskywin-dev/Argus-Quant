@@ -205,6 +205,35 @@ class Settings(BaseSettings):
     min_sl_distance_percent: float = 2.0  # widen (or reject) if SL closer than this
     max_sl_distance_percent: float = 10.0  # reject signal if SL farther than this
 
+    # --- Stop-Loss Engine V3 (Balanced ATR/structure mode) ---
+    # STOPLOSS_ENGINE_MODE selects the active stop engine and, when set, takes
+    # priority over STOPLOSS_ENGINE_V2_ENABLED. The mandatory previous-1D stop
+    # (PREV_1D_SUPPORT) placed the stop far from a 15m entry, inflating SL
+    # distance and failing the RR filter on nearly every setup ("signal
+    # starvation"). BALANCED derives the stop from the 15m ATR and the recent
+    # 15m swing instead, keeping distance inside sane min/max bounds. The legacy
+    # 15m ATR/structure stop and the prev-1D stop both remain available by mode.
+    #   LEGACY_ATR      — legacy 15m swing/ATR stop (pre-V2 behaviour)
+    #   PREV_1D_SUPPORT — Stop-Loss Engine V2 (previous-1D support/resistance)
+    #   BALANCED        — V3 balanced ATR + structure stop (default)
+    stoploss_engine_mode: str = "BALANCED"
+
+    balanced_stop_atr_mult: float = 2.2  # ATR stop = entry ∓ ATR(15m) * mult
+    balanced_stop_structure_buffer_atr_mult: float = 0.25  # swing ∓ ATR(15m) * mult
+    balanced_stop_min_distance_percent: float = 1.8  # widen if SL closer than this
+    balanced_stop_max_distance_percent: float = 8.0  # fallback/reject if farther
+    # Only consult the prev-1D support/resistance as a last-resort candidate when
+    # explicitly allowed; off by default so BALANCED never reintroduces the wide
+    # 1D stop that caused starvation.
+    balanced_stop_allow_1d_fallback: bool = False
+
+    # Regime-adaptive max SL distance for BALANCED mode. Used only when the
+    # Regime Adaptive Gate is enabled; otherwise BALANCED_STOP_MAX_DISTANCE_PERCENT
+    # applies. Low-vol markets tolerate a wider stop; high-vol / sideways tighten.
+    low_vol_balanced_max_distance_percent: float = 12.0
+    high_vol_balanced_max_distance_percent: float = 6.0
+    sideways_balanced_max_distance_percent: float = 6.0
+
     # ── Regime Adaptive Gate V1 (feature-flagged; default OFF) ──
     # Adapts the RR / SL-distance / confidence thresholds to the market regime so
     # that range/low-volatility markets (where the 1D SL sits far from a 15m

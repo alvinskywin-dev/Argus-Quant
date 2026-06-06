@@ -648,14 +648,20 @@ async def api_public_regime_adaptive_thresholds():
         from app.config import settings
         from app.market_data.market_regime import get_market_regime
         from app.risk.regime_adaptive_gate import get_effective_thresholds
+        from app.risk.stoploss_modes import (
+            balanced_max_distance_percent,
+            resolve_stoploss_mode,
+        )
 
         regime = await get_market_regime()
+        regime_name = regime.market_regime if regime else None
         thr = get_effective_thresholds(
             base_min_rr=settings.min_rr,
             base_max_sl_distance_percent=settings.max_sl_distance_percent,
             base_min_confidence=settings.min_confidence,
-            market_regime=regime.market_regime if regime else None,
+            market_regime=regime_name,
         )
+        sl_mode = resolve_stoploss_mode()
         return JSONResponse(
             {
                 "enabled": thr.enabled,
@@ -672,6 +678,10 @@ async def api_public_regime_adaptive_thresholds():
                 },
                 "confidence_delta": thr.confidence_delta,
                 "reason": thr.reason,
+                # Stop-Loss Engine V3 (Balanced mode) surface.
+                "stoploss_engine_mode": sl_mode,
+                "balanced_max_distance": balanced_max_distance_percent(regime_name),
+                "balanced_atr_mult": settings.balanced_stop_atr_mult,
             }
         )
     except Exception as exc:

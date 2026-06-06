@@ -215,6 +215,7 @@ class MarketScanner:
                 df_1d=dfs.get("1d"),
                 min_rr=thr.effective_min_rr,
                 max_sl_distance_percent=thr.effective_max_sl_distance_percent,
+                market_regime=_gate_regime.market_regime if _gate_regime else None,
             )
             if levels is None:
                 if settings.log_rejection_detail:

@@ -22,6 +22,13 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
 from app.config import settings
+from app.risk.stoploss_modes import (
+    MODE_BALANCED,
+    MODE_PREV_1D_SUPPORT,
+    balanced_max_distance_percent,
+    compute_balanced_stop,
+    resolve_stoploss_mode,
+)
 from app.strategies.features import FeatureSnapshot
 from app.utils.logger import logger
 
@@ -253,6 +260,7 @@ def build_levels(
     df_1d=None,  # Optional[pd.DataFrame] — 1D klines for the V2 SL engine
     min_rr: Optional[float] = None,  # override settings.min_rr (Regime Adaptive Gate)
     max_sl_distance_percent: Optional[float] = None,  # override settings.max_sl_distance_percent
+    market_regime: Optional[str] = None,  # regime label (BALANCED max-distance adapt)
 ) -> Optional[TradeLevels]:
     """
     Compute trade levels with dynamic RR selection.
@@ -274,10 +282,64 @@ def build_levels(
     entry_low = price - entry_pad
     entry_high = price + entry_pad
 
-    # ── Stop-Loss Engine V2: previous-1D support/resistance stop ──────
-    sl_diag: dict = {}
-    v2_sl: Optional[float] = None
-    if settings.stoploss_engine_v2_enabled and settings.stoploss_method == "PREV_1D_SUPPORT":
+    # ── Stop-Loss Engine: mode dispatch (V3) ──────────────────────────
+    # STOPLOSS_ENGINE_MODE selects the active engine (priority over the legacy
+    # V2 flag). `mode_sl` is the explicit stop from the chosen engine; when it
+    # stays None the side branch falls back to the LEGACY_ATR 15m stop. The
+    # engine only sizes the stop — it never forces a signal.
+    sl_engine_mode = resolve_stoploss_mode()
+    sl_diag: dict = {"stoploss_engine_mode": sl_engine_mode}
+    mode_sl: Optional[float] = None
+
+    if sl_engine_mode == MODE_BALANCED:
+        bal_max_pct = balanced_max_distance_percent(market_regime)
+        res = compute_balanced_stop(
+            side,
+            price,
+            atr,
+            snap.recent_low,
+            snap.recent_high,
+            atr_mult=settings.balanced_stop_atr_mult,
+            structure_buffer_atr_mult=settings.balanced_stop_structure_buffer_atr_mult,
+            min_pct=settings.balanced_stop_min_distance_percent,
+            max_pct=bal_max_pct,
+        )
+        sl_diag = res
+        if res["sl_valid"]:
+            mode_sl = float(res["stop_loss"])
+        elif settings.balanced_stop_allow_1d_fallback:
+            # Last-resort prev-1D candidate, only when explicitly allowed.
+            prev = _extract_prev_1d(df_1d)
+            if prev is not None:
+                fb = compute_prev_1d_stop(
+                    side,
+                    price,
+                    prev["low"],
+                    prev["high"],
+                    prev["atr_1d"],
+                    buffer_mult=settings.stoploss_1d_buffer_atr_mult,
+                    min_pct=settings.balanced_stop_min_distance_percent,
+                    max_pct=bal_max_pct,
+                    too_close_action=settings.stoploss_too_close_action,
+                )
+                fb["stoploss_engine_mode"] = sl_engine_mode
+                fb["selected_stop_source"] = "PREV_1D_FALLBACK"
+                fb["sl_min_distance_percent"] = round(
+                    float(settings.balanced_stop_min_distance_percent), 4
+                )
+                fb["sl_max_distance_percent"] = round(float(bal_max_pct), 4)
+                sl_diag = fb
+                if fb["sl_valid"]:
+                    mode_sl = float(fb["stop_loss"])
+        if mode_sl is None:
+            logger.info(
+                f"⛔ {snap.symbol} {side} — SL V3 balanced reject: "
+                f"{sl_diag.get('sl_reject_reason')} "
+                f"(dist={sl_diag.get('sl_distance_percent')}%)"
+            )
+            return None
+
+    elif sl_engine_mode == MODE_PREV_1D_SUPPORT:
         prev = _extract_prev_1d(df_1d)
         if prev is not None:
             res = compute_prev_1d_stop(
@@ -292,6 +354,7 @@ def build_levels(
                 too_close_action=settings.stoploss_too_close_action,
             )
             res["prev_1d_time"] = prev["time"]
+            res["stoploss_engine_mode"] = sl_engine_mode
             sl_diag = res
             if not res["sl_valid"]:
                 logger.info(
@@ -299,10 +362,11 @@ def build_levels(
                     f"{res['sl_reject_reason']} (dist={res.get('sl_distance_percent')}%)"
                 )
                 return None
-            v2_sl = float(res["stop_loss"])
+            mode_sl = float(res["stop_loss"])
         else:
             # No usable 1D data → fall back to the legacy stop (do not reject).
             sl_diag = {
+                "stoploss_engine_mode": sl_engine_mode,
                 "stoploss_method": "PREV_1D_SUPPORT",
                 "sl_valid": False,
                 "sl_reject_reason": "no_1d_data",
@@ -310,8 +374,8 @@ def build_levels(
             }
 
     if side == "LONG":
-        if v2_sl is not None:
-            sl = v2_sl
+        if mode_sl is not None:
+            sl = mode_sl
         else:
             swing_sl = snap.recent_low - 0.2 * atr
             atr_sl = price - 1.8 * atr
@@ -331,8 +395,8 @@ def build_levels(
         tp3 = price + 3.5 * risk
 
     else:  # SHORT
-        if v2_sl is not None:
-            sl = v2_sl
+        if mode_sl is not None:
+            sl = mode_sl
         else:
             swing_sl = snap.recent_high + 0.2 * atr
             atr_sl = price + 1.8 * atr
