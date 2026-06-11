@@ -230,6 +230,11 @@ class Settings(BaseSettings):
     position_recovery_enabled: bool = False  # 21C: rebuild state on startup + API
     order_failure_engine_enabled: bool = False  # 21D: failure tracking + retry policy API
     accounting_enabled: bool = False  # 21E: net-PnL accounting API
+    # Report performance PnL net of an estimated round-trip taker fee (#8) so
+    # displayed avg/total PnL, profit factor, and Telegram stats reflect real
+    # trading costs instead of gross price move. Set false to report gross.
+    report_fees_enabled: bool = True
+    report_roundtrip_fee_bps: float = 8.0  # 2 × 0.04% Binance USDT-M taker
     emergency_close_enabled: bool = False  # allow reduce-only emergency close action
     # When >0, a user who hits this many live-order failures inside the window
     # below has their auto-trading tripped by the circuit breaker.

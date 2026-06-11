@@ -14,6 +14,7 @@ from typing import Dict, List, Optional
 
 from sqlalchemy import desc, select
 
+from app.accounting.pnl import signal_net_pnl
 from app.analytics.trade_outcome import is_loss, is_win
 from app.database.models import Signal
 from app.database.session import SessionLocal
@@ -110,7 +111,7 @@ class PerformanceEngine:
         report.losses = len(losses)
         report.win_rate = round(len(wins) / max(1, len(closed)) * 100, 1)
 
-        pnls = [float(s.pnl_pct or 0) for s in closed]
+        pnls = [signal_net_pnl(s) for s in closed]
         rrs = [float(s.risk_reward or 0) for s in closed]
 
         report.avg_pnl = round(sum(pnls) / max(1, len(pnls)), 2)
@@ -146,7 +147,7 @@ class PerformanceEngine:
         for side in ("LONG", "SHORT"):
             side_sigs = [s for s in closed if s.side == side]
             side_wins = [s for s in side_sigs if is_win(s)]
-            side_pnls = [float(s.pnl_pct or 0) for s in side_sigs]
+            side_pnls = [signal_net_pnl(s) for s in side_sigs]
             stat = SideStat(
                 side=side,
                 total=len(side_sigs),
@@ -167,7 +168,7 @@ class PerformanceEngine:
         sym_stats: List[SymbolStat] = []
         for sym, sigs in sym_map.items():
             sym_wins = [s for s in sigs if is_win(s)]
-            sym_pnls = [float(s.pnl_pct or 0) for s in sigs]
+            sym_pnls = [signal_net_pnl(s) for s in sigs]
             sym_rrs = [float(s.risk_reward or 0) for s in sigs]
             sym_stats.append(
                 SymbolStat(
@@ -192,7 +193,7 @@ class PerformanceEngine:
         monthly: List[MonthStat] = []
         for month, sigs in sorted(monthly_map.items()):
             m_wins = [s for s in sigs if is_win(s)]
-            m_pnls = [float(s.pnl_pct or 0) for s in sigs]
+            m_pnls = [signal_net_pnl(s) for s in sigs]
             monthly.append(
                 MonthStat(
                     month=month,

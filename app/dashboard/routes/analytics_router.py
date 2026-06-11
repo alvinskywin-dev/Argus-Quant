@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import desc, select
 from sqlalchemy import func as _sqlfunc
 
+from app.accounting.pnl import signal_net_pnl
 from app.analytics.trade_outcome import is_loss, is_win
 from app.dashboard.server import (
     _MTF_STRATEGY,
@@ -37,6 +38,8 @@ async def api_public_performance():
     Legacy 5m signals, archived signals, and other strategies are excluded.
     """
     from collections import defaultdict as _dd
+
+    from app.config import settings
 
     try:
         # ── fetch all closed MTF signals (no row cap) ─────────────────
@@ -70,7 +73,7 @@ async def api_public_performance():
         def _side_stat(sigs: list) -> dict:
             sw = [s for s in sigs if is_win(s)]
             sl = [s for s in sigs if s.status == "SL"]
-            sp = [float(s.pnl_pct or 0) for s in sigs]
+            sp = [signal_net_pnl(s) for s in sigs]
             sr = [float(s.risk_reward or 0) for s in sigs]
             n = max(1, len(sigs))
             return {
@@ -86,7 +89,7 @@ async def api_public_performance():
         total_closed = len(closed)
         wins = [s for s in closed if is_win(s)]
         losses = [s for s in closed if is_loss(s)]
-        pnls = [float(s.pnl_pct or 0) for s in closed]
+        pnls = [signal_net_pnl(s) for s in closed]
         rrs = [float(s.risk_reward or 0) for s in closed]
         n = max(1, total_closed)
 
@@ -118,7 +121,7 @@ async def api_public_performance():
         for sym, sigs in sym_map.items():
             sw = [s for s in sigs if is_win(s)]
             sl = [s for s in sigs if s.status == "SL"]
-            sp = [float(s.pnl_pct or 0) for s in sigs]
+            sp = [signal_net_pnl(s) for s in sigs]
             sr = [float(s.risk_reward or 0) for s in sigs]
             nn = max(1, len(sigs))
             ls = [s for s in sigs if s.side == "LONG"]
@@ -138,16 +141,12 @@ async def api_public_performance():
                     "long": {
                         "total": len(ls),
                         "wins": len(lw),
-                        "avg_pnl": round(
-                            sum(float(s.pnl_pct or 0) for s in ls) / max(1, len(ls)), 2
-                        ),
+                        "avg_pnl": round(sum(signal_net_pnl(s) for s in ls) / max(1, len(ls)), 2),
                     },
                     "short": {
                         "total": len(ss),
                         "wins": len(shw),
-                        "avg_pnl": round(
-                            sum(float(s.pnl_pct or 0) for s in ss) / max(1, len(ss)), 2
-                        ),
+                        "avg_pnl": round(sum(signal_net_pnl(s) for s in ss) / max(1, len(ss)), 2),
                     },
                 }
             )
@@ -166,7 +165,7 @@ async def api_public_performance():
         for month, msigs in sorted(mo_map.items()):
             mw = [s for s in msigs if is_win(s)]
             ml = [s for s in msigs if is_loss(s)]
-            mp = [float(s.pnl_pct or 0) for s in msigs]
+            mp = [signal_net_pnl(s) for s in msigs]
             mn = max(1, len(msigs))
             monthly_rows.append(
                 {
@@ -192,6 +191,9 @@ async def api_public_performance():
                 "total_pnl": total_pnl,
                 "avg_rr": avg_rr,
                 "profit_factor": profit_factor,  # null when no losses
+                # PnL basis transparency (#8): net of an estimated round-trip fee.
+                "pnl_basis": "net_est_fees" if settings.report_fees_enabled else "gross",
+                "roundtrip_fee_bps": settings.report_roundtrip_fee_bps,
                 "avg_hold_time_minutes": avg_hold_min,
                 "long": _side_stat(long_sigs),
                 "short": _side_stat(short_sigs),
