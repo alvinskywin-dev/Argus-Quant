@@ -177,6 +177,7 @@ class BybitAdapter(ExchangeAdapter):
         order_type: str = "MARKET",
         price: Optional[float] = None,
         reduce_only: bool = False,
+        client_order_id: Optional[str] = None,  # idempotency key (accepted; passthrough/no-op)
     ) -> OrderResult:
         body = {
             "category": "linear",

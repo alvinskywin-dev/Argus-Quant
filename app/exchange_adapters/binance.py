@@ -10,6 +10,7 @@ of touching the network.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import time
@@ -21,12 +22,17 @@ from app.exchange_adapters import live_gate_open
 from app.exchange_adapters.base import (
     MODE_LIVE,
     AdapterError,
+    AdapterTimeoutError,
     BalanceInfo,
     ExchangeAdapter,
     OrderResult,
     PositionInfo,
     opposite_side,
 )
+
+# Binance error code returned when an order does not exist (used to resolve an
+# ambiguous timeout: "did my order actually land?").
+_ERR_ORDER_NOT_FOUND = -2013
 
 _PROD_URL = "https://fapi.binance.com"
 _TESTNET_URL = "https://testnet.binancefuture.com"
@@ -80,6 +86,8 @@ class BinanceFuturesAdapter(ExchangeAdapter):
     async def _request(
         self, method: str, path: str, params: Optional[dict] = None, *, signed: bool = True
     ) -> Any:
+        import aiohttp
+
         self._guard()
         params = dict(params or {})
         if signed:
@@ -89,12 +97,19 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         headers = {"X-MBX-APIKEY": self._key}
         url = f"{self._base}{path}"
         session = await self._client()
-        async with session.request(method, url, params=params, headers=headers) as resp:
-            data = await resp.json(content_type=None)
-            if resp.status >= 400:
-                msg = data.get("msg") if isinstance(data, dict) else str(data)
-                raise AdapterError(f"Binance {resp.status}: {msg}")
-            return data
+        try:
+            async with session.request(method, url, params=params, headers=headers) as resp:
+                data = await resp.json(content_type=None)
+                if resp.status >= 400:
+                    msg = data.get("msg") if isinstance(data, dict) else str(data)
+                    raise AdapterError(f"Binance {resp.status}: {msg}")
+                return data
+        except (asyncio.TimeoutError, aiohttp.ClientError) as exc:
+            # Ambiguous: the request may have reached the exchange and mutated
+            # state (e.g. placed an order) even though we never saw the response.
+            # Surface a distinct error so callers resolve the real state instead
+            # of assuming failure and retrying blindly.
+            raise AdapterTimeoutError(f"Binance request timed out/dropped: {exc!r}") from exc
 
     # ── interface ─────────────────────────────────────────────────
 
@@ -172,6 +187,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         order_type: str = "MARKET",
         price: Optional[float] = None,
         reduce_only: bool = False,
+        client_order_id: Optional[str] = None,
     ) -> OrderResult:
         # Round to the symbol's valid step/tick precision before sending so a
         # raw computed quantity never triggers a PRECISION_ERROR / opaque reject.
@@ -187,6 +203,11 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             "type": order_type,
             "quantity": qty,
         }
+        if client_order_id:
+            # Idempotency key — Binance rejects a duplicate id (-4015), so a
+            # blind retry can never double-fill, and we can look the order up by
+            # this id after a timeout.
+            params["newClientOrderId"] = client_order_id
         if reduce_only:
             params["reduceOnly"] = "true"
         if order_type == "LIMIT":
@@ -194,6 +215,28 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             params["timeInForce"] = "GTC"
         data = await self._request("POST", "/fapi/v1/order", params)
         return self._to_order(data, symbol, side, order_type, reduce_only)
+
+    async def get_order_by_client_id(
+        self, *, symbol: str, client_order_id: str
+    ) -> Optional[OrderResult]:
+        """Resolve an order by its client id. Returns None if it never landed."""
+        try:
+            d = await self._request(
+                "GET",
+                "/fapi/v1/order",
+                {"symbol": symbol, "origClientOrderId": client_order_id},
+            )
+        except AdapterError as exc:
+            if str(_ERR_ORDER_NOT_FOUND) in str(exc):
+                return None
+            raise
+        return self._to_order(
+            d,
+            symbol,
+            d.get("side", ""),
+            d.get("type", "MARKET"),
+            str(d.get("reduceOnly", "")).lower() == "true",
+        )
 
     async def close_order(self, *, symbol: str, side: str, qty: float) -> OrderResult:
         return await self.open_order(

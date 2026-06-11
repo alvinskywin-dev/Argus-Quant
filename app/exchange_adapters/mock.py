@@ -44,6 +44,9 @@ class MockExchangeAdapter(ExchangeAdapter):
         self._balance = balance
         self._leverage: dict[str, int] = {}
         self._margin: dict[str, str] = {}
+        # Idempotency registry: client_order_id -> OrderResult (mirrors a real
+        # exchange rejecting/deduping a duplicate newClientOrderId).
+        self._orders_by_cid: dict[str, OrderResult] = {}
 
     async def connect(self) -> bool:
         return True
@@ -72,11 +75,17 @@ class MockExchangeAdapter(ExchangeAdapter):
         order_type: str = "MARKET",
         price: Optional[float] = None,
         reduce_only: bool = False,
+        client_order_id: Optional[str] = None,  # idempotency key (accepted; passthrough/no-op)
     ) -> OrderResult:
+        # Idempotent on client_order_id: a repeat returns the original order
+        # instead of simulating a second fill.
+        if client_order_id and client_order_id in self._orders_by_cid:
+            return self._orders_by_cid[client_order_id]
+
         fill = float(price) if price else _mark(symbol, price or 0.0)
-        oid = f"MOCK-{next(_order_seq)}"
+        oid = client_order_id or f"MOCK-{next(_order_seq)}"
         status = "FILLED" if order_type == "MARKET" else "NEW"
-        return OrderResult(
+        result = OrderResult(
             order_id=oid,
             symbol=symbol,
             side=side,
@@ -88,8 +97,16 @@ class MockExchangeAdapter(ExchangeAdapter):
             avg_price=fill if status == "FILLED" else 0.0,
             reduce_only=reduce_only,
             mode=MODE_MOCK,
-            raw={"simulated": True},
+            raw={"simulated": True, "client_order_id": client_order_id},
         )
+        if client_order_id:
+            self._orders_by_cid[client_order_id] = result
+        return result
+
+    async def get_order_by_client_id(
+        self, *, symbol: str, client_order_id: str
+    ) -> Optional[OrderResult]:
+        return self._orders_by_cid.get(client_order_id)
 
     async def close_order(self, *, symbol: str, side: str, qty: float) -> OrderResult:
         return await self.open_order(

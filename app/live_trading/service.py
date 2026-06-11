@@ -12,6 +12,8 @@ By default everything runs MOCK and the result rows are tagged mode="MOCK".
 
 from __future__ import annotations
 
+import asyncio
+import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -20,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import LiveAuditLog, LiveOrder, LivePosition, LiveTrade
 from app.exchange_adapters import live_gate_open, resolve_adapter
-from app.exchange_adapters.base import AdapterError, opposite_side, to_side
+from app.exchange_adapters.base import AdapterError, AdapterTimeoutError, opposite_side, to_side
 from app.exchange_vault import service as vault
 from app.paper_engine import math as pmath
 from app.recovery import tp_sl as tp_sl_const
@@ -37,6 +39,75 @@ class LiveTradingError(Exception):
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+# Binance newClientOrderId allows ^[\.A-Z\:/a-z0-9_-]{1,36}$.
+_CID_ALLOWED = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-.:/")
+
+
+def _build_client_order_id(supplied: Optional[str]) -> str:
+    """Return a valid idempotency key — caller-supplied (sanitised) or generated."""
+    if supplied:
+        cid = "".join(c for c in str(supplied) if c in _CID_ALLOWED)[:36]
+        if cid:
+            return cid
+    return f"ax{uuid.uuid4().hex}"[:36]
+
+
+async def _resolve_after_timeout(
+    adapter, symbol: str, client_order_id: str, *, attempts: int = 3, delay: float = 0.5
+):
+    """After an ambiguous timeout, ask the exchange whether the order landed.
+
+    Returns the OrderResult if found, else None. Retries because a just-placed
+    order can take a moment to become queryable.
+    """
+    for i in range(attempts):
+        try:
+            res = await adapter.get_order_by_client_id(
+                symbol=symbol, client_order_id=client_order_id
+            )
+        except AdapterError:
+            res = None
+        if res is not None:
+            return res
+        if i < attempts - 1:
+            await asyncio.sleep(delay)
+    return None
+
+
+async def _open_entry_idempotent(adapter, *, symbol, side, qty, order_type, price, client_order_id):
+    """Place the entry order; on a timeout, resolve the true state by client id.
+
+    This is the heart of the duplicate-safety fix: a dropped connection no longer
+    means "assume it failed and risk a second fill" — we look the order up by its
+    idempotency key and only report failure when the exchange truly has no order.
+    """
+    try:
+        return await adapter.open_order(
+            symbol=symbol,
+            side=side,
+            qty=qty,
+            order_type=order_type,
+            price=price,
+            client_order_id=client_order_id,
+        )
+    except AdapterTimeoutError as exc:
+        logger.warning(
+            f"[live] entry timeout for {symbol} {side} — resolving by "
+            f"client_order_id={client_order_id}"
+        )
+        resolved = await _resolve_after_timeout(adapter, symbol, client_order_id)
+        if resolved is not None:
+            logger.warning(
+                f"[live] entry DID land despite timeout {symbol} {side} "
+                f"order_id={resolved.order_id} — adopting it (no duplicate placed)"
+            )
+            return resolved
+        # The exchange has no such order — safe to treat as a clean failure.
+        raise AdapterError(
+            f"entry timed out and no order found for client_order_id={client_order_id}: {exc}"
+        ) from exc
 
 
 def gate_status() -> dict:
@@ -123,6 +194,7 @@ async def open_position(
     take_profit: Optional[float] = None,
     stop_loss: Optional[float] = None,
     trailing_pct: Optional[float] = None,
+    client_order_id: Optional[str] = None,
 ) -> dict:
     exchange = exchange.lower()
     if exchange == "auto":
@@ -165,14 +237,23 @@ async def open_position(
         raise LiveTradingError(400, "Quantity must be positive")
 
     bside = to_side(side)
+    cid = _build_client_order_id(client_order_id)
 
     # ── 1) ENTRY ─────────────────────────────────────────────────────
     # If the entry itself fails, no position exists — record + reject cleanly.
+    # The order carries an idempotency key (cid); a dropped connection is
+    # resolved by looking the order up rather than risking a duplicate fill.
     try:
         await adapter.set_margin_type(symbol, margin_type)
         await adapter.set_leverage(symbol, leverage)
-        order = await adapter.open_order(
-            symbol=symbol, side=bside, qty=quantity, order_type=order_type, price=entry_price
+        order = await _open_entry_idempotent(
+            adapter,
+            symbol=symbol,
+            side=bside,
+            qty=quantity,
+            order_type=order_type,
+            price=entry_price,
+            client_order_id=cid,
         )
     except AdapterError as exc:
         await _record_order_error(db, user_id, exchange, symbol, bside, order_type, mode, str(exc))
