@@ -192,6 +192,18 @@ class Settings(BaseSettings):
     live_pilot_allowed_symbols: str = "BTCUSDT,ETHUSDT"
     live_pilot_require_confirmation: bool = True
 
+    # ── Live execution: risk-based sizing (#5) + slippage guard (#4) ──
+    # Default risk-per-trade % used when a live order asks to be sized by risk
+    # (entry→stop distance) instead of a raw notional.
+    live_risk_per_trade_pct: float = 1.0
+    # Cap on risk-based sizing: required margin must not exceed this fraction of
+    # available balance (1.0 = up to full balance as margin).
+    live_max_notional_frac: float = 1.0
+    # Refuse / flag a MARKET entry when the live price has moved beyond this many
+    # basis points adverse to the intended entry (50 bps = 0.5%). 0 disables.
+    slippage_guard_enabled: bool = True
+    max_slippage_bps: float = 50.0
+
     # ── Multi-user Live Beta — controlled live access (default OFF) ──
     live_beta_enabled: bool = False
     live_beta_max_users: int = 10

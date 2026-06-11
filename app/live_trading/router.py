@@ -78,6 +78,7 @@ async def open_position(body: OpenLiveIn, user: AuthUser = Depends(get_current_u
                 side=body.side,
                 quantity=body.quantity,
                 notional_usdt=body.notional_usdt,
+                risk_pct=body.risk_pct,
                 entry_price=body.entry_price,
                 leverage=body.leverage,
                 margin_type=body.margin_type,
