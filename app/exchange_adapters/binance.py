@@ -29,10 +29,16 @@ from app.exchange_adapters.base import (
     PositionInfo,
     opposite_side,
 )
+from app.utils.logger import logger
 
 # Binance error code returned when an order does not exist (used to resolve an
 # ambiguous timeout: "did my order actually land?").
 _ERR_ORDER_NOT_FOUND = -2013
+# Timestamp outside recvWindow / ahead of server time — clock drift. We resync
+# the server-time offset and retry once.
+_ERR_TIMESTAMP_DRIFT = -1021
+# Re-sync the server-time offset at most this often (seconds).
+_TIME_SYNC_TTL_SEC = 1800
 
 _PROD_URL = "https://fapi.binance.com"
 _TESTNET_URL = "https://testnet.binancefuture.com"
@@ -55,6 +61,10 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         self._base = _TESTNET_URL if self._testnet else _PROD_URL
         self._session = None  # lazy aiohttp session
         self._filters: dict = {}  # symbol -> SymbolFilters (per-instance cache)
+        # Server-time sync (#7): offset = serverTime - localTime, applied to every
+        # signed request so host clock drift never causes a -1021 rejection.
+        self._time_offset_ms = 0
+        self._time_synced_at = 0.0
 
     # ── gate ──────────────────────────────────────────────────────
 
@@ -81,27 +91,67 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             await self._session.close()
             self._session = None
 
+    # ── server-time sync (#7) ─────────────────────────────────────
+
+    async def _sync_time(self, *, force: bool = False) -> None:
+        """Refresh the local→server clock offset from /fapi/v1/time.
+
+        Best-effort: on failure we keep the previous offset (recvWindow still
+        gives slack). Skips work when a recent sync is still fresh.
+        """
+        now = time.time()
+        if not force and self._time_synced_at and (now - self._time_synced_at) < _TIME_SYNC_TTL_SEC:
+            return
+        data = await self._request("GET", "/fapi/v1/time", signed=False)
+        server_ms = int(data.get("serverTime", 0)) if isinstance(data, dict) else 0
+        if server_ms:
+            self._time_offset_ms = server_ms - int(time.time() * 1000)
+            self._time_synced_at = time.time()
+            logger.debug(f"[binance] time offset synced: {self._time_offset_ms}ms")
+
+    async def _ensure_time_offset(self) -> None:
+        try:
+            await self._sync_time()
+        except Exception as exc:  # noqa: BLE001 — non-fatal; fall back to local clock
+            logger.debug(f"[binance] time sync failed (using local clock): {exc!r}")
+
     # ── signed request ────────────────────────────────────────────
 
     async def _request(
-        self, method: str, path: str, params: Optional[dict] = None, *, signed: bool = True
+        self,
+        method: str,
+        path: str,
+        params: Optional[dict] = None,
+        *,
+        signed: bool = True,
+        _retry_on_drift: bool = True,
     ) -> Any:
         import aiohttp
 
         self._guard()
-        params = dict(params or {})
+        p = dict(params or {})
         if signed:
-            params["timestamp"] = int(time.time() * 1000)
-            params["recvWindow"] = 5000
-            params["signature"] = sign_query(self._secret, params)
+            await self._ensure_time_offset()
+            p["timestamp"] = int(time.time() * 1000) + self._time_offset_ms
+            p["recvWindow"] = 5000
+            p["signature"] = sign_query(self._secret, p)
         headers = {"X-MBX-APIKEY": self._key}
         url = f"{self._base}{path}"
         session = await self._client()
         try:
-            async with session.request(method, url, params=params, headers=headers) as resp:
+            async with session.request(method, url, params=p, headers=headers) as resp:
                 data = await resp.json(content_type=None)
                 if resp.status >= 400:
+                    code = data.get("code") if isinstance(data, dict) else None
                     msg = data.get("msg") if isinstance(data, dict) else str(data)
+                    # Clock drift outside recvWindow — resync once and retry with a
+                    # corrected timestamp (re-signs from the original params).
+                    if signed and _retry_on_drift and code == _ERR_TIMESTAMP_DRIFT:
+                        logger.warning("[binance] -1021 clock drift — resyncing time and retrying")
+                        await self._sync_time(force=True)
+                        return await self._request(
+                            method, path, params, signed=signed, _retry_on_drift=False
+                        )
                     raise AdapterError(f"Binance {resp.status}: {msg}")
                 return data
         except (asyncio.TimeoutError, aiohttp.ClientError) as exc:
@@ -214,7 +264,30 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             params["price"] = price
             params["timeInForce"] = "GTC"
         data = await self._request("POST", "/fapi/v1/order", params)
-        return self._to_order(data, symbol, side, order_type, reduce_only)
+        result = self._to_order(data, symbol, side, order_type, reduce_only)
+        # A MARKET order's POST response often omits avgPrice (returns 0); re-read
+        # the order to capture the true fill price/qty so PnL is based on reality.
+        if order_type == "MARKET" and result.avg_price <= 0 and result.order_id:
+            result = await self._reconcile_fill(symbol, result)
+        return result
+
+    async def _reconcile_fill(self, symbol: str, result: OrderResult) -> OrderResult:
+        """Re-query a just-placed order to capture its real avgPrice / executedQty.
+
+        Best-effort: returns the original result unchanged if the lookup fails or
+        the exchange still reports no fill price.
+        """
+        try:
+            latest = await self.get_order_status(symbol=symbol, order_id=result.order_id)
+        except AdapterError as exc:
+            logger.debug(f"[binance] fill reconcile failed for {symbol} {result.order_id}: {exc}")
+            return result
+        if latest.avg_price > 0:
+            result.avg_price = latest.avg_price
+            result.price = latest.avg_price
+            result.filled_qty = latest.filled_qty or result.filled_qty
+            result.status = latest.status or result.status
+        return result
 
     async def get_order_by_client_id(
         self, *, symbol: str, client_order_id: str
