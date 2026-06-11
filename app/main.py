@@ -308,6 +308,17 @@ class App:
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"startup recovery not scheduled (non-fatal): {exc!r}")
 
+        # Periodic DB↔exchange reconciliation sweep (read-only; no-ops unless
+        # RECONCILIATION_LOOP_ENABLED). The loop owns its own supervise/sleep
+        # cycle, so it is scheduled directly (not via run_forever): when disabled
+        # it returns immediately instead of busy-looping. Alerts admins on drift.
+        try:
+            from app.reconciliation.loop import reconciliation_loop
+
+            self._tasks.append(asyncio.create_task(reconciliation_loop(alert=self.bot.alert_admin)))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"reconciliation loop not scheduled (non-fatal): {exc!r}")
+
         logger.info(
             f"=== all services running  "
             f"universe={len(universe.symbols)} symbols  "

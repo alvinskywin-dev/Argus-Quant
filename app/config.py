@@ -209,6 +209,12 @@ class Settings(BaseSettings):
     # cancel, or modify real orders except emergency_close (admin-triggered,
     # reduce-only) which additionally requires the live execution gate.
     reconciliation_enabled: bool = False  # 21B: DB↔exchange drift detection API
+    # Periodic background reconciliation sweep (DB↔exchange drift) while running.
+    # Read-only: it only writes ReconciliationIssue audit rows and alerts admins;
+    # it never opens/closes/cancels orders. Off by default.
+    reconciliation_loop_enabled: bool = False
+    reconciliation_interval_sec: int = 300  # how often the sweep runs (min 30)
+    reconciliation_alert_critical: bool = True  # admin-alert on newly-found drift
     position_recovery_enabled: bool = False  # 21C: rebuild state on startup + API
     order_failure_engine_enabled: bool = False  # 21D: failure tracking + retry policy API
     accounting_enabled: bool = False  # 21E: net-PnL accounting API
