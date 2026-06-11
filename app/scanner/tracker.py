@@ -35,6 +35,9 @@ class SignalTracker:
             "event": event,  # TP1/TP2/TP3/SL/UPDATE
             "pnl_pct": sig.pnl_pct,
             "telegram_message_id": sig.telegram_message_id,
+            # Display-only: lets the Telegram formatter show holding time.
+            "opened_at": sig.created_at,
+            "event_time": utcnow(),
         }
         for cb in self._update_callbacks:
             try:
