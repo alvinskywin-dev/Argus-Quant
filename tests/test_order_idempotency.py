@@ -21,7 +21,7 @@ from app.exchange_adapters.base import (
     OrderResult,
 )
 from app.exchange_adapters.mock import MockExchangeAdapter
-from app.live_trading import service
+from app.execution.live_trading import service
 
 
 # ── 1. client_order_id idempotency on the mock adapter ────────────────────────

@@ -19,8 +19,8 @@ def setup_live(app: FastAPI) -> None:
         return
 
     from app.auth.service import AuthError
-    from app.live_trading.router import router as live_router
-    from app.live_trading.service import LiveTradingError
+    from app.execution.live_trading.router import router as live_router
+    from app.execution.live_trading.service import LiveTradingError
 
     async def _auth_error_handler(_request: Request, exc: AuthError) -> JSONResponse:
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})

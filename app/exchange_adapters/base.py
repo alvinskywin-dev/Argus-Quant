@@ -8,7 +8,7 @@ order was placed.
 
 SAFETY: real adapters must place no real orders unless the live-trading gate
 is open (LIVE_TRADING_ENABLED=true AND MOCK_EXCHANGE_MODE=false). The gate is
-enforced centrally in app.live_trading.service.resolve_adapter and again,
+enforced centrally in app.execution.live_trading.service.resolve_adapter and again,
 defensively, inside each real adapter.
 """
 

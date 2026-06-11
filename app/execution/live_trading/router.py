@@ -15,8 +15,8 @@ from fastapi.responses import JSONResponse
 from app.auth.deps import get_current_user
 from app.database.models import AuthUser, LiveOrder, LivePosition, LiveTrade
 from app.database.session import get_session
-from app.live_trading import pilot, service
-from app.live_trading.schemas import (
+from app.execution.live_trading import pilot, service
+from app.execution.live_trading.schemas import (
     CloseLiveIn,
     EmergencyCloseIn,
     GateStatusOut,

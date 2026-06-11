@@ -42,7 +42,7 @@ def test_target_metadata_covers_all_model_domains():
 
     for mod in (
         "app.accounting.models",
-        "app.live_beta.models",
+        "app.execution.live_beta.models",
         "app.order_failures.models",
         "app.reconciliation.models",
     ):

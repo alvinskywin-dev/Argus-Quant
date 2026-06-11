@@ -629,7 +629,7 @@ def create_app():
     # LIVE_TRADING_API_ENABLED; REAL orders still need the execution gate.
     if settings.live_trading_api_enabled:
         try:
-            from app.live_trading import setup_live
+            from app.execution.live_trading import setup_live
 
             setup_live(app)
         except Exception as exc:  # noqa: BLE001
@@ -677,7 +677,7 @@ def create_app():
     # Multi-user Live Beta — membership API (controlled live access).
     if settings.live_beta_enabled:
         try:
-            from app.live_beta import setup_live_beta
+            from app.execution.live_beta import setup_live_beta
 
             setup_live_beta(app)
         except Exception as exc:  # noqa: BLE001

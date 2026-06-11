@@ -18,8 +18,8 @@ def setup_live_beta(app: FastAPI) -> None:
     if getattr(app.state, "_live_beta_installed", False):
         return
 
-    from app.live_beta.router import router as beta_router
-    from app.live_beta.service import LiveBetaError
+    from app.execution.live_beta.router import router as beta_router
+    from app.execution.live_beta.service import LiveBetaError
 
     async def _beta_error_handler(_request: Request, exc: LiveBetaError) -> JSONResponse:
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})

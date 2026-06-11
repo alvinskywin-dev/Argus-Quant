@@ -12,9 +12,9 @@ import asyncio
 import pytest
 
 from app.config import settings
-from app.live_trading import pilot
-from app.live_trading.pilot import PILOT_CONFIRM_PHRASE, PilotPreflight
-from app.live_trading.service import LiveTradingError
+from app.execution.live_trading import pilot
+from app.execution.live_trading.pilot import PILOT_CONFIRM_PHRASE, PilotPreflight
+from app.execution.live_trading.service import LiveTradingError
 
 
 @pytest.fixture

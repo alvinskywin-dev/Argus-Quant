@@ -23,7 +23,7 @@ from app.database.models import Base
 # Register every model module so all tables are on Base.metadata.
 for _mod in (
     "app.accounting.models",
-    "app.live_beta.models",
+    "app.execution.live_beta.models",
     "app.order_failures.models",
     "app.reconciliation.models",
 ):

@@ -293,7 +293,7 @@ class _Acct:
 
 
 def _patch_vault(monkeypatch, accounts):
-    from app.live_trading import service
+    from app.execution.live_trading import service
 
     async def fake_list_accounts(db, user_id):
         return accounts

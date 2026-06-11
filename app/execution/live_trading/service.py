@@ -215,7 +215,7 @@ async def open_position(
 
     # Multi-user Live Beta gate (no-op unless LIVE_BETA_ENABLED). Enforces the
     # per-user / per-symbol / global exposure envelope for beta members.
-    from app.live_beta import service as live_beta
+    from app.execution.live_beta import service as live_beta
 
     if live_beta.beta_enabled():
         est_notional = float(notional_usdt or (quantity or 0) * (entry_price or pmath_mark(symbol)))

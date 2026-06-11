@@ -11,7 +11,7 @@ automatically and never places an order without ALL of the following:
   * the safety layer clear (global kill / user kill / lockout),
   * and finally the live execution gate (otherwise the underlying open runs MOCK).
 
-The actual order goes through app.live_trading.service.open_position, which is
+The actual order goes through app.execution.live_trading.service.open_position, which is
 itself gated by live_gate_open(); so with the gate closed this whole path is a
 realistic dry-run that places nothing.
 """
@@ -26,8 +26,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database.models import LivePosition
-from app.live_trading import service
-from app.live_trading.service import LiveTradingError
+from app.execution.live_trading import service
+from app.execution.live_trading.service import LiveTradingError
 from app.safety import service as safety
 from app.utils.logger import logger
 
