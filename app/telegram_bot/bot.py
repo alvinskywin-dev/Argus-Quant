@@ -747,15 +747,23 @@ class TelegramBot:
         side = payload.get("side", "")
         pnl = float(payload.get("pnl_pct", 0) or 0)
         signal_id = payload.get("signal_id")
+        max_tp_hit = int(payload.get("max_tp_hit") or 0)
 
+        # Lifecycle-aware framing: a stop hit *after* a take-profit is not a pure
+        # loss — it is a protected partial/locked win. Don't broadcast it as SL.
         is_sl = event == "SL"
-        title = (
-            f"🛑 <b>STOP LOSS • {symbol} {side}</b>"
-            if is_sl
-            else f"🎯 <b>{event} HIT • {symbol} {side}</b>"
-        )
-
-        label = "Loss" if is_sl else "Profit"
+        if is_sl and max_tp_hit >= 2:
+            title = f"🟢 <b>WIN LOCKED • {symbol} {side}</b>"
+            icon, label = "🟢", "Win locked"
+        elif is_sl and max_tp_hit == 1:
+            title = f"🟡 <b>PARTIAL WIN • {symbol} {side}</b>"
+            icon, label = "🟡", "Partial win protected"
+        elif is_sl:
+            title = f"🛑 <b>STOP LOSS • {symbol} {side}</b>"
+            icon, label = "🔻", "Loss"
+        else:
+            title = f"🎯 <b>{event} HIT • {symbol} {side}</b>"
+            icon, label = "🔥", "Profit"
 
         # Display-only holding-time line; omitted cleanly if opened_at is missing.
         footer = "⚡ ARGUS QUANT"
@@ -763,11 +771,7 @@ class TelegramBot:
         if duration_line:
             footer += f"\n{duration_line}"
 
-        text = (
-            f"{title}\n\n"
-            f"{'🔻' if is_sl else '🔥'} <code>{pnl:+.2f}%</code> {label}\n"
-            f"{footer}"
-        )
+        text = f"{title}\n\n" f"{icon} <code>{pnl:+.2f}%</code> {label}\n" f"{footer}"
 
         targets = []
         if signal_id:

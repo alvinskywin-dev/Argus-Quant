@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import desc, select
 from sqlalchemy import func as _sqlfunc
 
+from app.analytics.trade_outcome import is_loss, is_win
 from app.dashboard.server import (
     _MTF_STRATEGY,
     _MTF_TIMEFRAMES,
@@ -61,15 +62,13 @@ async def api_public_performance():
             open_count = int(open_cnt_res.scalar() or 0)
 
         # ── helpers ────────────────────────────────────────────────────
-        WIN_ST = ("TP1", "TP2", "TP3")
-
         def _pf(pnls: list) -> float | None:
             gw = sum(p for p in pnls if p > 0)
             gl = abs(sum(p for p in pnls if p < 0))
             return round(gw / gl, 2) if gl > 0 else None
 
         def _side_stat(sigs: list) -> dict:
-            sw = [s for s in sigs if s.status in WIN_ST]
+            sw = [s for s in sigs if is_win(s)]
             sl = [s for s in sigs if s.status == "SL"]
             sp = [float(s.pnl_pct or 0) for s in sigs]
             sr = [float(s.risk_reward or 0) for s in sigs]
@@ -85,8 +84,8 @@ async def api_public_performance():
 
         # ── overall metrics ────────────────────────────────────────────
         total_closed = len(closed)
-        wins = [s for s in closed if s.status in WIN_ST]
-        losses = [s for s in closed if s.status == "SL"]
+        wins = [s for s in closed if is_win(s)]
+        losses = [s for s in closed if is_loss(s)]
         pnls = [float(s.pnl_pct or 0) for s in closed]
         rrs = [float(s.risk_reward or 0) for s in closed]
         n = max(1, total_closed)
@@ -117,15 +116,15 @@ async def api_public_performance():
 
         leaderboard_rows = []
         for sym, sigs in sym_map.items():
-            sw = [s for s in sigs if s.status in WIN_ST]
+            sw = [s for s in sigs if is_win(s)]
             sl = [s for s in sigs if s.status == "SL"]
             sp = [float(s.pnl_pct or 0) for s in sigs]
             sr = [float(s.risk_reward or 0) for s in sigs]
             nn = max(1, len(sigs))
             ls = [s for s in sigs if s.side == "LONG"]
             ss = [s for s in sigs if s.side == "SHORT"]
-            lw = [s for s in ls if s.status in WIN_ST]
-            shw = [s for s in ss if s.status in WIN_ST]
+            lw = [s for s in ls if is_win(s)]
+            shw = [s for s in ss if is_win(s)]
             leaderboard_rows.append(
                 {
                     "symbol": sym,
@@ -165,8 +164,8 @@ async def api_public_performance():
 
         monthly_rows = []
         for month, msigs in sorted(mo_map.items()):
-            mw = [s for s in msigs if s.status in WIN_ST]
-            ml = [s for s in msigs if s.status == "SL"]
+            mw = [s for s in msigs if is_win(s)]
+            ml = [s for s in msigs if is_loss(s)]
             mp = [float(s.pnl_pct or 0) for s in msigs]
             mn = max(1, len(msigs))
             monthly_rows.append(
@@ -343,8 +342,6 @@ async def api_performance_center():
     cutoff_7d = now - timedelta(days=7)
     cutoff_30d = now - timedelta(days=30)
 
-    WIN_ST = ("TP1", "TP2", "TP3")
-
     try:
         async with SessionLocal() as session:
             res = await session.execute(
@@ -365,7 +362,7 @@ async def api_performance_center():
             tp2 = [s for s in sigs if s.status == "TP2"]
             sl = [s for s in sigs if s.status == "SL"]
             exp = [s for s in sigs if s.status == "EXPIRED"]
-            wins = [s for s in closed if s.status in WIN_ST]
+            wins = [s for s in closed if is_win(s)]
             nc = max(1, len(closed))
             wr = round(len(wins) / nc * 100, 1) if len(closed) >= 5 else None
             return {
@@ -388,7 +385,7 @@ async def api_performance_center():
 
         # Long vs Short
         def _side(sigs):
-            wins = [s for s in sigs if s.status in WIN_ST]
+            wins = [s for s in sigs if is_win(s)]
             n = max(1, len(sigs))
             return {"total": len(sigs), "winrate": round(len(wins) / n * 100, 1)}
 
@@ -402,7 +399,7 @@ async def api_performance_center():
 
         pair_rows = []
         for sym, sigs in sym_map.items():
-            wins = [s for s in sigs if s.status in WIN_ST]
+            wins = [s for s in sigs if is_win(s)]
             rrs = [float(s.risk_reward or 0) for s in sigs]
             n = len(sigs)
             pair_rows.append(
@@ -420,8 +417,8 @@ async def api_performance_center():
         # Confidence bands (30D all statuses)
         def _band(lo, hi):
             bsigs = [s for s in sigs_30d if lo <= float(s.confidence or 0) < hi]
-            wins = [s for s in bsigs if s.status in WIN_ST]
-            losses = [s for s in bsigs if s.status == "SL"]
+            wins = [s for s in bsigs if is_win(s)]
+            losses = [s for s in bsigs if is_loss(s)]
             n = len(bsigs)
             return {
                 "signals": n,
@@ -430,11 +427,21 @@ async def api_performance_center():
                 "winrate": round(len(wins) / n * 100, 1) if n >= 3 else None,
             }
 
-        # Status distribution (30D)
+        # Status distribution (30D) — raw latest status.
         status_dist = {
             k: sum(1 for s in sigs_30d if s.status == k)
             for k in ("OPEN", "TP1", "TP2", "SL", "EXPIRED")
         }
+
+        # Lifecycle outcome distribution (30D) — TP1→SL shows as PARTIAL_WIN, not SL.
+        from app.analytics.trade_outcome import outcome_for_signal
+
+        outcome_dist = {
+            k: 0 for k in ("FULL_WIN", "WIN", "PARTIAL_WIN", "BREAKEVEN", "LOSS", "OPEN")
+        }
+        for s in sigs_30d:
+            oc = outcome_for_signal(s).outcome
+            outcome_dist[oc] = outcome_dist.get(oc, 0) + 1
 
         total_closed_30d = len(closed_30d)
 
@@ -454,6 +461,7 @@ async def api_performance_center():
                 "90_plus": _band(90, 200),
             },
             "status_distribution": status_dist,
+            "outcome_distribution": outcome_dist,
             "updated_at": now.isoformat(),
         }
         _cache_set("perf_center", result)
@@ -719,7 +727,7 @@ async def api_public_community_analytics():
 
         WIN_ST = ("TP1", "TP2", "TP3")
         closed = [s for s in rows if s.status in (*WIN_ST, "SL")]
-        wins = [s for s in closed if s.status in WIN_ST]
+        wins = [s for s in closed if is_win(s)]
 
         # signal frequency — per UTC day over the window
         freq: dict[str, int] = {}

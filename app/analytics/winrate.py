@@ -13,9 +13,17 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import desc, select
 
+from app.analytics.trade_outcome import (
+    BUCKET_LOSS,
+    BUCKET_WIN,
+    outcome_for_signal,
+    winrate_bucket_for_signal,
+)
 from app.database.models import Signal
 from app.database.session import SessionLocal
 
+# Kept for backwards-compat imports; winrate now derives from trade lifecycle
+# (see app.analytics.trade_outcome) rather than latest status alone.
 WIN_STATUSES = {"TP1", "TP2", "TP3"}
 CLOSED_STATUSES = ["TP1", "TP2", "TP3", "SL"]
 
@@ -49,10 +57,20 @@ _SL_METHODS = ["PREV_1D_SUPPORT", "atr", "structure", "liquidity"]
 
 
 def _wr(sigs: List) -> Optional[float]:
+    """Lifecycle-aware win rate: wins / (wins + losses).
+
+    A trade that reached any take-profit before stopping out counts as a win
+    (PARTIAL_WIN / WIN / FULL_WIN). Break-even and still-open trades are
+    excluded from the denominator.
+    """
     if not sigs:
         return None
-    wins = sum(1 for s in sigs if s.status in WIN_STATUSES)
-    return round(wins / len(sigs) * 100.0, 1)
+    wins = sum(1 for s in sigs if winrate_bucket_for_signal(s) == BUCKET_WIN)
+    losses = sum(1 for s in sigs if winrate_bucket_for_signal(s) == BUCKET_LOSS)
+    denom = wins + losses
+    if denom == 0:
+        return None
+    return round(wins / denom * 100.0, 1)
 
 
 def _bucket_stats(sigs: List, label: str) -> Dict[str, Any]:
@@ -83,6 +101,35 @@ async def compute_winrate_analysis(limit: int = 500) -> Dict[str, Any]:
             "best_timeframe": None,
             "best_rr_bucket": None,
         }
+
+    # ── Lifecycle outcome breakdown ───────────────────────────────────────
+    # Classify every closed signal by its *lifecycle* outcome so a TP-then-SL
+    # trade is reported as a (partial) win rather than a loss.
+    outcomes = [outcome_for_signal(s) for s in closed]
+    n_partial = sum(1 for o in outcomes if o.outcome == "PARTIAL_WIN")
+    n_win = sum(1 for o in outcomes if o.outcome == "WIN")
+    n_full = sum(1 for o in outcomes if o.outcome == "FULL_WIN")
+    n_loss = sum(1 for o in outcomes if o.outcome == "LOSS")
+    n_be = sum(1 for o in outcomes if o.outcome == "BREAKEVEN")
+    total_wins = n_partial + n_win + n_full
+    wr_denom = total_wins + n_loss
+    overall_wr = round(total_wins / wr_denom * 100.0, 1) if wr_denom else None
+    decided = max(1, wr_denom)
+    tp1_then_sl = sum(1 for o in outcomes if o.final_exit_event == "SL" and o.max_tp_hit == 1)
+    tp2_then_sl = sum(1 for o in outcomes if o.final_exit_event == "SL" and o.max_tp_hit >= 2)
+    outcome_summary = {
+        "overall_winrate": overall_wr,
+        "wins": total_wins,
+        "losses": n_loss,
+        "partial_win_count": n_partial,
+        "full_win_count": n_full,
+        "win_count": n_win,
+        "partial_win_rate": round(n_partial / decided * 100.0, 1),
+        "full_win_rate": round(n_full / decided * 100.0, 1),
+        "breakeven_count": n_be,
+        "tp1_then_sl_count": tp1_then_sl,
+        "tp2_then_sl_count": tp2_then_sl,
+    }
 
     # ── Side win rates ────────────────────────────────────────────────────
     longs = [s for s in closed if s.side == "LONG"]
@@ -158,6 +205,7 @@ async def compute_winrate_analysis(limit: int = 500) -> Dict[str, Any]:
 
     return {
         "sample_size": len(closed),
+        "outcome_summary": outcome_summary,
         "long_winrate": _wr(longs),
         "short_winrate": _wr(shorts),
         "funding_positive_winrate": _wr(funding_pos_sigs),

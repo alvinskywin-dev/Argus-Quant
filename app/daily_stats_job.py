@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from telegram import Bot, constants
 
+from app.analytics.trade_outcome import BUCKET_LOSS, BUCKET_WIN, winrate_bucket_for_signal
 from app.config import settings
 from app.database.models import Signal
 from app.database.session import SessionLocal
@@ -20,8 +21,8 @@ async def main():
     today_signals = [s for s in signals if s.created_at and s.created_at.date() == today]
 
     closed = [s for s in today_signals if s.status in ["TP1", "TP2", "TP3", "SL"]]
-    wins = len([s for s in closed if s.status in ["TP1", "TP2", "TP3"]])
-    losses = len([s for s in closed if s.status == "SL"])
+    wins = len([s for s in closed if winrate_bucket_for_signal(s) == BUCKET_WIN])
+    losses = len([s for s in closed if winrate_bucket_for_signal(s) == BUCKET_LOSS])
     total = len(today_signals)
 
     winrate = (wins / max(1, wins + losses)) * 100
