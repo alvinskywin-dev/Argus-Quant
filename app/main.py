@@ -197,7 +197,7 @@ class App:
 
         # Open a paper position for every valid MTF signal (no real funds)
         try:
-            from app.paper.trading import open_paper_position
+            from app.paper_follow.trading import open_paper_position
 
             await open_paper_position(persisted)
             logger.info(f"📊 paper position opened for signal #{persisted.id} {sig['symbol']}")
@@ -246,7 +246,7 @@ class App:
         event = payload.get("event", "")
         if event in ("TP1", "TP2", "TP3", "SL"):
             try:
-                from app.paper.trading import on_signal_event
+                from app.paper_follow.trading import on_signal_event
 
                 await on_signal_event(
                     signal_id=int(payload["signal_id"]),

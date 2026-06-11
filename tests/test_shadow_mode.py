@@ -8,8 +8,8 @@ from __future__ import annotations
 import pytest
 
 from app.config import settings
-from app.live import shadow_mode
-from app.live.shadow_mode import (
+from app.shadow import shadow_mode
+from app.shadow.shadow_mode import (
     ShadowFill,
     ShadowResult,
     build_report,

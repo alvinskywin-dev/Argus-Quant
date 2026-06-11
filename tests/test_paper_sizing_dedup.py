@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.paper.trading import RISK_PCT, _calc_size
+from app.paper_follow.trading import RISK_PCT, _calc_size
 
 
 def _original(entry: float, stop_loss: float, balance: float) -> float:

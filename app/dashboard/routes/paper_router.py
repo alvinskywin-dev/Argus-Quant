@@ -26,7 +26,7 @@ router = APIRouter()
 async def api_paper():
     """Paper trading — stats + latest positions (Sprint 6 primary endpoint)."""
     try:
-        from app.paper.trading import get_portfolio_stats, get_positions
+        from app.paper_follow.trading import get_portfolio_stats, get_positions
 
         stats = await get_portfolio_stats()
         open_pos = await get_positions(status="open", limit=50)
@@ -41,7 +41,7 @@ async def api_paper_positions(status: str = "", limit: int = 100):
     """Paper trading — positions list (filter: open / closed / all)."""
     limit = min(max(1, limit), 500)
     try:
-        from app.paper.trading import get_positions
+        from app.paper_follow.trading import get_positions
 
         rows = await get_positions(
             status=status.lower() if status else None,
@@ -56,7 +56,7 @@ async def api_paper_positions(status: str = "", limit: int = 100):
 async def api_paper_stats():
     """Paper trading — portfolio statistics only."""
     try:
-        from app.paper.trading import get_portfolio_stats
+        from app.paper_follow.trading import get_portfolio_stats
 
         return JSONResponse(await get_portfolio_stats())
     except Exception as exc:
