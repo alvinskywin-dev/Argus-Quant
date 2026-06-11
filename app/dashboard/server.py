@@ -23,7 +23,9 @@ from app.database.models import (
 )
 from app.database.session import SessionLocal
 from app.market_data import universe
-from app.utils.observability import CorrelationMiddleware
+from app.utils.logger import logger
+from app.utils.observability import CorrelationMiddleware, request_id_ctx
+from app.utils.ratelimit import RateLimitMiddleware
 from app.utils.timezone import normalize_utc_iso
 
 # ── auth ──────────────────────────────────────────────────────────
@@ -140,9 +142,30 @@ class _SecurityHeaders(BaseHTTPMiddleware):
 
 
 app.add_middleware(_SecurityHeaders)
+# Per-IP rate limit on the public API surface (abuse / DoS protection). Placed
+# under CorrelationMiddleware so a 429 still carries the request id.
+app.add_middleware(
+    RateLimitMiddleware,
+    limit=settings.api_rate_limit_per_min,
+    window_sec=60,
+    prefixes=[p.strip() for p in settings.api_rate_limit_prefixes.split(",") if p.strip()],
+    enabled=settings.api_rate_limit_enabled,
+)
 # Added last → outermost: assigns the correlation id before any other
 # middleware runs, so security-header and route logs share one request id.
 app.add_middleware(CorrelationMiddleware)
+
+
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Return a structured 500 (no internals leaked) and log the traceback with
+    the request's correlation id so the failure is traceable in production."""
+    rid = request_id_ctx.get()
+    logger.exception(f"unhandled error rid={rid} {request.method} {request.url.path}: {exc!r}")
+    return JSONResponse(
+        status_code=500,
+        content={"error": "internal_error", "correlation_id": rid},
+    )
 
 
 # ── stats helper ──────────────────────────────────────────────────

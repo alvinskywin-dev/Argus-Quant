@@ -235,6 +235,13 @@ class Settings(BaseSettings):
     # trading costs instead of gross price move. Set false to report gross.
     report_fees_enabled: bool = True
     report_roundtrip_fee_bps: float = 8.0  # 2 × 0.04% Binance USDT-M taker
+
+    # ── HTTP API hardening ────────────────────────────────────────────
+    # Per-IP fixed-window rate limit on the public API surface (abuse / DoS
+    # protection). Applies to paths matching api_rate_limit_prefixes.
+    api_rate_limit_enabled: bool = True
+    api_rate_limit_per_min: int = 120
+    api_rate_limit_prefixes: str = "/api/public/"  # comma-separated path prefixes
     emergency_close_enabled: bool = False  # allow reduce-only emergency close action
     # When >0, a user who hits this many live-order failures inside the window
     # below has their auto-trading tripped by the circuit breaker.
