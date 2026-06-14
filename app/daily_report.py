@@ -2,10 +2,12 @@ import asyncio
 import os
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import text
+from sqlalchemy import select
 from telegram import Bot, constants
 
+from app.analytics.trade_outcome import BUCKET_LOSS, BUCKET_WIN, winrate_bucket_for_signal
 from app.config import settings
+from app.database.models import Signal
 from app.database.session import SessionLocal
 
 
@@ -13,24 +15,15 @@ async def build_report() -> str:
     since = datetime.now(timezone.utc) - timedelta(days=1)
 
     async with SessionLocal() as session:
-        r = await session.execute(
-            text("""
-                SELECT
-                    COUNT(*) total,
-                    SUM(CASE WHEN status IN ('TP1','TP2','TP3') THEN 1 ELSE 0 END) wins,
-                    SUM(CASE WHEN status='SL' THEN 1 ELSE 0 END) losses,
-                    ROUND(AVG(pnl_pct)::numeric, 2) avg_pnl
-                FROM signals
-                WHERE created_at >= :since
-            """),
-            {"since": since},
-        )
-        row = r.first()
+        result = await session.execute(select(Signal).where(Signal.created_at >= since))
+        signals = result.scalars().all()
 
-    total = row.total or 0
-    wins = row.wins or 0
-    losses = row.losses or 0
-    avg_pnl = row.avg_pnl or 0
+    total = len(signals)
+    # Lifecycle-aware: a TP-then-SL trade counts as a win, not a loss.
+    wins = len([s for s in signals if winrate_bucket_for_signal(s) == BUCKET_WIN])
+    losses = len([s for s in signals if winrate_bucket_for_signal(s) == BUCKET_LOSS])
+    pnls = [float(s.pnl_pct) for s in signals if s.pnl_pct is not None]
+    avg_pnl = round(sum(pnls) / len(pnls), 2) if pnls else 0
     winrate = round((wins / max(wins + losses, 1)) * 100, 1)
 
     return f"""

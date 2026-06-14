@@ -13,6 +13,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy import desc, select
 
+from app.analytics.trade_outcome import outcome_for_signal
 from app.config import settings
 from app.dashboard.routes.analytics_router import api_public_market_regime, api_public_performance
 from app.dashboard.routes.system_router import status_route
@@ -158,6 +159,8 @@ async def api_public_signal(signal_id: int):
         if sig is None:
             return JSONResponse({"error": "not found"}, status_code=404)
         reasons_list = [r.strip() for r in (sig.reasons or "").split("|") if r.strip()]
+        # Lifecycle-aware outcome so a TP-then-SL trade renders as a win, not a loss.
+        outcome = outcome_for_signal(sig)
         return JSONResponse(
             {
                 "id": sig.id,
@@ -169,6 +172,9 @@ async def api_public_signal(signal_id: int):
                 "risk_level": sig.risk_level or "",
                 "strategy": sig.strategy or "",
                 "status": sig.status,
+                "trade_outcome": outcome.outcome,
+                "winrate_bucket": outcome.winrate_bucket,
+                "max_tp_hit": outcome.max_tp_hit,
                 "pnl_pct": round(float(sig.pnl_pct or 0), 2),
                 "entry_low": round(float(sig.entry_low or 0), 6),
                 "entry_high": round(float(sig.entry_high or 0), 6),

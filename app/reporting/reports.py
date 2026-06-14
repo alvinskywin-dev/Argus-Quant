@@ -13,6 +13,7 @@ from typing import List, Optional
 
 from sqlalchemy import desc, select
 
+from app.analytics.trade_outcome import is_loss, is_win
 from app.database.models import Signal
 from app.database.session import SessionLocal
 from app.utils.logger import logger
@@ -34,8 +35,9 @@ async def _fetch_signals(since: datetime, until: Optional[datetime] = None) -> L
 def _build_stats(signals: List[Signal]) -> dict:
     closed = [s for s in signals if s.status in ("TP1", "TP2", "TP3", "SL")]
     open_s = [s for s in signals if s.status == "OPEN"]
-    wins = [s for s in closed if s.status in ("TP1", "TP2", "TP3")]
-    losses = [s for s in closed if s.status == "SL"]
+    # Lifecycle-aware: a TP-then-SL trade counts as a win, not a loss.
+    wins = [s for s in closed if is_win(s)]
+    losses = [s for s in closed if is_loss(s)]
     pnls = [float(s.pnl_pct or 0) for s in closed]
     win_rate = round(len(wins) / max(1, len(closed)) * 100, 1)
     avg_pnl = round(sum(pnls) / max(1, len(pnls)), 2) if pnls else 0.0

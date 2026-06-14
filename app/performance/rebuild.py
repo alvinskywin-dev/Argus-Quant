@@ -25,6 +25,7 @@ from typing import Any
 
 from sqlalchemy import delete, select
 
+from app.analytics.trade_outcome import is_loss, is_win
 from app.database.models import DailyStat, Signal, WeeklyStat
 from app.database.session import SessionLocal
 
@@ -63,8 +64,9 @@ async def rebuild() -> dict[str, Any]:
         )
         open_signals: list[Signal] = list(open_res.scalars().all())
 
-    wins = [s for s in closed if s.status in ("TP1", "TP2", "TP3")]
-    losses = [s for s in closed if s.status == "SL"]
+    # Lifecycle-aware: a TP-then-SL trade counts as a win, not a loss.
+    wins = [s for s in closed if is_win(s)]
+    losses = [s for s in closed if is_loss(s)]
     pnls = [float(s.pnl_pct or 0) for s in closed]
     rrs = [float(s.risk_reward or 0) for s in closed]
 
