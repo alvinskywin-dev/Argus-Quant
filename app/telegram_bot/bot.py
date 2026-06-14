@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from typing import Optional
+from typing import Any, Optional
 
 import psutil
 from telegram import (
@@ -40,6 +40,7 @@ from app.telegram_bot.formatter import (
     format_community_signal,
     format_market_overview,
     format_signal,
+    trade_duration_line,
 )
 from app.telegram_bot.signal_card import make_signal_card
 from app.utils.logger import logger
@@ -183,7 +184,7 @@ def _route_signal_chats(sig: dict) -> list[str]:
     return [c.strip() for c in chosen.split(",") if c.strip()]
 
 
-async def _tg_send_with_retry(coro_factory, *, max_attempts: int = 4) -> any:
+async def _tg_send_with_retry(coro_factory, *, max_attempts: int = 4) -> Any:
     """
     Retry a Telegram API call with exponential backoff.
     Handles rate-limit (RetryAfter), transient network errors, and timeouts.
@@ -746,20 +747,31 @@ class TelegramBot:
         side = payload.get("side", "")
         pnl = float(payload.get("pnl_pct", 0) or 0)
         signal_id = payload.get("signal_id")
+        max_tp_hit = int(payload.get("max_tp_hit") or 0)
 
+        # Lifecycle-aware framing: a stop hit *after* a take-profit is not a pure
+        # loss — it is a protected partial/locked win. Don't broadcast it as SL.
         is_sl = event == "SL"
-        title = (
-            f"🛑 <b>STOP LOSS • {symbol} {side}</b>"
-            if is_sl
-            else f"🎯 <b>{event} HIT • {symbol} {side}</b>"
-        )
+        if is_sl and max_tp_hit >= 2:
+            title = f"🟢 <b>WIN LOCKED • {symbol} {side}</b>"
+            icon, label = "🟢", "Win locked"
+        elif is_sl and max_tp_hit == 1:
+            title = f"🟡 <b>PARTIAL WIN • {symbol} {side}</b>"
+            icon, label = "🟡", "Partial win protected"
+        elif is_sl:
+            title = f"🛑 <b>STOP LOSS • {symbol} {side}</b>"
+            icon, label = "🔻", "Loss"
+        else:
+            title = f"🎯 <b>{event} HIT • {symbol} {side}</b>"
+            icon, label = "🔥", "Profit"
 
-        label = "Loss" if is_sl else "Profit"
-        text = (
-            f"{title}\n\n"
-            f"{'🔻' if is_sl else '🔥'} <code>{pnl:+.2f}%</code> {label}\n"
-            f"⚡ ARGUS QUANT"
-        )
+        # Display-only holding-time line; omitted cleanly if opened_at is missing.
+        footer = "⚡ ARGUS QUANT"
+        duration_line = trade_duration_line(payload.get("opened_at"), payload.get("event_time"))
+        if duration_line:
+            footer += f"\n{duration_line}"
+
+        text = f"{title}\n\n" f"{icon} <code>{pnl:+.2f}%</code> {label}\n" f"{footer}"
 
         targets = []
         if signal_id:

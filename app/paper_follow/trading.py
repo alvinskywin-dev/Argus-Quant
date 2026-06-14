@@ -39,6 +39,7 @@ from sqlalchemy import desc, select, update
 
 from app.database.models import PaperPosition, Signal
 from app.database.session import SessionLocal
+from app.paper_engine.math import risk_based_notional
 
 # ── constants ────────────────────────────────────────────────────────────────
 
@@ -52,14 +53,22 @@ WIN_STATUSES = ("TP1", "TP2", "TP3")
 
 
 def _calc_size(entry: float, stop_loss: float, balance: float) -> float:
-    """Return position size in USDT using risk-based sizing."""
+    """Return position size in USDT using risk-based sizing.
+
+    The core maths — risk RISK_PCT of balance over the entry→stop distance,
+    capped at 50% of balance — is delegated to the shared paper_engine helper
+    (single source of truth). This wrapper preserves the module's exact rounding
+    and the degenerate-stop fallback (return the bare risk amount when there is
+    no usable stop distance). ``leverage=1`` makes the notional cap equal
+    ``0.5 * balance`` to match the original behaviour.
+    """
     risk_usdt = balance * RISK_PCT
-    if entry <= 0 or stop_loss <= 0:
+    if entry <= 0 or stop_loss <= 0 or entry == stop_loss:
         return round(risk_usdt, 2)
-    dist = abs(entry - stop_loss) / entry
-    if dist <= 0:
-        return round(risk_usdt, 2)
-    return round(min(risk_usdt / dist, balance * 0.5), 2)  # cap at 50 % of balance
+    notional = risk_based_notional(
+        balance, RISK_PCT * 100.0, entry, stop_loss, leverage=1, max_notional_frac=0.5
+    )
+    return round(notional, 2)
 
 
 async def _current_balance() -> float:

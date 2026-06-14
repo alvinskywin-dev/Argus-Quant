@@ -8,7 +8,7 @@ order was placed.
 
 SAFETY: real adapters must place no real orders unless the live-trading gate
 is open (LIVE_TRADING_ENABLED=true AND MOCK_EXCHANGE_MODE=false). The gate is
-enforced centrally in app.live_trading.service.resolve_adapter and again,
+enforced centrally in app.execution.live_trading.service.resolve_adapter and again,
 defensively, inside each real adapter.
 """
 
@@ -23,6 +23,15 @@ MODE_LIVE = "LIVE"
 
 class AdapterError(Exception):
     """An exchange call failed (network, signature, rejection, etc.)."""
+
+
+class AdapterTimeoutError(AdapterError):
+    """A request timed out or the connection dropped mid-flight.
+
+    Distinct from AdapterError because the outcome is *ambiguous*: the order may
+    or may not have reached the exchange. Callers must resolve the real state
+    (e.g. via get_order_by_client_id) rather than assuming the order failed.
+    """
 
 
 @dataclass
@@ -118,7 +127,15 @@ class ExchangeAdapter:
         order_type: str = "MARKET",
         price: Optional[float] = None,
         reduce_only: bool = False,
+        client_order_id: Optional[str] = None,
     ) -> OrderResult:
+        """Place an order.
+
+        ``client_order_id`` is an idempotency key echoed back by the exchange.
+        Supplying a stable id lets a caller resolve an ambiguous timeout (did
+        the order land?) via :meth:`get_order_by_client_id` instead of blindly
+        retrying and risking a duplicate fill.
+        """
         raise NotImplementedError
 
     async def close_order(self, *, symbol: str, side: str, qty: float) -> OrderResult:
@@ -139,6 +156,17 @@ class ExchangeAdapter:
 
     async def get_order_status(self, *, symbol: str, order_id: str) -> OrderResult:
         raise NotImplementedError
+
+    async def get_order_by_client_id(
+        self, *, symbol: str, client_order_id: str
+    ) -> Optional[OrderResult]:
+        """Look up an order by its client_order_id (idempotency key).
+
+        Returns the order if the exchange has it, or ``None`` if no such order
+        exists. Used to resolve ambiguous timeouts. Default ``None`` for
+        adapters that do not implement it yet.
+        """
+        return None
 
     async def close(self) -> None:
         """Release any network resources."""

@@ -8,11 +8,90 @@ premium commercial signal product.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 
-from app.utils.helpers import fmt_pct, fmt_price
+from app.utils.helpers import fmt_pct, fmt_price, utcnow
 
 _SIDE_EMOJI = {"LONG": "🚀", "SHORT": "🔻"}
 _RISK_EMOJI = {"LOW": "🟢", "MEDIUM": "🟡", "HIGH": "🟠"}
+
+
+def format_trade_duration(seconds) -> str | None:
+    """Human-readable holding time, rounded to the nearest minute.
+
+    Format rules (no seconds are ever shown):
+      * < 60 minutes -> ``14m``
+      * < 24 hours   -> ``2h 14m``
+      * >= 24 hours  -> ``1d 3h``  (days + hours; minutes dropped)
+
+    Returns ``None`` when the duration cannot be derived so callers can fall
+    back to a duration-less message instead of crashing.
+    """
+    if seconds is None:
+        return None
+    try:
+        total_seconds = float(seconds)
+    except (TypeError, ValueError):
+        return None
+    if total_seconds < 0:
+        total_seconds = 0.0
+
+    total_minutes = int(round(total_seconds / 60.0))
+    if total_minutes < 60:
+        return f"{total_minutes}m"
+
+    hours, minutes = divmod(total_minutes, 60)
+    if hours < 24:
+        return f"{hours}h {minutes}m"
+
+    days, rem_hours = divmod(hours, 24)
+    return f"{days}d {rem_hours}h"
+
+
+def _as_utc(value) -> datetime | None:
+    """Coerce a datetime (or ISO string) into a timezone-aware UTC datetime."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _duration_seconds(opened_at, event_time=None) -> float | None:
+    """Seconds between ``opened_at`` and ``event_time`` (UTC-safe), or None."""
+    opened = _as_utc(opened_at)
+    if opened is None:
+        return None
+    now = _as_utc(event_time) or utcnow()
+    return max((now - opened).total_seconds(), 0.0)
+
+
+def trade_duration_context(opened_at, event_time=None) -> dict:
+    """Build ``trade_duration`` / ``trade_duration_seconds`` for a formatter.
+
+    Returns an empty dict when ``opened_at`` is missing/unparseable so the
+    caller can render a clean message without the duration line.
+    """
+    seconds = _duration_seconds(opened_at, event_time)
+    if seconds is None:
+        return {}
+    label = format_trade_duration(seconds)
+    if label is None:
+        return {}
+    return {"trade_duration_seconds": seconds, "trade_duration": label}
+
+
+def trade_duration_line(opened_at, event_time=None) -> str:
+    """Return ``⏱ <duration> in trade`` or an empty string when unavailable."""
+    label = trade_duration_context(opened_at, event_time).get("trade_duration")
+    return f"⏱ {label} in trade" if label else ""
 
 
 def _quality_label(conf: float) -> str:
@@ -168,7 +247,18 @@ def format_event(payload: dict) -> str:
     else:
         head = "🔔 *UPDATE*"
     pnl = payload.get("pnl_pct", 0.0)
-    return f"{head}\n" f"`{payload['symbol']}` · {payload['side']}\n" f"PnL: *{fmt_pct(pnl)}*"
+
+    footer = "⚡ ARGUS QUANT"
+    duration_line = trade_duration_line(payload.get("opened_at"), payload.get("event_time"))
+    if duration_line:
+        footer += f"\n{duration_line}"
+
+    return (
+        f"{head}\n"
+        f"`{payload['symbol']}` · {payload['side']}\n"
+        f"PnL: *{fmt_pct(pnl)}*\n\n"
+        f"{footer}"
+    )
 
 
 def format_market_overview(data: dict) -> str:

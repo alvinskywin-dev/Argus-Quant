@@ -16,7 +16,7 @@ import pytest
 
 from app.exchange_adapters.base import opposite_side, to_side
 from app.exchange_adapters.mock import MockExchangeAdapter
-from app.live_trading import service
+from app.execution.live_trading import service
 
 
 def test_confirmation_phrase_is_exact():

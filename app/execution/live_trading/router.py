@@ -15,8 +15,8 @@ from fastapi.responses import JSONResponse
 from app.auth.deps import get_current_user
 from app.database.models import AuthUser, LiveOrder, LivePosition, LiveTrade
 from app.database.session import get_session
-from app.live_trading import pilot, service
-from app.live_trading.schemas import (
+from app.execution.live_trading import pilot, service
+from app.execution.live_trading.schemas import (
     CloseLiveIn,
     EmergencyCloseIn,
     GateStatusOut,
@@ -78,6 +78,7 @@ async def open_position(body: OpenLiveIn, user: AuthUser = Depends(get_current_u
                 side=body.side,
                 quantity=body.quantity,
                 notional_usdt=body.notional_usdt,
+                risk_pct=body.risk_pct,
                 entry_price=body.entry_price,
                 leverage=body.leverage,
                 margin_type=body.margin_type,

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from app.config import settings
-from app.live_trading.break_even import (
+from app.execution.live_trading.break_even import (
     BreakEvenIntent,
     PositionProtectionState,
     apply_intents,

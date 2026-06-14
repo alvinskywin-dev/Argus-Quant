@@ -8,8 +8,10 @@ restarts (state is persisted in PostgreSQL).
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Dict, List
 
+from app.analytics.trade_outcome import classify_trade_outcome, record_exit_event
 from app.database import repo
 from app.database.models import Signal
 from app.market_data.binance_client import get_client
@@ -27,6 +29,11 @@ class SignalTracker:
         self._update_callbacks.append(cb)
 
     async def _fanout(self, sig: Signal, event: str) -> None:
+        outcome = classify_trade_outcome(
+            status=sig.status,
+            realized_pnl=sig.pnl_pct,
+            diagnostics=sig.diagnostics,
+        )
         payload = {
             "id": sig.id,
             "signal_id": sig.id,
@@ -35,6 +42,13 @@ class SignalTracker:
             "event": event,  # TP1/TP2/TP3/SL/UPDATE
             "pnl_pct": sig.pnl_pct,
             "telegram_message_id": sig.telegram_message_id,
+            # Display-only: lets the Telegram formatter show holding time.
+            "opened_at": sig.created_at,
+            "event_time": utcnow(),
+            # Lifecycle-aware outcome so Telegram can render TP-then-SL correctly.
+            "trade_outcome": outcome.outcome,
+            "winrate_bucket": outcome.winrate_bucket,
+            "max_tp_hit": outcome.max_tp_hit,
         }
         for cb in self._update_callbacks:
             try:
@@ -101,11 +115,20 @@ class SignalTracker:
                 new_status, event = "TP1", "TP1"
 
         if event:
+            now = utcnow()
             fields["status"] = new_status
             if event in {"TP3", "SL"}:
-                fields["closed_at"] = utcnow()
+                fields["closed_at"] = now
+            # Persist lifecycle (tp_history) into diagnostics so a later SL never
+            # erases the fact that a take-profit was reached. Display-only +
+            # winrate; does not change signal/execution logic.
+            updated_diag = record_exit_event(
+                sig.diagnostics, event, event_time=now, realized_pnl=fields["pnl_pct"]
+            )
+            fields["diagnostics"] = json.dumps(updated_diag)
             sig.status = new_status
             sig.pnl_pct = fields["pnl_pct"]
+            sig.diagnostics = fields["diagnostics"]
             await repo.update_signal(sig.id, fields)
             await self._fanout(sig, event)
             logger.info(f"signal #{sig.id} {sig.symbol} -> {event} pnl={pnl:+.2f}%")

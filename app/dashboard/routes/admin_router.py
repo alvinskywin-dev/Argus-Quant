@@ -111,7 +111,7 @@ async def saas_admin_safety_overview(request: Request):
         "live_gate": {},
     }
     try:
-        from app.live_trading.service import gate_status
+        from app.execution.live_trading.service import gate_status
 
         out["live_gate"] = gate_status()
     except Exception as exc:  # noqa: BLE001

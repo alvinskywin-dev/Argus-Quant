@@ -14,6 +14,8 @@ from typing import Dict, List, Optional
 
 from sqlalchemy import desc, select
 
+from app.accounting.pnl import signal_net_pnl
+from app.analytics.trade_outcome import is_loss, is_win
 from app.database.models import Signal
 from app.database.session import SessionLocal
 
@@ -100,8 +102,8 @@ class PerformanceEngine:
         report.total_signals = len(signals)
         closed = [s for s in signals if s.status in ("TP1", "TP2", "TP3", "SL")]
         open_sigs = [s for s in signals if s.status == "OPEN"]
-        wins = [s for s in closed if s.status in ("TP1", "TP2", "TP3")]
-        losses = [s for s in closed if s.status == "SL"]
+        wins = [s for s in closed if is_win(s)]
+        losses = [s for s in closed if is_loss(s)]
 
         report.closed_signals = len(closed)
         report.open_signals = len(open_sigs)
@@ -109,7 +111,7 @@ class PerformanceEngine:
         report.losses = len(losses)
         report.win_rate = round(len(wins) / max(1, len(closed)) * 100, 1)
 
-        pnls = [float(s.pnl_pct or 0) for s in closed]
+        pnls = [signal_net_pnl(s) for s in closed]
         rrs = [float(s.risk_reward or 0) for s in closed]
 
         report.avg_pnl = round(sum(pnls) / max(1, len(pnls)), 2)
@@ -144,8 +146,8 @@ class PerformanceEngine:
         # LONG / SHORT breakdown
         for side in ("LONG", "SHORT"):
             side_sigs = [s for s in closed if s.side == side]
-            side_wins = [s for s in side_sigs if s.status in ("TP1", "TP2", "TP3")]
-            side_pnls = [float(s.pnl_pct or 0) for s in side_sigs]
+            side_wins = [s for s in side_sigs if is_win(s)]
+            side_pnls = [signal_net_pnl(s) for s in side_sigs]
             stat = SideStat(
                 side=side,
                 total=len(side_sigs),
@@ -165,8 +167,8 @@ class PerformanceEngine:
             sym_map.setdefault(s.symbol, []).append(s)
         sym_stats: List[SymbolStat] = []
         for sym, sigs in sym_map.items():
-            sym_wins = [s for s in sigs if s.status in ("TP1", "TP2", "TP3")]
-            sym_pnls = [float(s.pnl_pct or 0) for s in sigs]
+            sym_wins = [s for s in sigs if is_win(s)]
+            sym_pnls = [signal_net_pnl(s) for s in sigs]
             sym_rrs = [float(s.risk_reward or 0) for s in sigs]
             sym_stats.append(
                 SymbolStat(
@@ -190,8 +192,8 @@ class PerformanceEngine:
                 monthly_map.setdefault(key, []).append(s)
         monthly: List[MonthStat] = []
         for month, sigs in sorted(monthly_map.items()):
-            m_wins = [s for s in sigs if s.status in ("TP1", "TP2", "TP3")]
-            m_pnls = [float(s.pnl_pct or 0) for s in sigs]
+            m_wins = [s for s in sigs if is_win(s)]
+            m_pnls = [signal_net_pnl(s) for s in sigs]
             monthly.append(
                 MonthStat(
                     month=month,

@@ -17,6 +17,9 @@ class OpenLiveIn(BaseModel):
     side: str = Field(pattern="^(LONG|SHORT)$")
     quantity: Optional[float] = Field(default=None, gt=0)
     notional_usdt: Optional[float] = Field(default=None, gt=0)
+    # Risk-based sizing (#5): size by entry→stop distance risking this % of
+    # balance. Requires stop_loss; used only when quantity/notional are absent.
+    risk_pct: Optional[float] = Field(default=None, gt=0, le=100)
     entry_price: Optional[float] = Field(default=None, gt=0)
     leverage: int = Field(default=5, ge=1, le=125)
     margin_type: str = Field(default="isolated", pattern="^(isolated|cross)$")

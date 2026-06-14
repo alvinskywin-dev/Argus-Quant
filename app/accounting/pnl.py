@@ -92,6 +92,31 @@ def compute_net_pnl(
     )
 
 
+def net_pnl_pct(gross_pct, *, fee_bps: float | None = None) -> float:
+    """Convert a gross price-move % into a net % after an estimated round-trip
+    taker fee.
+
+    ``pnl_pct`` on a signal is a price-move percentage, so a round-trip taker
+    fee of ``fee_bps`` basis points subtracts ``fee_bps / 100`` percentage
+    points. Returns the gross value unchanged when REPORT_FEES_ENABLED is off.
+    """
+    if gross_pct is None:
+        return 0.0
+    from app.config import settings
+
+    g = float(gross_pct)
+    if not settings.report_fees_enabled:
+        return g
+    fee = settings.report_roundtrip_fee_bps if fee_bps is None else fee_bps
+    return g - (float(fee) / 100.0)
+
+
+def signal_net_pnl(sig) -> float:
+    """Net reporting pnl_pct for a Signal row or dict (gross − est. fees)."""
+    pnl = sig.get("pnl_pct") if isinstance(sig, dict) else getattr(sig, "pnl_pct", None)
+    return net_pnl_pct(pnl)
+
+
 def holding_seconds(opened_at, closed_at) -> int:
     """Whole seconds a position was held; 0 if either timestamp is missing."""
     if not opened_at or not closed_at:

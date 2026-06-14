@@ -12,6 +12,8 @@ By default everything runs MOCK and the result rows are tagged mode="MOCK".
 
 from __future__ import annotations
 
+import asyncio
+import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -20,10 +22,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import LiveAuditLog, LiveOrder, LivePosition, LiveTrade
 from app.exchange_adapters import live_gate_open, resolve_adapter
-from app.exchange_adapters.base import AdapterError, opposite_side, to_side
+from app.exchange_adapters.base import AdapterError, AdapterTimeoutError, opposite_side, to_side
 from app.exchange_vault import service as vault
 from app.paper_engine import math as pmath
 from app.recovery import tp_sl as tp_sl_const
+from app.risk.slippage import exceeds_slippage, slippage_bps
 from app.safety import service as safety
 from app.utils.logger import logger
 
@@ -37,6 +40,75 @@ class LiveTradingError(Exception):
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+# Binance newClientOrderId allows ^[\.A-Z\:/a-z0-9_-]{1,36}$.
+_CID_ALLOWED = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-.:/")
+
+
+def _build_client_order_id(supplied: Optional[str]) -> str:
+    """Return a valid idempotency key — caller-supplied (sanitised) or generated."""
+    if supplied:
+        cid = "".join(c for c in str(supplied) if c in _CID_ALLOWED)[:36]
+        if cid:
+            return cid
+    return f"ax{uuid.uuid4().hex}"[:36]
+
+
+async def _resolve_after_timeout(
+    adapter, symbol: str, client_order_id: str, *, attempts: int = 3, delay: float = 0.5
+):
+    """After an ambiguous timeout, ask the exchange whether the order landed.
+
+    Returns the OrderResult if found, else None. Retries because a just-placed
+    order can take a moment to become queryable.
+    """
+    for i in range(attempts):
+        try:
+            res = await adapter.get_order_by_client_id(
+                symbol=symbol, client_order_id=client_order_id
+            )
+        except AdapterError:
+            res = None
+        if res is not None:
+            return res
+        if i < attempts - 1:
+            await asyncio.sleep(delay)
+    return None
+
+
+async def _open_entry_idempotent(adapter, *, symbol, side, qty, order_type, price, client_order_id):
+    """Place the entry order; on a timeout, resolve the true state by client id.
+
+    This is the heart of the duplicate-safety fix: a dropped connection no longer
+    means "assume it failed and risk a second fill" — we look the order up by its
+    idempotency key and only report failure when the exchange truly has no order.
+    """
+    try:
+        return await adapter.open_order(
+            symbol=symbol,
+            side=side,
+            qty=qty,
+            order_type=order_type,
+            price=price,
+            client_order_id=client_order_id,
+        )
+    except AdapterTimeoutError as exc:
+        logger.warning(
+            f"[live] entry timeout for {symbol} {side} — resolving by "
+            f"client_order_id={client_order_id}"
+        )
+        resolved = await _resolve_after_timeout(adapter, symbol, client_order_id)
+        if resolved is not None:
+            logger.warning(
+                f"[live] entry DID land despite timeout {symbol} {side} "
+                f"order_id={resolved.order_id} — adopting it (no duplicate placed)"
+            )
+            return resolved
+        # The exchange has no such order — safe to treat as a clean failure.
+        raise AdapterError(
+            f"entry timed out and no order found for client_order_id={client_order_id}: {exc}"
+        ) from exc
 
 
 def gate_status() -> dict:
@@ -123,7 +195,12 @@ async def open_position(
     take_profit: Optional[float] = None,
     stop_loss: Optional[float] = None,
     trailing_pct: Optional[float] = None,
+    client_order_id: Optional[str] = None,
+    risk_pct: Optional[float] = None,
+    balance: Optional[float] = None,
 ) -> dict:
+    from app.config import settings
+
     exchange = exchange.lower()
     if exchange == "auto":
         exchange = await route_exchange(db, user_id)  # Signal -> Exchange Adapter routing
@@ -138,7 +215,7 @@ async def open_position(
 
     # Multi-user Live Beta gate (no-op unless LIVE_BETA_ENABLED). Enforces the
     # per-user / per-symbol / global exposure envelope for beta members.
-    from app.live_beta import service as live_beta
+    from app.execution.live_beta import service as live_beta
 
     if live_beta.beta_enabled():
         est_notional = float(notional_usdt or (quantity or 0) * (entry_price or pmath_mark(symbol)))
@@ -155,24 +232,73 @@ async def open_position(
         await _audit(db, user_id, exchange, symbol, "OPEN", "REJECTED", mode, exc.detail)
         raise LiveTradingError(exc.status_code, exc.detail) from exc
 
-    # Resolve quantity.
+    # Resolve quantity. Sizing precedence: explicit quantity > notional > risk.
     px = float(entry_price or pmath_mark(symbol))
     if quantity is None:
-        if not notional_usdt or px <= 0:
-            raise LiveTradingError(400, "Provide quantity, or notional_usdt with a price")
-        quantity = pmath.position_quantity(notional_usdt, px)
+        if notional_usdt:
+            if px <= 0:
+                raise LiveTradingError(400, "A price is required to size from notional")
+            quantity = pmath.position_quantity(notional_usdt, px)
+        elif risk_pct and stop_loss and px > 0:
+            # Risk-based sizing (#5): size so the entry→stop distance risks
+            # risk_pct% of available balance, capped by margin availability.
+            bal = balance
+            if bal is None:
+                try:
+                    bal = float((await adapter.get_balance()).available)
+                except AdapterError as exc:
+                    raise LiveTradingError(
+                        502, f"Cannot fetch balance for risk-based sizing: {exc}"
+                    ) from exc
+            notional = pmath.risk_based_notional(
+                bal,
+                float(risk_pct),
+                px,
+                float(stop_loss),
+                leverage=leverage,
+                max_notional_frac=settings.live_max_notional_frac,
+            )
+            quantity = pmath.position_quantity(notional, px)
+        else:
+            raise LiveTradingError(
+                400, "Provide quantity, notional_usdt, or risk_pct with a stop_loss"
+            )
     if quantity <= 0:
         raise LiveTradingError(400, "Quantity must be positive")
 
     bside = to_side(side)
+    cid = _build_client_order_id(client_order_id)
+
+    # ── Slippage guard (#4) — refuse a MARKET entry that chases a moved market ──
+    # Only meaningful when we have an intended reference price (entry_price) and a
+    # live mark to compare it against. Favourable moves never trip the guard.
+    if settings.slippage_guard_enabled and order_type == "MARKET" and entry_price:
+        mark = pmath_mark(symbol)
+        if mark > 0 and exceeds_slippage(side, float(entry_price), mark, settings.max_slippage_bps):
+            slip = slippage_bps(side, float(entry_price), mark)
+            msg = (
+                f"Slippage guard: {symbol} {side} mark moved {slip:.0f}bps beyond "
+                f"intended entry {entry_price} (max {settings.max_slippage_bps:.0f}bps)"
+            )
+            await _audit(db, user_id, exchange, symbol, "OPEN", "REJECTED", mode, msg)
+            await adapter.close()
+            raise LiveTradingError(409, msg)
 
     # ── 1) ENTRY ─────────────────────────────────────────────────────
     # If the entry itself fails, no position exists — record + reject cleanly.
+    # The order carries an idempotency key (cid); a dropped connection is
+    # resolved by looking the order up rather than risking a duplicate fill.
     try:
         await adapter.set_margin_type(symbol, margin_type)
         await adapter.set_leverage(symbol, leverage)
-        order = await adapter.open_order(
-            symbol=symbol, side=bside, qty=quantity, order_type=order_type, price=entry_price
+        order = await _open_entry_idempotent(
+            adapter,
+            symbol=symbol,
+            side=bside,
+            qty=quantity,
+            order_type=order_type,
+            price=entry_price,
+            client_order_id=cid,
         )
     except AdapterError as exc:
         await _record_order_error(db, user_id, exchange, symbol, bside, order_type, mode, str(exc))
@@ -196,6 +322,28 @@ async def open_position(
     # Entry filled — persist the order + position FIRST so a real fill is never
     # lost even if protection placement fails below.
     fill_price = order.avg_price or order.price or px
+
+    # Post-fill slippage telemetry (#4): a MARKET fill can't be undone, but record
+    # and alert when realised slippage breaches the band so ops can review.
+    if settings.slippage_guard_enabled and order_type == "MARKET" and order.avg_price:
+        ref = float(entry_price or px)
+        realised = slippage_bps(side, ref, float(order.avg_price))
+        if ref > 0 and realised > settings.max_slippage_bps:
+            logger.warning(
+                f"[live] HIGH SLIPPAGE {symbol} {side}: fill {order.avg_price} vs "
+                f"ref {ref} = {realised:.0f}bps (band {settings.max_slippage_bps:.0f}bps)"
+            )
+            await _audit(
+                db,
+                user_id,
+                exchange,
+                symbol,
+                "OPEN",
+                "HIGH_SLIPPAGE",
+                mode,
+                f"fill {order.avg_price} vs ref {ref} = {realised:.0f}bps",
+            )
+
     db.add(
         LiveOrder(
             user_id=user_id,

@@ -3,7 +3,7 @@
 
 # ─────────────────────────── Ruff (lint + import sort) ───────────────────────
 [tool.ruff]
-target-version = "py311"   # match the Docker runtime (python:3.11-slim)
+target-version = "py312"   # match the Docker runtime (python:3.12-slim) and CI
 line-length = 100
 extend-exclude = [
     "app/database/migrations",   # one-off operational scripts
@@ -49,7 +49,7 @@ known-first-party = ["app"]
 # ─────────────────────────── Black (formatter) ───────────────────────────────
 [tool.black]
 line-length = 100
-target-version = ["py311"]
+target-version = ["py312"]
 extend-exclude = '''
 /(
     app/database/migrations
@@ -65,7 +65,7 @@ extend-exclude = '''
 # ADVISORY in CI (does not block PRs yet) and ratchets to blocking as modules
 # gain annotations — see .github/workflows/ci.yml and ARGUS_QUANT_PRODUCTION_REVIEW.md.
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 ignore_missing_imports = true
 disable_error_code = ["union-attr", "annotation-unchecked"]
 warn_unused_ignores = true          # keep "noqa/ignore" debt honest

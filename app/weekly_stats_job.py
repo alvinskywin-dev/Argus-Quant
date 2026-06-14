@@ -4,6 +4,8 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from telegram import Bot, constants
 
+from app.accounting.pnl import signal_net_pnl
+from app.analytics.trade_outcome import BUCKET_LOSS, BUCKET_WIN, winrate_bucket_for_signal
 from app.config import settings
 from app.database.models import Signal
 from app.database.session import SessionLocal
@@ -21,12 +23,12 @@ async def main():
     week_signals = [s for s in signals if s.created_at and s.created_at >= start]
 
     closed = [s for s in week_signals if s.status in ["TP1", "TP2", "TP3", "SL"]]
-    wins = len([s for s in closed if s.status in ["TP1", "TP2", "TP3"]])
-    losses = len([s for s in closed if s.status == "SL"])
+    wins = len([s for s in closed if winrate_bucket_for_signal(s) == BUCKET_WIN])
+    losses = len([s for s in closed if winrate_bucket_for_signal(s) == BUCKET_LOSS])
     total = len(week_signals)
 
     winrate = (wins / max(1, wins + losses)) * 100
-    pnl = sum(float(s.pnl_pct or 0) for s in closed)
+    pnl = sum(signal_net_pnl(s) for s in closed)
 
     data = {
         "signals": total,

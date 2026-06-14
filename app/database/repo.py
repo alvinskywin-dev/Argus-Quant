@@ -212,28 +212,32 @@ async def set_setting(key: str, value: str) -> None:
 
 # ---------------- stats ----------------
 async def winrate_summary(days: int = 7) -> dict[str, Any]:
+    # Lifecycle-aware: a trade that reached a take-profit before stopping out is
+    # a (partial) win, not a loss. We classify in Python from diagnostics
+    # tp_history rather than counting raw latest status in SQL.
+    from app.analytics.trade_outcome import BUCKET_LOSS, BUCKET_WIN, winrate_bucket_for_signal
+
     since = datetime.now(timezone.utc) - timedelta(days=days)
     async with get_session() as s:
         rows = await s.execute(
-            select(
-                func.count(Signal.id),
-                func.sum(func.case((Signal.status.in_(["TP1", "TP2", "TP3"]), 1), else_=0)),
-                func.sum(func.case((Signal.status == "SL", 1), else_=0)),
-                func.avg(Signal.pnl_pct),
-            ).where(Signal.created_at >= since, Signal.status != "OPEN")
+            select(Signal).where(Signal.created_at >= since, Signal.status != "OPEN")
         )
-        total, wins, losses, avg_pnl = rows.one()
-        total = int(total or 0)
-        wins = int(wins or 0)
-        losses = int(losses or 0)
-        wr = (wins / total * 100.0) if total else 0.0
-        return {
-            "total": total,
-            "wins": wins,
-            "losses": losses,
-            "winrate": wr,
-            "avg_pnl": float(avg_pnl or 0.0),
-        }
+        sigs = list(rows.scalars().all())
+
+    total = len(sigs)
+    wins = sum(1 for sig in sigs if winrate_bucket_for_signal(sig) == BUCKET_WIN)
+    losses = sum(1 for sig in sigs if winrate_bucket_for_signal(sig) == BUCKET_LOSS)
+    pnls = [float(sig.pnl_pct or 0.0) for sig in sigs]
+    avg_pnl = (sum(pnls) / len(pnls)) if pnls else 0.0
+    decided = wins + losses
+    wr = (wins / decided * 100.0) if decided else 0.0
+    return {
+        "total": total,
+        "wins": wins,
+        "losses": losses,
+        "winrate": wr,
+        "avg_pnl": avg_pnl,
+    }
 
 
 async def leaderboard(limit: int = 10) -> List[dict[str, Any]]:

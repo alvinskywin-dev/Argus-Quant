@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database.models import LivePosition
-from app.live_beta.models import APPROVED, PENDING, SUSPENDED, LiveBetaMember
+from app.execution.live_beta.models import APPROVED, PENDING, SUSPENDED, LiveBetaMember
 from app.utils.logger import logger
 
 

@@ -197,7 +197,7 @@ class App:
 
         # Open a paper position for every valid MTF signal (no real funds)
         try:
-            from app.paper.trading import open_paper_position
+            from app.paper_follow.trading import open_paper_position
 
             await open_paper_position(persisted)
             logger.info(f"📊 paper position opened for signal #{persisted.id} {sig['symbol']}")
@@ -246,7 +246,7 @@ class App:
         event = payload.get("event", "")
         if event in ("TP1", "TP2", "TP3", "SL"):
             try:
-                from app.paper.trading import on_signal_event
+                from app.paper_follow.trading import on_signal_event
 
                 await on_signal_event(
                     signal_id=int(payload["signal_id"]),
@@ -307,6 +307,17 @@ class App:
             self._tasks.append(asyncio.create_task(run_startup_recovery()))
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"startup recovery not scheduled (non-fatal): {exc!r}")
+
+        # Periodic DB↔exchange reconciliation sweep (read-only; no-ops unless
+        # RECONCILIATION_LOOP_ENABLED). The loop owns its own supervise/sleep
+        # cycle, so it is scheduled directly (not via run_forever): when disabled
+        # it returns immediately instead of busy-looping. Alerts admins on drift.
+        try:
+            from app.reconciliation.loop import reconciliation_loop
+
+            self._tasks.append(asyncio.create_task(reconciliation_loop(alert=self.bot.alert_admin)))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"reconciliation loop not scheduled (non-fatal): {exc!r}")
 
         logger.info(
             f"=== all services running  "

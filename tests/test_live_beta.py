@@ -10,9 +10,9 @@ import asyncio
 
 import pytest
 
-import app.live_beta.service as service
+import app.execution.live_beta.service as service
 from app.config import settings
-from app.live_beta.models import APPROVED, PENDING, LiveBetaMember
+from app.execution.live_beta.models import APPROVED, PENDING, LiveBetaMember
 
 
 @pytest.fixture

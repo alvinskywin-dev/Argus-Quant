@@ -14,8 +14,8 @@ from fastapi.responses import JSONResponse
 from app.auth.deps import get_current_user, require_role
 from app.database.models import AuthUser
 from app.database.session import get_session
-from app.live_beta import service
-from app.live_beta.schemas import BetaAdminActionIn, BetaRequestIn
+from app.execution.live_beta import service
+from app.execution.live_beta.schemas import BetaAdminActionIn, BetaRequestIn
 
 router = APIRouter(prefix="/api/live-beta", tags=["live-beta"])
 

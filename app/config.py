@@ -192,6 +192,18 @@ class Settings(BaseSettings):
     live_pilot_allowed_symbols: str = "BTCUSDT,ETHUSDT"
     live_pilot_require_confirmation: bool = True
 
+    # ── Live execution: risk-based sizing (#5) + slippage guard (#4) ──
+    # Default risk-per-trade % used when a live order asks to be sized by risk
+    # (entry→stop distance) instead of a raw notional.
+    live_risk_per_trade_pct: float = 1.0
+    # Cap on risk-based sizing: required margin must not exceed this fraction of
+    # available balance (1.0 = up to full balance as margin).
+    live_max_notional_frac: float = 1.0
+    # Refuse / flag a MARKET entry when the live price has moved beyond this many
+    # basis points adverse to the intended entry (50 bps = 0.5%). 0 disables.
+    slippage_guard_enabled: bool = True
+    max_slippage_bps: float = 50.0
+
     # ── Multi-user Live Beta — controlled live access (default OFF) ──
     live_beta_enabled: bool = False
     live_beta_max_users: int = 10
@@ -209,9 +221,27 @@ class Settings(BaseSettings):
     # cancel, or modify real orders except emergency_close (admin-triggered,
     # reduce-only) which additionally requires the live execution gate.
     reconciliation_enabled: bool = False  # 21B: DB↔exchange drift detection API
+    # Periodic background reconciliation sweep (DB↔exchange drift) while running.
+    # Read-only: it only writes ReconciliationIssue audit rows and alerts admins;
+    # it never opens/closes/cancels orders. Off by default.
+    reconciliation_loop_enabled: bool = False
+    reconciliation_interval_sec: int = 300  # how often the sweep runs (min 30)
+    reconciliation_alert_critical: bool = True  # admin-alert on newly-found drift
     position_recovery_enabled: bool = False  # 21C: rebuild state on startup + API
     order_failure_engine_enabled: bool = False  # 21D: failure tracking + retry policy API
     accounting_enabled: bool = False  # 21E: net-PnL accounting API
+    # Report performance PnL net of an estimated round-trip taker fee (#8) so
+    # displayed avg/total PnL, profit factor, and Telegram stats reflect real
+    # trading costs instead of gross price move. Set false to report gross.
+    report_fees_enabled: bool = True
+    report_roundtrip_fee_bps: float = 8.0  # 2 × 0.04% Binance USDT-M taker
+
+    # ── HTTP API hardening ────────────────────────────────────────────
+    # Per-IP fixed-window rate limit on the public API surface (abuse / DoS
+    # protection). Applies to paths matching api_rate_limit_prefixes.
+    api_rate_limit_enabled: bool = True
+    api_rate_limit_per_min: int = 120
+    api_rate_limit_prefixes: str = "/api/public/"  # comma-separated path prefixes
     emergency_close_enabled: bool = False  # allow reduce-only emergency close action
     # When >0, a user who hits this many live-order failures inside the window
     # below has their auto-trading tripped by the circuit breaker.
