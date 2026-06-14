@@ -74,6 +74,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       - name: Run pytest
+        env:
+          # Throwaway key so the exchange-vault crypto unit tests can derive a
+          # key in CI. Test-only — never used for real credential encryption.
+          VAULT_MASTER_KEY: ci-test-vault-master-key-do-not-use-in-prod
         run: pytest -q
 
   # ── 4. Docker build validation (blocking) ───────────────────────────────────
