@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import desc, select
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from app.analytics.trade_outcome import is_loss, is_win
 from app.config import settings
 
 # Re-exported from htmlpages (handlers in app/dashboard/routes import these
@@ -202,8 +203,9 @@ async def _get_stats() -> dict:
 
     closed = [s for s in week if s.status in ("TP1", "TP2", "TP3", "SL")]
     open_sigs = [s for s in week if s.status == "OPEN"]
-    wins = [s for s in closed if s.status in ("TP1", "TP2", "TP3")]
-    losses = [s for s in closed if s.status == "SL"]
+    # Lifecycle-aware: a TP-then-SL trade counts as a win, not a loss.
+    wins = [s for s in closed if is_win(s)]
+    losses = [s for s in closed if is_loss(s)]
     winrate = len(wins) / max(1, len(wins) + len(losses)) * 100
     avg_pnl = sum(float(s.pnl_pct or 0) for s in closed) / max(1, len(closed))
 
@@ -305,9 +307,9 @@ def _compute_backtest(signals: list) -> dict:
     if not signals:
         return _EMPTY
 
-    WIN_ST = ("TP1", "TP2", "TP3")
-    wins = [s for s in signals if s.status in WIN_ST]
-    losses = [s for s in signals if s.status == "SL"]
+    # Lifecycle-aware: a TP-then-SL trade counts as a win, not a loss.
+    wins = [s for s in signals if is_win(s)]
+    losses = [s for s in signals if is_loss(s)]
     pnls = [float(s.pnl_pct or 0) for s in signals]
     rrs = [float(s.risk_reward or 0) for s in signals]
     n = len(signals)
@@ -352,8 +354,8 @@ def _compute_backtest(signals: list) -> dict:
 
     monthly_rows = []
     for month, msigs in sorted(mo_map.items()):
-        mw = [s for s in msigs if s.status in WIN_ST]
-        ml = [s for s in msigs if s.status == "SL"]
+        mw = [s for s in msigs if is_win(s)]
+        ml = [s for s in msigs if is_loss(s)]
         mp = [float(s.pnl_pct or 0) for s in msigs]
         mn = max(1, len(msigs))
         mgw = sum(p for p in mp if p > 0)

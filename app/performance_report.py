@@ -1,7 +1,10 @@
 import asyncio
+from collections import defaultdict
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 
+from app.analytics.trade_outcome import BUCKET_LOSS, BUCKET_WIN, winrate_bucket_for_signal
+from app.database.models import Signal
 from app.database.session import SessionLocal
 
 
@@ -9,6 +12,37 @@ async def q(sql: str):
     async with SessionLocal() as session:
         r = await session.execute(text(sql))
         return r.fetchall()
+
+
+async def _symbol_rows():
+    """Per-symbol win/loss tallies — lifecycle-aware (a TP-then-SL trade is a
+    win, not a loss), so figures match the dashboard rather than raw status."""
+    async with SessionLocal() as session:
+        result = await session.execute(select(Signal).where(Signal.status != "OPEN"))
+        signals = result.scalars().all()
+
+    by_symbol: dict = defaultdict(list)
+    for s in signals:
+        by_symbol[s.symbol].append(s)
+
+    rows = []
+    for symbol, sigs in by_symbol.items():
+        if len(sigs) < 2:
+            continue
+        wins = sum(1 for s in sigs if winrate_bucket_for_signal(s) == BUCKET_WIN)
+        losses = sum(1 for s in sigs if winrate_bucket_for_signal(s) == BUCKET_LOSS)
+        pnls = [float(s.pnl_pct) for s in sigs if s.pnl_pct is not None]
+        avg_pnl = round(sum(pnls) / len(pnls), 2) if pnls else 0.0
+        rows.append(
+            {
+                "symbol": symbol,
+                "total": len(sigs),
+                "wins": wins,
+                "losses": losses,
+                "avg_pnl": avg_pnl,
+            }
+        )
+    return rows
 
 
 async def main():
@@ -31,28 +65,6 @@ async def main():
             GROUP BY timeframe, status
             ORDER BY timeframe, total DESC;
         """,
-        "WORST SYMBOLS": """
-            SELECT symbol, COUNT(*) total,
-                   SUM(CASE WHEN status='SL' THEN 1 ELSE 0 END) losses,
-                   ROUND(AVG(pnl_pct)::numeric, 2) avg_pnl
-            FROM signals
-            WHERE status != 'OPEN'
-            GROUP BY symbol
-            HAVING COUNT(*) >= 2
-            ORDER BY avg_pnl ASC
-            LIMIT 15;
-        """,
-        "BEST SYMBOLS": """
-            SELECT symbol, COUNT(*) total,
-                   SUM(CASE WHEN status IN ('TP1','TP2','TP3') THEN 1 ELSE 0 END) wins,
-                   ROUND(AVG(pnl_pct)::numeric, 2) avg_pnl
-            FROM signals
-            WHERE status != 'OPEN'
-            GROUP BY symbol
-            HAVING COUNT(*) >= 2
-            ORDER BY avg_pnl DESC
-            LIMIT 15;
-        """,
     }
 
     for name, sql in sections.items():
@@ -62,6 +74,20 @@ async def main():
         rows = await q(sql)
         for row in rows:
             print(tuple(row))
+
+    sym_rows = await _symbol_rows()
+
+    print("\\n" + "=" * 60)
+    print("WORST SYMBOLS")
+    print("=" * 60)
+    for r in sorted(sym_rows, key=lambda x: x["avg_pnl"])[:15]:
+        print((r["symbol"], r["total"], r["losses"], r["avg_pnl"]))
+
+    print("\\n" + "=" * 60)
+    print("BEST SYMBOLS")
+    print("=" * 60)
+    for r in sorted(sym_rows, key=lambda x: x["avg_pnl"], reverse=True)[:15]:
+        print((r["symbol"], r["total"], r["wins"], r["avg_pnl"]))
 
 
 asyncio.run(main())

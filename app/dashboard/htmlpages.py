@@ -691,9 +691,12 @@ async function load() {{
     return;
   }}
 
-  const isWin  = ['TP1','TP2','TP3'].includes(d.status);
-  const isLoss = d.status === 'SL';
-  const isOpen = d.status === 'OPEN';
+  // Lifecycle-aware: a TP-then-SL trade is a win, not a loss (winrate_bucket
+  // comes from the server-side classifier; fall back to status for old payloads).
+  const isOpen = d.winrate_bucket ? d.winrate_bucket === 'OPEN' : d.status === 'OPEN';
+  const isWin  = d.winrate_bucket ? d.winrate_bucket === 'WIN'
+                                  : ['TP1','TP2','TP3'].includes(d.status);
+  const isLoss = d.winrate_bucket ? d.winrate_bucket === 'LOSS' : d.status === 'SL';
   const pnlClass = isOpen ? 'open' : isWin ? 'win' : isLoss ? 'loss' : 'open';
 
   // PnL banner

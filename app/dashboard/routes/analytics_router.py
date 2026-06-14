@@ -72,7 +72,7 @@ async def api_public_performance():
 
         def _side_stat(sigs: list) -> dict:
             sw = [s for s in sigs if is_win(s)]
-            sl = [s for s in sigs if s.status == "SL"]
+            sl = [s for s in sigs if is_loss(s)]
             sp = [signal_net_pnl(s) for s in sigs]
             sr = [float(s.risk_reward or 0) for s in sigs]
             n = max(1, len(sigs))
@@ -120,7 +120,7 @@ async def api_public_performance():
         leaderboard_rows = []
         for sym, sigs in sym_map.items():
             sw = [s for s in sigs if is_win(s)]
-            sl = [s for s in sigs if s.status == "SL"]
+            sl = [s for s in sigs if is_loss(s)]
             sp = [signal_net_pnl(s) for s in sigs]
             sr = [float(s.risk_reward or 0) for s in sigs]
             nn = max(1, len(sigs))
