@@ -21,13 +21,19 @@ def setup_exchange_vault(app: FastAPI) -> None:
     from app.exchange_vault.router import router as vault_router
     from app.exchange_vault.service import VaultError
 
-    async def _vault_error_handler(_request: Request, exc: VaultError) -> JSONResponse:
-        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    async def _vault_error_handler(_request: Request, exc: Exception) -> JSONResponse:
+        return JSONResponse(
+            status_code=getattr(exc, "status_code", 500),
+            content={"detail": getattr(exc, "detail", str(exc))},
+        )
 
-    async def _auth_error_handler(_request: Request, exc: AuthError) -> JSONResponse:
-        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    async def _auth_error_handler(_request: Request, exc: Exception) -> JSONResponse:
+        return JSONResponse(
+            status_code=getattr(exc, "status_code", 500),
+            content={"detail": getattr(exc, "detail", str(exc))},
+        )
 
-    app.add_exception_handler(VaultError, _vault_error_handler)  # type: ignore[arg-type]  # FastAPI: handler typed for its specific exc subtype
-    app.add_exception_handler(AuthError, _auth_error_handler)  # type: ignore[arg-type]  # FastAPI: handler typed for its specific exc subtype
+    app.add_exception_handler(VaultError, _vault_error_handler)
+    app.add_exception_handler(AuthError, _auth_error_handler)
     app.include_router(vault_router)
     app.state._vault_installed = True
