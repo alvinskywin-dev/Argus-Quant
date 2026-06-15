@@ -302,6 +302,12 @@ class Settings(BaseSettings):
     # tightens the gate within hard clamps. Per-regime values below; NORMAL is
     # the fallback for unknown regimes.
     regime_adaptive_gate_enabled: bool = False
+    # The gate may RELAX thresholds only in the low-volatility / range regime it
+    # was designed for; in every other regime it may tighten but never drop below
+    # the static base (min_rr / max_sl_distance / min_confidence). This stops the
+    # gate from silently lowering RR globally (e.g. NORMAL → normal_min_rr 1.5)
+    # the moment it is enabled.
+    gate_relax_only_in_low_vol: bool = True
 
     normal_min_rr: float = 1.5
     normal_max_sl_distance_percent: float = 10.0
@@ -315,19 +321,57 @@ class Settings(BaseSettings):
     high_vol_max_sl_distance_percent: float = 8.0
     high_vol_min_confidence_delta: int = 3
 
-    bull_min_rr: float = 1.3
-    bull_max_sl_distance_percent: float = 12.0
-    bull_min_confidence_delta: int = -2
+    # BULL/BEAR are directional *trend* regimes, not low-liquidity regimes, so the
+    # gate must NOT relax RR/SL/confidence here (that only let weaker setups
+    # through in the regimes where realized expectancy was worst). They may only
+    # tighten relative to the NORMAL baseline. The low-vol/range relaxation the
+    # gate was built for stays on LOW_VOLATILITY.
+    bull_min_rr: float = 1.8
+    bull_max_sl_distance_percent: float = 10.0
+    bull_min_confidence_delta: int = 0
 
-    bear_min_rr: float = 1.3
-    bear_max_sl_distance_percent: float = 12.0
-    bear_min_confidence_delta: int = -2
+    bear_min_rr: float = 2.0
+    bear_max_sl_distance_percent: float = 8.0
+    bear_min_confidence_delta: int = 3
 
     sideways_min_rr: float = 1.6
     sideways_max_sl_distance_percent: float = 8.0
     sideways_min_confidence_delta: int = 3
     # When the 1D stop is closer than the min floor: "widen" to the floor, or "reject".
     stoploss_too_close_action: str = "widen"  # widen | reject
+
+    # ── Trading-logic audit fixes (signal tracker + scoring) ──────────────
+    # 1) Lifecycle PnL: book a portion of the position at each take-profit and
+    #    move the stop to break-even after TP1, so a TP-then-SL trade records the
+    #    blended realized PnL (booked partials + break-even remainder) instead of
+    #    a full loss. Makes pnl_pct agree with the lifecycle win-rate.
+    lifecycle_pnl_enabled: bool = True
+    tp1_close_fraction: float = 0.30  # portion realized at TP1
+    tp2_close_fraction: float = 0.30  # portion realized at TP2
+    # remainder (1 - tp1 - tp2) rides to TP3
+    move_sl_to_breakeven_after_tp1: bool = True
+
+    # 5) Detect TP/SL touches from the 1m candle high/low between polls so a wick
+    #    that tags a level is not missed (and TP-before-SL ordering is preserved).
+    tracker_use_candle_extremes: bool = True
+    # 6) Only treat a signal as filled once price actually trades inside the entry
+    #    band; a signal that never returns to its entry is expired rather than
+    #    counted as an instant phantom fill.
+    entry_fill_required: bool = True
+    entry_fill_timeout_min: int = 90
+    # 8) Skip a per-poll DB write when nothing moved materially.
+    tracker_min_pnl_delta_pct: float = 0.05
+
+    # 2) Regime directional bias was empirically inverted on alts (it penalised
+    #    the side that was actually profitable), so the directional bonus/penalty
+    #    is OFF by default. Volatility-regime handling is unaffected.
+    regime_directional_bias_enabled: bool = False
+
+    # 4) The OI/funding/liquidity additive sub-scores inflated confidence past the
+    #    calibrated base without adding edge (the 90+ bucket was the worst). Weight
+    #    and cap their *positive* contribution; penalties pass through in full.
+    confidence_additive_weight: float = 0.5
+    confidence_additive_max: float = 8.0
 
     # ══════════════════════════════════════════════════════════════════
     #  SPRINT 22 — Institutional Risk & Execution Upgrade (all default OFF)
