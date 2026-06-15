@@ -90,6 +90,11 @@ class Settings(BaseSettings):
     scan_timeframes: str = "15m,1h,4h,1d"
     max_symbols: int = 0
     min_quote_volume_usdt: float = 5_000_000
+    # Exclude pairs whose *base* asset is itself a stablecoin (e.g. USDCUSDT,
+    # FDUSDUSDT). These hug 1.00 with near-zero volatility, so the scorer can
+    # emit nonsense high-confidence signals on them. Quote is always USDT here.
+    exclude_stablecoin_bases: bool = True
+    stablecoin_bases: str = "USDC,FDUSD,TUSD,DAI,USDP,USDD,BUSD,USDE,GUSD,PYUSD,EURT,EURI,XUSD"
 
     # --- Signal engine ---
     min_confidence: float = 75.0
@@ -454,6 +459,13 @@ class Settings(BaseSettings):
     @property
     def timeframes(self) -> List[str]:
         return [tf.strip() for tf in self.scan_timeframes.split(",") if tf.strip()]
+
+    @property
+    def stablecoin_base_set(self) -> set[str]:
+        """Upper-cased set of base assets to exclude from the scan universe."""
+        if not self.exclude_stablecoin_bases or not self.stablecoin_bases:
+            return set()
+        return {b.strip().upper() for b in self.stablecoin_bases.split(",") if b.strip()}
 
     @property
     def postgres_dsn(self) -> str:

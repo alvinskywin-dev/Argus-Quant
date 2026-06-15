@@ -30,12 +30,14 @@ class SymbolUniverse:
                 info = await client.exchange_info()
                 tickers = await client.ticker_24h()
 
+                stable_bases = settings.stablecoin_base_set
                 allowed = {
                     s["symbol"]
                     for s in info.get("symbols", [])
                     if s.get("status") == "TRADING"
                     and s.get("contractType") == "PERPETUAL"
                     and s.get("quoteAsset") == "USDT"
+                    and s.get("baseAsset", "").upper() not in stable_bases
                 }
 
                 meta: Dict[str, dict] = {}
