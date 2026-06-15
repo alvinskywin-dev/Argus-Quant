@@ -94,7 +94,7 @@ class PerformanceEngine:
                 .order_by(desc(Signal.created_at))
                 .limit(5000)
             )
-            signals: List[Signal] = res.scalars().all()
+            signals: List[Signal] = list(res.scalars().all())
 
         if not signals:
             return report

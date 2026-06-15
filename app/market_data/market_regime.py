@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import asdict, dataclass
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, cast
 
 import numpy as np
 
@@ -208,6 +208,8 @@ async def calculate_market_regime() -> MarketRegime:
     Full regime calculation. Fetches BTC/ETH multi-TF trends, market breadth,
     and BTC ATR percentile, then classifies and caches the result.
     """
+    # asyncio.gather has no typed overload past 6 awaitables, so mypy widens the
+    # heterogeneous results to ``object``; cast back to the known result shape.
     (
         btc_1d,
         eth_1d,
@@ -216,14 +218,17 @@ async def calculate_market_regime() -> MarketRegime:
         btc_1h,
         atr_pct,
         breadth,
-    ) = await asyncio.gather(
-        _get_trend("BTCUSDT", "1d"),
-        _get_trend("ETHUSDT", "1d"),
-        _get_trend("BTCUSDT", "4h"),
-        _get_trend("ETHUSDT", "4h"),
-        _get_trend("BTCUSDT", "1h"),
-        _get_atr_percentile("BTCUSDT"),
-        _get_breadth(50),
+    ) = cast(
+        "Tuple[str, str, str, str, str, float, Dict[str, float]]",
+        await asyncio.gather(
+            _get_trend("BTCUSDT", "1d"),
+            _get_trend("ETHUSDT", "1d"),
+            _get_trend("BTCUSDT", "4h"),
+            _get_trend("ETHUSDT", "4h"),
+            _get_trend("BTCUSDT", "1h"),
+            _get_atr_percentile("BTCUSDT"),
+            _get_breadth(50),
+        ),
     )
 
     breadth_200 = breadth["breadth_ema200"]

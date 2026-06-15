@@ -27,9 +27,9 @@ def setup_paper(app: FastAPI) -> None:
     async def _auth_error_handler(_request: Request, exc: AuthError) -> JSONResponse:
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
-    app.add_exception_handler(PaperError, _paper_error_handler)
+    app.add_exception_handler(PaperError, _paper_error_handler)  # type: ignore[arg-type]  # FastAPI: handler typed for its specific exc subtype
     # Ensure AuthError -> 401 even if the auth router itself wasn't mounted.
-    app.add_exception_handler(AuthError, _auth_error_handler)
+    app.add_exception_handler(AuthError, _auth_error_handler)  # type: ignore[arg-type]  # FastAPI: handler typed for its specific exc subtype
     app.include_router(paper_router)
     app.include_router(debug_router)
     app.state._paper_installed = True

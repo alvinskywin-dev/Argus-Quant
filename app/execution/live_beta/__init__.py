@@ -24,6 +24,6 @@ def setup_live_beta(app: FastAPI) -> None:
     async def _beta_error_handler(_request: Request, exc: LiveBetaError) -> JSONResponse:
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
-    app.add_exception_handler(LiveBetaError, _beta_error_handler)
+    app.add_exception_handler(LiveBetaError, _beta_error_handler)  # type: ignore[arg-type]  # FastAPI: handler typed for its specific exc subtype
     app.include_router(beta_router)
     app.state._live_beta_installed = True

@@ -75,7 +75,7 @@ def compute_lifecycle(
         lo, hi = trade.get("entry_low"), trade.get("entry_high")
         if lo is not None and hi is not None:
             entry = (float(lo) + float(hi)) / 2
-    entry = float(entry) if entry not in (None, 0) else 0.0
+    entry = float(entry) if entry else 0.0
 
     sl = float(trade.get("stop_loss") or 0.0)
     tp1 = float(trade.get("tp1") or 0.0)
@@ -160,7 +160,7 @@ class LifecycleAggregate:
     avg_tp_quality: float = 0.0
     avg_time_to_tp1_seconds: Optional[float] = None
     avg_time_to_sl_seconds: Optional[float] = None
-    regime_performance: dict = None  # filled below
+    regime_performance: Optional[dict] = None  # filled below
 
     def to_dict(self) -> dict:
         d = asdict(self)

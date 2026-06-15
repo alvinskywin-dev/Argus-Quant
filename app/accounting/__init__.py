@@ -21,6 +21,6 @@ def setup_accounting(app: FastAPI) -> None:
     async def _auth_error_handler(_request: Request, exc: AuthError) -> JSONResponse:
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
-    app.add_exception_handler(AuthError, _auth_error_handler)
+    app.add_exception_handler(AuthError, _auth_error_handler)  # type: ignore[arg-type]  # FastAPI: handler typed for its specific exc subtype
     app.include_router(acct_router)
     app.state._accounting_installed = True

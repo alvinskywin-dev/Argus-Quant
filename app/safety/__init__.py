@@ -30,8 +30,8 @@ def setup_safety(app: FastAPI) -> None:
     async def _safety_error_handler(_request: Request, exc: SafetyError) -> JSONResponse:
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
-    app.add_exception_handler(AuthError, _auth_error_handler)
-    app.add_exception_handler(SafetyError, _safety_error_handler)
+    app.add_exception_handler(AuthError, _auth_error_handler)  # type: ignore[arg-type]  # FastAPI: handler typed for its specific exc subtype
+    app.add_exception_handler(SafetyError, _safety_error_handler)  # type: ignore[arg-type]  # FastAPI: handler typed for its specific exc subtype
     app.include_router(router)
     app.include_router(admin_router)
     app.state._safety_installed = True

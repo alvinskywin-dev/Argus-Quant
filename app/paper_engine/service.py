@@ -422,7 +422,7 @@ async def account_summary(db: AsyncSession, account: PaperAccount) -> dict:
     total_trades = len(trades)
 
     midnight = _now().replace(hour=0, minute=0, second=0, microsecond=0)
-    daily_pnl = sum(t.pnl_usdt for t in trades if t.closed_at and t.closed_at >= midnight)
+    daily_pnl = sum((t.pnl_usdt for t in trades if t.closed_at and t.closed_at >= midnight), 0.0)
 
     realized = account.balance - account.initial_balance
     return {

@@ -415,7 +415,7 @@ async def run_binance_preflight(
                     msg = bal.get("msg") if isinstance(bal, dict) else str(bal)
                     res.add("account_read", False, f"balance read failed: {msg}")
                 else:
-                    usdt = next((b for b in bal if b.get("asset") == "USDT"), {})
+                    usdt: dict = next((b for b in bal if b.get("asset") == "USDT"), {})
                     avail = _as_float(usdt.get("availableBalance", usdt.get("balance")))
                     res.add("account_read", True, f"USDT available≈{avail}")
                     res.add(
