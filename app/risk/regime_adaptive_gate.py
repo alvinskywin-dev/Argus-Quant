@@ -141,10 +141,7 @@ def get_effective_thresholds(
 
     # Relaxation guard: outside the low-vol/range regime the gate may tighten but
     # never loosen below the base thresholds (no silent global RR reduction).
-    if (
-        settings.gate_relax_only_in_low_vol
-        and regime_name not in RELAX_ALLOWED_REGIMES
-    ):
+    if settings.gate_relax_only_in_low_vol and regime_name not in RELAX_ALLOWED_REGIMES:
         clamped_rr = max(eff_min_rr, float(base_min_rr))
         clamped_sl = min(eff_max_sl, float(base_max_sl_distance_percent))
         clamped_conf = max(eff_min_conf, float(base_min_confidence))

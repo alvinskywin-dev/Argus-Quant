@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.analytics.lifecycle_pnl import blended_realized_pnl
 from app.analytics.trade_outcome import classify_trade_outcome, record_exit_event
@@ -221,9 +221,7 @@ class SignalTracker:
         # in force. Evaluated against the status that held at the start of the poll.
         be_active = pre_rank >= 1 and settings.move_sl_to_breakeven_after_tp1
         eff_stop = entry if be_active else sig.stop_loss
-        sl_hit = (
-            sl_touch <= eff_stop if sig.side == "LONG" else sl_touch >= eff_stop
-        )
+        sl_hit = sl_touch <= eff_stop if sig.side == "LONG" else sl_touch >= eff_stop
 
         # Build the event sequence (TP advance first, then SL) for this poll.
         seq: List[str] = []
@@ -237,7 +235,7 @@ class SignalTracker:
 
         if not seq:
             # ── #8: skip the DB write when nothing moved materially ──
-            fields = {
+            fields: Dict[str, Any] = {
                 "pnl_pct": round(pnl, 3),
                 "max_favorable_pct": round(max_fav, 3),
                 "max_adverse_pct": round(max_adv, 3),
@@ -275,7 +273,7 @@ class SignalTracker:
                 # Intermediate TP — position still open, keep mark-to-market.
                 realized = round(pnl, 3)
 
-            fields: dict = {
+            fields = {
                 "status": event,
                 "pnl_pct": realized,
                 "max_favorable_pct": round(max_fav, 3),
@@ -283,9 +281,7 @@ class SignalTracker:
             }
             if terminal:
                 fields["closed_at"] = now
-            diag = record_exit_event(
-                diag, event, event_time=now, realized_pnl=realized
-            )
+            diag = record_exit_event(diag, event, event_time=now, realized_pnl=realized)
             fields["diagnostics"] = json.dumps(diag)
 
             sig.status = event
@@ -305,9 +301,7 @@ class SignalTracker:
                     syms = list({s.symbol for s in opens})
                     prices = await self._prices(syms)
                     extremes = (
-                        await self._extremes(syms)
-                        if settings.tracker_use_candle_extremes
-                        else {}
+                        await self._extremes(syms) if settings.tracker_use_candle_extremes else {}
                     )
                     for sig in opens:
                         price = prices.get(sig.symbol)
