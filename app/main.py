@@ -178,6 +178,11 @@ class App:
                     "diagnostics": sig.get("diagnostics"),
                     # Sprint 16C — dynamic RR method
                     "rr_method": sig.get("rr_method"),
+                    # Sprint 19A — market regime at signal-creation time.
+                    # Previously dropped here, so the column stayed NULL even
+                    # though the value was present in diagnostics.
+                    "market_regime": sig.get("market_regime"),
+                    "regime_score": sig.get("regime_score"),
                 }
             )
         except Exception as exc:  # noqa: BLE001

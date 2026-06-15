@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import desc, select
 
+from app.accounting.pnl import signal_net_pnl
 from app.analytics.trade_outcome import (
     BUCKET_LOSS,
     BUCKET_WIN,
@@ -117,6 +118,16 @@ async def compute_winrate_analysis(limit: int = 500) -> Dict[str, Any]:
     decided = max(1, wr_denom)
     tp1_then_sl = sum(1 for o in outcomes if o.final_exit_event == "SL" and o.max_tp_hit == 1)
     tp2_then_sl = sum(1 for o in outcomes if o.final_exit_event == "SL" and o.max_tp_hit >= 2)
+
+    # ── Realized-PnL truth (independent of the lifecycle win rate) ─────────
+    # The lifecycle win rate counts a TP-then-SL trade as a win, but its stored
+    # pnl_pct is the (losing) SL exit. So "win rate" and "profitability" can
+    # diverge sharply — surface both so the dashboard never overstates results.
+    pnls = [signal_net_pnl(s) for s in closed]
+    net_positive = sum(1 for p in pnls if p > 0)
+    gross_win = sum(p for p in pnls if p > 0)
+    gross_loss = abs(sum(p for p in pnls if p < 0))
+    n_pnl = len(pnls)
     outcome_summary = {
         "overall_winrate": overall_wr,
         "wins": total_wins,
@@ -129,6 +140,16 @@ async def compute_winrate_analysis(limit: int = 500) -> Dict[str, Any]:
         "breakeven_count": n_be,
         "tp1_then_sl_count": tp1_then_sl,
         "tp2_then_sl_count": tp2_then_sl,
+        # Realized-PnL view — the honest "did it make money" picture.
+        "net_pnl_pct": round(sum(pnls), 1) if pnls else 0.0,
+        "expectancy_pct": round(sum(pnls) / n_pnl, 2) if n_pnl else None,
+        "profit_factor": round(gross_win / gross_loss, 2) if gross_loss else None,
+        "avg_win_pct": round(gross_win / net_positive, 2) if net_positive else None,
+        "avg_loss_pct": (
+            round(-gross_loss / (n_pnl - net_positive), 2) if (n_pnl - net_positive) else None
+        ),
+        "net_positive_count": net_positive,
+        "net_positive_rate": round(net_positive / n_pnl * 100.0, 1) if n_pnl else None,
     }
 
     # ── Side win rates ────────────────────────────────────────────────────
