@@ -141,6 +141,12 @@ class MarketScanner:
                     logger.info(f"⛔ {symbol} {side} — {stage_label}: {rejection.detail}")
                 return {"_DIAG_": True, "stage": stage, "side": side}
 
+            # evaluate_pipeline returns exactly one of (decision, rejection); with
+            # no rejection the decision is present. Narrow it explicitly so the
+            # type checker knows decision is non-None for the rest of the scan.
+            if decision is None:
+                return {"_DIAG_": True, "stage": "no_decision"}
+
             # ── Market quality filters ───────────────────────────────────
             primary_snap = snaps["15m"]
 
