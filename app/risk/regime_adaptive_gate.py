@@ -26,6 +26,14 @@ HARD_MIN_RR = 1.0
 HARD_MAX_SL_DISTANCE_PERCENT = 20.0
 HARD_MIN_CONFIDENCE = 70.0
 
+# The gate was built to RELAX thresholds only where that is justified: the
+# low-volatility / range regime, where the 1D support/resistance stop sits far
+# from a 15m entry and would otherwise fail RR / SL-distance on every setup. In
+# every other regime the gate may only TIGHTEN — it must never drop a threshold
+# below the static base, otherwise simply enabling the gate silently lowered RR
+# (and confidence, and widened the max SL) globally.
+RELAX_ALLOWED_REGIMES = frozenset({"LOW_VOLATILITY"})
+
 
 @dataclass
 class RegimeAdaptiveThresholds:
@@ -84,14 +92,14 @@ def _regime_params(regime: str) -> tuple[float, float, int, str]:
             settings.bull_min_rr,
             settings.bull_max_sl_distance_percent,
             settings.bull_min_confidence_delta,
-            "BULL: moderately relaxed thresholds",
+            "BULL: trend regime — thresholds not relaxed",
         )
     if r == "BEAR":
         return (
             settings.bear_min_rr,
             settings.bear_max_sl_distance_percent,
             settings.bear_min_confidence_delta,
-            "BEAR: moderately relaxed thresholds",
+            "BEAR: weakest regime — thresholds tightened",
         )
     # NORMAL / unknown / None → the NORMAL baseline.
     return (
@@ -130,6 +138,19 @@ def get_effective_thresholds(
     eff_min_rr = max(HARD_MIN_RR, float(min_rr))
     eff_max_sl = min(HARD_MAX_SL_DISTANCE_PERCENT, float(max_sl))
     eff_min_conf = max(HARD_MIN_CONFIDENCE, float(base_min_confidence) + int(conf_delta))
+
+    # Relaxation guard: outside the low-vol/range regime the gate may tighten but
+    # never loosen below the base thresholds (no silent global RR reduction).
+    if (
+        settings.gate_relax_only_in_low_vol
+        and regime_name not in RELAX_ALLOWED_REGIMES
+    ):
+        clamped_rr = max(eff_min_rr, float(base_min_rr))
+        clamped_sl = min(eff_max_sl, float(base_max_sl_distance_percent))
+        clamped_conf = max(eff_min_conf, float(base_min_confidence))
+        if (clamped_rr, clamped_sl, clamped_conf) != (eff_min_rr, eff_max_sl, eff_min_conf):
+            reason += " (clamped to base — gate only relaxes in LOW_VOLATILITY)"
+        eff_min_rr, eff_max_sl, eff_min_conf = clamped_rr, clamped_sl, clamped_conf
 
     return RegimeAdaptiveThresholds(
         market_regime=regime_name,

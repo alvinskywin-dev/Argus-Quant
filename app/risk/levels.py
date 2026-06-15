@@ -415,6 +415,19 @@ def build_levels(
         tp1 = price - 1.2 * risk
         tp3 = price - 3.5 * risk
 
+    # ── TP ordering guard ────────────────────────────────────────────────
+    # tp2 is the dynamic RR target (atr/structure/liquidity); tp3 is a fixed
+    # 3.5R. A far structure/liquidity tp2 could otherwise sit beyond tp3 — or a
+    # low-RR tp2 below the 1.2R tp1 — so the tracker would tag a "higher" level
+    # first and the displayed RR would exceed the real exit. Keep tp2 (the RR
+    # anchor) fixed and clamp tp1/tp3 around it to a strict monotonic ladder.
+    if side == "LONG":
+        tp1 = min(tp1, tp2 - 0.1 * risk)
+        tp3 = max(tp3, tp2 + 0.5 * risk)
+    else:  # SHORT
+        tp1 = max(tp1, tp2 + 0.1 * risk)
+        tp3 = min(tp3, tp2 - 0.5 * risk)
+
     # Finalize SL diagnostics (legacy path or V2 with derived distance).
     sl_diag.setdefault("stop_loss", round(sl, 8))
     if sl_diag.get("sl_distance_percent") is None:

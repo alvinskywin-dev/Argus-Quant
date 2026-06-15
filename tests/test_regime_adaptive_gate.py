@@ -107,6 +107,31 @@ def test_none_regime_uses_normal(gate):
     assert t.market_regime == "UNKNOWN"
 
 
+def test_non_low_vol_never_relaxes_below_base(gate):
+    # Production base (RR 2.2 / SL 6% / conf 85) is stricter than the per-regime
+    # NORMAL config (1.5 / 10 / +0). The gate must not loosen it.
+    t = get_effective_thresholds(2.2, 6.0, 85.0, "NORMAL")
+    assert t.effective_min_rr == 2.2  # NOT lowered to normal_min_rr 1.5
+    assert t.effective_max_sl_distance_percent == 6.0  # NOT widened to 10
+    assert t.effective_min_confidence == 85.0  # NOT lowered
+    # BULL/BEAR/HIGH_VOL/SIDEWAYS are likewise floored at base.
+    for regime in ("BULL", "BEAR", "SIDEWAYS", "HIGH_VOLATILITY", "WHO_KNOWS"):
+        assert get_effective_thresholds(2.2, 6.0, 85.0, regime).effective_min_rr >= 2.2
+
+
+def test_low_vol_still_relaxes_below_base(gate):
+    # The one regime the gate exists for keeps its escape hatch.
+    t = get_effective_thresholds(2.2, 6.0, 85.0, "LOW_VOLATILITY")
+    assert t.effective_min_rr == 1.0  # relaxed below base
+    assert t.effective_max_sl_distance_percent == 15.0  # widened above base
+
+
+def test_relax_guard_can_be_disabled(gate):
+    gate.gate_relax_only_in_low_vol = False
+    t = get_effective_thresholds(2.2, 6.0, 85.0, "NORMAL")
+    assert t.effective_min_rr == gate.normal_min_rr  # legacy behaviour: 1.5
+
+
 def test_diagnostics_contains_base_and_effective(gate):
     d = _eff("LOW_VOLATILITY").to_diagnostics()
     assert d["regime_adaptive_enabled"] is True

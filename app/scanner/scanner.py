@@ -365,21 +365,30 @@ class MarketScanner:
             funding_class = funding_data.classification if funding_data else None
 
             # ── Base confidence after OI, funding, and liquidity ─────────
+            # Calibration fix: the additive sub-scores inflated confidence past the
+            # calibrated base without adding edge (the 90+ bucket had the worst
+            # expectancy). Weight + cap the *positive* contribution; keep penalties
+            # (negative sum) at full strength so risk is never hidden.
+            raw_additive = oi_score + funding_score + (liquidity_score * 0.5)
+            if raw_additive > 0:
+                additive_contribution = min(
+                    settings.confidence_additive_max,
+                    raw_additive * settings.confidence_additive_weight,
+                )
+            else:
+                additive_contribution = raw_additive
             adjusted_confidence = round(
-                max(
-                    0.0,
-                    min(
-                        100.0,
-                        decision.confidence + oi_score + funding_score + (liquidity_score * 0.5),
-                    ),
-                ),
+                max(0.0, min(100.0, decision.confidence + additive_contribution)),
                 1,
             )
 
             # ── Sprint 19A: Market regime scoring impact ──────────────────
+            # Directional bias (BULL→LONG / BEAR→SHORT) is OFF by default: on the
+            # alt universe it was inverted — it penalised the side that was actually
+            # profitable. Gated behind regime_directional_bias_enabled.
             regime = await get_market_regime()
             regime_delta = 0
-            if regime:
+            if regime and settings.regime_directional_bias_enabled:
                 rn = regime.market_regime
                 if rn == "BULL":
                     regime_delta = 5 if decision.side == "LONG" else -10
