@@ -21,11 +21,17 @@ def setup_paper(app: FastAPI) -> None:
     from app.paper_engine.router import router as paper_router
     from app.paper_engine.service import PaperError
 
-    async def _paper_error_handler(_request: Request, exc: PaperError) -> JSONResponse:
-        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    async def _paper_error_handler(_request: Request, exc: Exception) -> JSONResponse:
+        return JSONResponse(
+            status_code=getattr(exc, "status_code", 500),
+            content={"detail": getattr(exc, "detail", str(exc))},
+        )
 
-    async def _auth_error_handler(_request: Request, exc: AuthError) -> JSONResponse:
-        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    async def _auth_error_handler(_request: Request, exc: Exception) -> JSONResponse:
+        return JSONResponse(
+            status_code=getattr(exc, "status_code", 500),
+            content={"detail": getattr(exc, "detail", str(exc))},
+        )
 
     app.add_exception_handler(PaperError, _paper_error_handler)
     # Ensure AuthError -> 401 even if the auth router itself wasn't mounted.

@@ -142,8 +142,8 @@ def reconcile_symbol(
                 symbol,
                 "Position side differs between DB and exchange. Reconcile before any "
                 "further action; risk of opening an opposite position.",
-                db_state=db_pos,
-                exchange_state=ex_pos,
+                db_state=db_pos or {},
+                exchange_state=ex_pos or {},
             )
         )
 

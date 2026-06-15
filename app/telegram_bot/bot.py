@@ -510,7 +510,7 @@ class TelegramBot:
         if not _is_admin(update.effective_user.id):
             return
         try:
-            val = float(ctx.args[0])
+            val = float((ctx.args or [])[0])
             settings.min_confidence = val
             await update.effective_message.reply_text(f"✅ MIN_CONFIDENCE set to {val}")
         except Exception:
@@ -520,7 +520,7 @@ class TelegramBot:
         if not _is_admin(update.effective_user.id):
             return
         try:
-            val = int(ctx.args[0])
+            val = int((ctx.args or [])[0])
             settings.symbol_cooldown_minutes = val
             await update.effective_message.reply_text(f"✅ COOLDOWN set to {val} minutes")
         except Exception:
@@ -530,7 +530,7 @@ class TelegramBot:
         if not _is_admin(update.effective_user.id):
             return
         try:
-            val = int(ctx.args[0])
+            val = int((ctx.args or [])[0])
             rate_limiter.max = val
             settings.max_signals_per_hour = val
             await update.effective_message.reply_text(f"✅ MAX_SIGNALS_PER_HOUR set to {val}")

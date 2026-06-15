@@ -16,6 +16,7 @@ Startup self-diagnostics verify all critical connections before serving.
 from __future__ import annotations
 
 import asyncio
+import functools
 import signal
 from typing import Optional
 
@@ -361,7 +362,7 @@ def _install_signal_handlers(loop: asyncio.AbstractEventLoop, app: App) -> None:
 
     for sig in (signal.SIGTERM, signal.SIGINT):
         try:
-            loop.add_signal_handler(sig, lambda s=sig: _handler(s.name))
+            loop.add_signal_handler(sig, functools.partial(_handler, sig.name))
         except NotImplementedError:
             pass  # Windows
 

@@ -29,7 +29,7 @@ async def _fetch_signals(since: datetime, until: Optional[datetime] = None) -> L
         if until:
             q = q.where(Signal.created_at < until)
         res = await session.execute(q.order_by(desc(Signal.created_at)).limit(5000))
-        return res.scalars().all()
+        return list(res.scalars().all())
 
 
 def _build_stats(signals: List[Signal]) -> dict:

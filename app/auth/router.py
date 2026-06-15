@@ -292,6 +292,8 @@ async def reset_password(body: ResetPasswordIn):
 async def setup_2fa(user: AuthUser = Depends(get_current_user)):
     async with get_session() as db:
         managed = await db.get(AuthUser, user.id)
+        if managed is None:
+            raise service.AuthError(404, "User not found")
         secret, uri = await service.begin_2fa_setup(db, managed)
     return TwoFactorSetupOut(secret=secret, otpauth_uri=uri)
 
@@ -301,6 +303,8 @@ async def enable_2fa(body: Enable2FAVerifyIn, user: AuthUser = Depends(get_curre
     try:
         async with get_session() as db:
             managed = await db.get(AuthUser, user.id)
+            if managed is None:
+                raise service.AuthError(404, "User not found")
             await service.confirm_2fa(db, managed, body.code)
         return MessageOut(detail="2FA enabled")
     except service.AuthError as exc:
@@ -312,6 +316,8 @@ async def disable_2fa(body: Enable2FAVerifyIn, user: AuthUser = Depends(get_curr
     try:
         async with get_session() as db:
             managed = await db.get(AuthUser, user.id)
+            if managed is None:
+                raise service.AuthError(404, "User not found")
             await service.disable_2fa(db, managed, body.code)
         return MessageOut(detail="2FA disabled")
     except service.AuthError as exc:

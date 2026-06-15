@@ -221,6 +221,8 @@ async def debug_paper_positions(user: AuthUser = Depends(get_current_user)):
         out = []
         for p in rows:
             mark, source, age = service.mark_price_info(p.symbol)
+            pnl: float | None
+            roe: float | None
             if mark > 0:
                 pnl = round(pmath.unrealized_pnl(p.side, p.entry_price, mark, p.notional_usdt), 4)
                 roe = round(pmath.roe_pct(pnl, p.margin_usdt), 4)

@@ -115,7 +115,7 @@ class BacktestEngine:
                 q = q.where(Signal.timeframe == timeframe)
             q = q.order_by(Signal.created_at)
             res = await session.execute(q)
-            signals: List[Signal] = res.scalars().all()
+            signals: List[Signal] = list(res.scalars().all())
 
         if not signals:
             return result

@@ -22,8 +22,11 @@ def setup_auto_engine(app: FastAPI) -> None:
     from app.auth.service import AuthError
     from app.auto_engine.router import router as auto_router
 
-    async def _auth_error_handler(_request: Request, exc: AuthError) -> JSONResponse:
-        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    async def _auth_error_handler(_request: Request, exc: Exception) -> JSONResponse:
+        return JSONResponse(
+            status_code=getattr(exc, "status_code", 500),
+            content={"detail": getattr(exc, "detail", str(exc))},
+        )
 
     app.add_exception_handler(AuthError, _auth_error_handler)
     app.include_router(auto_router)

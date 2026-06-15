@@ -99,7 +99,9 @@ def is_supported_timezone(tz: Optional[str]) -> bool:
 
 def safe_timezone(tz: Optional[str]) -> str:
     """Return ``tz`` if supported, else the default — never raises."""
-    return tz if is_supported_timezone(tz) else DEFAULT_TIMEZONE
+    # Inline the check (rather than is_supported_timezone) so the type checker
+    # narrows tz to str on the supported branch.
+    return tz if isinstance(tz, str) and tz in SUPPORTED_TIMEZONES else DEFAULT_TIMEZONE
 
 
 def _zoneinfo(tz: Optional[str]) -> ZoneInfo:

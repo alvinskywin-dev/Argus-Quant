@@ -85,7 +85,7 @@ class BinanceClient:
         ):
             with attempt:
                 async with self._semaphore:
-                    async with self._session.get(url, params=params) as resp:  # type: ignore[union-attr]
+                    async with self._session.get(url, params=params) as resp:
                         if resp.status == 429 or resp.status == 418:
                             retry_after = int(resp.headers.get("Retry-After", "1"))
                             logger.warning(f"binance rate limit hit, sleeping {retry_after}s")

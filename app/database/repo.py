@@ -5,7 +5,7 @@ Repository helpers — typed, async, transaction-safe.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, List, Optional
+from typing import Any, List, Optional, overload
 
 from sqlalchemy import and_, delete, desc, func, select, update
 
@@ -195,6 +195,14 @@ async def upsert_user(user_id: int, username: str | None, is_admin: bool = False
 
 
 # ---------------- system settings ----------------
+@overload
+async def get_setting(key: str, default: str) -> str: ...
+
+
+@overload
+async def get_setting(key: str, default: None = ...) -> str | None: ...
+
+
 async def get_setting(key: str, default: str | None = None) -> str | None:
     async with get_session() as s:
         row = await s.get(SystemSetting, key)
