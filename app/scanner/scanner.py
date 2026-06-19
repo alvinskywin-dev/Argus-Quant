@@ -174,15 +174,28 @@ class MarketScanner:
                 market_regime=_gate_regime.market_regime if _gate_regime else None,
             )
 
+            # Raw MTF confidence, captured before passes_market_filters mutates
+            # decision.confidence in place. Stored as base_confidence in the
+            # diagnostics so that field reflects the pipeline output rather than
+            # the post-filter value.
+            mtf_base_confidence = round(float(decision.confidence), 1)
+
+            # Apply market-quality filters and their confidence adjustments, but do
+            # NOT enforce the confidence floor here. OI/funding/liquidity/regime are
+            # added below and a single authoritative floor is applied afterwards, so
+            # positive context can lift a borderline setup just as penalties sink
+            # one (symmetric gating).
             ok, reason = passes_market_filters(
-                primary_snap, decision, min_confidence=thr.effective_min_confidence
+                primary_snap,
+                decision,
+                min_confidence=thr.effective_min_confidence,
+                enforce_confidence_floor=False,
             )
             if not ok:
                 if settings.log_rejection_detail:
                     logger.info(
-                        f"⛔ {symbol} {decision.side} — Confidence failed: "
-                        f"conf={decision.confidence:.1f}% "
-                        f"(need>={thr.effective_min_confidence}) filter={reason}"
+                        f"⛔ {symbol} {decision.side} — Market filter failed: "
+                        f"conf={decision.confidence:.1f}% filter={reason}"
                     )
                 return {
                     "_DIAG_": True,
@@ -285,7 +298,11 @@ class MarketScanner:
                         "side": decision.side,
                     }
 
-            # ── Cooldown (same direction only) ───────────────────────────
+            # ── Cooldown (same direction only) — read-only check ─────────
+            # The budget-consuming guards (hourly rate cap + cooldown mark) are
+            # deferred to the very end, after every quality gate has passed, so a
+            # later confidence / short-protection rejection never burns a
+            # rate-limit slot or sets a spurious cooldown.
             if not await cooldown.can_emit(symbol, decision.side):
                 if settings.log_rejection_detail:
                     logger.info(
@@ -293,18 +310,6 @@ class MarketScanner:
                         f"same-direction cooldown active ({settings.symbol_cooldown_minutes}m)"
                     )
                 return {"_DIAG_": True, "stage": "cooldown", "side": decision.side}
-
-            # ── Hourly rate cap ──────────────────────────────────────────
-            if not await rate_limiter.acquire():
-                used = await rate_limiter.used()
-                if settings.log_rejection_detail:
-                    logger.info(
-                        f"⛔ {symbol} {decision.side} — Rate limit: "
-                        f"{used}/{settings.max_signals_per_hour} signals this hour"
-                    )
-                return {"_DIAG_": True, "stage": "rate_limit", "side": decision.side}
-
-            await cooldown.mark_emitted(symbol, decision.side)
 
             # ── Open Interest scoring ────────────────────────────────────
             oi_snap = await fetch_oi_snapshot(
@@ -410,7 +415,11 @@ class MarketScanner:
                         1,
                     )
 
-            # Secondary confidence gate: regime may have pushed us below threshold
+            # Authoritative confidence gate: applied once, on the fully-adjusted
+            # confidence (MTF base + market-filter tweaks + OI/funding/liquidity
+            # additive + regime delta). This is the single floor — positive
+            # context can rescue a borderline setup and penalties can sink one,
+            # symmetrically.
             if adjusted_confidence < thr.effective_min_confidence:
                 if settings.log_rejection_detail:
                     logger.info(
@@ -444,6 +453,22 @@ class MarketScanner:
                     "reason": short_protection.rejection_reason,
                 }
 
+            # ── Budget-consuming gates (deferred to the very end) ────────
+            # Every quality gate has now passed, so consume the hourly rate-cap
+            # slot and mark the same-direction cooldown. Doing this last ensures
+            # rejected candidates never deplete the rate budget or block future
+            # signals.
+            if not await rate_limiter.acquire():
+                used = await rate_limiter.used()
+                if settings.log_rejection_detail:
+                    logger.info(
+                        f"⛔ {symbol} {decision.side} — Rate limit: "
+                        f"{used}/{settings.max_signals_per_hour} signals this hour"
+                    )
+                return {"_DIAG_": True, "stage": "rate_limit", "side": decision.side}
+
+            await cooldown.mark_emitted(symbol, decision.side)
+
             logger.info(
                 f"✅ SIGNAL  {symbol} {decision.side}  "
                 f"tier={decision.tier}  conf={adjusted_confidence:.1f}%  "
@@ -464,7 +489,8 @@ class MarketScanner:
                     "funding_score": funding_score,
                     "oi_score": oi_score,
                     "liquidity_score": liquidity_score,
-                    "base_confidence": round(float(decision.confidence), 1),
+                    "base_confidence": mtf_base_confidence,
+                    "filtered_confidence": round(float(decision.confidence), 1),
                     "total_score": adjusted_confidence,
                     "rr_method": levels.rr_method,
                     "funding_class": funding_class,

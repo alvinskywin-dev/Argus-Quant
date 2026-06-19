@@ -89,11 +89,16 @@ def passes_market_filters(
     snap: FeatureSnapshot,
     decision: MTFDecision,
     min_confidence: float | None = None,
+    enforce_confidence_floor: bool = True,
 ) -> tuple[bool, str | None]:
     """Returns (ok, reject_reason_or_None).
 
     `min_confidence` overrides the static `settings.min_confidence` floor (used
-    by the Regime Adaptive Gate); the rest of the logic is unchanged."""
+    by the Regime Adaptive Gate). `enforce_confidence_floor` lets a caller apply
+    only the structural rejections and confidence adjustments here and defer the
+    floor to a later, authoritative gate (the scanner does this so positive
+    context — OI/funding/liquidity/regime — can lift a borderline setup, keeping
+    the gate symmetric with penalties); the rest of the logic is unchanged."""
     conf_floor = settings.min_confidence if min_confidence is None else min_confidence
     # low volume
     if snap.vol_spike_pct < -50:
@@ -150,8 +155,8 @@ def passes_market_filters(
         if bias == "NEUTRAL" and snap.trend_strength_adx < 25:
             decision.confidence -= 4
 
-    # confidence floor
-    if decision.confidence < conf_floor:
+    # confidence floor (optional — see enforce_confidence_floor)
+    if enforce_confidence_floor and decision.confidence < conf_floor:
         logger.debug(
             f"CONF_FLOOR {decision.side} final_conf={decision.confidence:.1f} "
             f"threshold={conf_floor} gap={conf_floor - decision.confidence:.1f}"
