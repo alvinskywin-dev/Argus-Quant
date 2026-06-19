@@ -6,6 +6,7 @@ No DB, no I/O — just decisions, so every branch is unit-testable.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from app.paper_engine import math as pmath
@@ -32,6 +33,31 @@ def _csv_set(value: str) -> set[str]:
     return {x.strip().upper() for x in (value or "").split(",") if x.strip()}
 
 
+def scale_leverage(
+    confidence: float,
+    max_leverage: int,
+    *,
+    floor_confidence: float = 75.0,
+    full_confidence: float = 95.0,
+    min_leverage: int = 1,
+) -> int:
+    """Map signal confidence to leverage, linearly between two anchors.
+
+    ``confidence <= floor_confidence`` -> ``min_leverage`` (lowest conviction),
+    ``confidence >= full_confidence``  -> ``max_leverage`` (full conviction),
+    interpolated in between. The result is always within
+    ``[min_leverage, max_leverage]`` — never above the configured cap. Uses
+    round-half-up so the midpoint rounds toward more leverage.
+    """
+    max_lev = max(1, int(max_leverage))
+    min_lev = max(1, min(int(min_leverage), max_lev))
+    span = max(1e-9, float(full_confidence) - float(floor_confidence))
+    frac = (float(confidence) - float(floor_confidence)) / span
+    frac = max(0.0, min(1.0, frac))
+    lev = min_lev + frac * (max_lev - min_lev)
+    return int(math.floor(lev + 0.5))
+
+
 def evaluate(
     *,
     enabled: bool,
@@ -47,6 +73,11 @@ def evaluate(
     allowed_coins: str,
     allowed_exchanges: str,
     min_confidence: float,
+    # leverage sizing
+    leverage_scaling: bool = True,
+    leverage_floor_confidence: float = 75.0,
+    leverage_full_confidence: float = 95.0,
+    min_leverage: int = 1,
     # demo context
     has_connected_exchange: bool = True,
 ) -> RiskDecision:
@@ -73,7 +104,16 @@ def evaluate(
     if available_margin <= 0:
         return RiskDecision(False, "no available margin")
 
-    leverage = max(1, int(max_leverage))
+    if leverage_scaling:
+        leverage = scale_leverage(
+            confidence,
+            max_leverage,
+            floor_confidence=leverage_floor_confidence,
+            full_confidence=leverage_full_confidence,
+            min_leverage=min_leverage,
+        )
+    else:
+        leverage = max(1, int(max_leverage))
     return RiskDecision(True, "ok", leverage=leverage, risk_pct=risk_per_trade_pct)
 
 
