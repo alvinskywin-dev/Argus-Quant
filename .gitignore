@@ -21,3 +21,7 @@ venv/
 *.before_*
 *.save
 logs.txt
+
+# VPS migration artifacts (contain .env secrets — never commit)
+migrate_bundle.tar.gz
+migrate_db.sql
