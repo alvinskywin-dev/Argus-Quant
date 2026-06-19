@@ -222,6 +222,18 @@ def _record_tg_failure() -> None:
         pass
 
 
+def should_broadcast_event(event: str, max_tp_hit: int, notify_protected_sl: bool) -> bool:
+    """Whether a tracker TP/SL event should be broadcast to Telegram.
+
+    A stop hit *after* a take-profit (``event == "SL"`` and ``max_tp_hit >= 1``)
+    is a protected win that was already announced when the TP hit, so it is not
+    re-notified unless ``notify_protected_sl`` is True. Genuine stops (no TP ever
+    hit) and all TP events are always broadcast."""
+    if event == "SL" and max_tp_hit >= 1 and not notify_protected_sl:
+        return False
+    return True
+
+
 def _main_keyboard() -> InlineKeyboardMarkup:
     rows = [
         [
@@ -748,6 +760,15 @@ class TelegramBot:
         pnl = float(payload.get("pnl_pct", 0) or 0)
         signal_id = payload.get("signal_id")
         max_tp_hit = int(payload.get("max_tp_hit") or 0)
+
+        # A stop hit after a take-profit is a protected win, already announced when
+        # the TP hit — don't re-notify it (unless explicitly re-enabled).
+        if not should_broadcast_event(event, max_tp_hit, settings.telegram_notify_protected_sl):
+            logger.info(
+                f"[broadcast] suppressed protected-SL event {symbol} {side} "
+                f"max_tp_hit={max_tp_hit} (already counted as a win)"
+            )
+            return
 
         # Lifecycle-aware framing: a stop hit *after* a take-profit is not a pure
         # loss — it is a protected partial/locked win. Don't broadcast it as SL.

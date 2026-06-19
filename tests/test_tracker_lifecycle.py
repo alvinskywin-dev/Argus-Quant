@@ -42,6 +42,7 @@ def cfg():
         "entry_fill_required",
         "entry_fill_timeout_min",
         "tracker_min_pnl_delta_pct",
+        "count_protected_sl_as_win",
     ]
     saved = {k: getattr(settings, k) for k in keys}
     settings.lifecycle_pnl_enabled = True
@@ -52,6 +53,7 @@ def cfg():
     settings.entry_fill_required = True
     settings.entry_fill_timeout_min = 90
     settings.tracker_min_pnl_delta_pct = 0.05
+    settings.count_protected_sl_as_win = True
     yield settings
     for k, v in saved.items():
         setattr(settings, k, v)
@@ -87,13 +89,27 @@ async def test_tp1_then_sl_books_partial(cfg, writes):
     sig = _sig()
     await t._check_one(sig, price=98.0, extreme=(102.5, 97.5))
 
-    # Terminal write is SL but the realized PnL is the booked partial, not −2%.
+    # Protected win: recorded status is the TP reached (not "SL") so no
+    # raw-status consumer counts it as a stop. PnL is the booked partial, not −2%.
+    final = writes[-1][1]
+    assert final["status"] == "TP1"
+    assert final["pnl_pct"] == pytest.approx(0.6, abs=0.01)
+    # Lifecycle diagnostics preserve the true SL exit.
+    diag = json.loads(final["diagnostics"])
+    assert diag["tp_history"]["max_tp_hit"] == 1
+    assert diag["tp_history"]["final_exit_event"] == "SL"
+
+
+@pytest.mark.asyncio
+async def test_protected_sl_as_win_can_be_disabled(cfg, writes):
+    # With the flag off, the terminal status reverts to the raw "SL".
+    cfg.count_protected_sl_as_win = False
+    t = SignalTracker()
+    sig = _sig()
+    await t._check_one(sig, price=98.0, extreme=(102.5, 97.5))
     final = writes[-1][1]
     assert final["status"] == "SL"
     assert final["pnl_pct"] == pytest.approx(0.6, abs=0.01)
-    # Lifecycle recorded TP1 first.
-    diag = json.loads(final["diagnostics"])
-    assert diag["tp_history"]["max_tp_hit"] == 1
 
 
 @pytest.mark.asyncio

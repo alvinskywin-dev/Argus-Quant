@@ -122,6 +122,18 @@ class Settings(BaseSettings):
     # Hours to suppress re-entry for the same symbol+side after a TP or SL close (0 = disabled)
     signal_duplicate_cooldown_hours: int = 24
 
+    # --- Protected take-profit-then-stop handling ---
+    # A trade that reached a take-profit and then drifted back to the stop is a
+    # protected win (it was already counted as a win when the TP hit), not a loss.
+    # When True (default) the tracker records its terminal status as the highest
+    # TP reached (TP1/TP2/TP3) instead of "SL", so no raw-status consumer counts
+    # it as a stop-loss. The lifecycle diagnostics still record the SL exit.
+    count_protected_sl_as_win: bool = True
+    # Broadcast the "WIN LOCKED" / "PARTIAL WIN" Telegram message when a stop is
+    # hit after a take-profit. Default False — the win was already announced at the
+    # TP, so the protected-stop event is not re-notified.
+    telegram_notify_protected_sl: bool = False
+
     # --- Dashboard ---
     dashboard_host: str = "0.0.0.0"
     dashboard_port: int = 8010
