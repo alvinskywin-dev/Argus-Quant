@@ -3,7 +3,10 @@ Sprint 16C — Dynamic RR Engine.
 
 Compute entry zone, take-profits and stop-loss from features.
 
-Three RR methods are evaluated and the best (highest valid RR) is selected:
+Three RR methods are evaluated and the NEAREST target whose RR still meets
+min_rr is selected (smallest valid RR). Picking the highest RR pushed TP2 out to
+distant structure/liquidity levels — a flattering ratio with a lower probability
+of ever being reached. The methods evaluated:
 
   atr       — TP2 is a volatility-scaled ATR multiple of risk.
                Multiplier: 2.5 (low vol) → 1.8 (high vol), linear in ATR%.
@@ -390,7 +393,11 @@ def build_levels(
         if not valid:
             return None
 
-        rr_method, rr, tp2 = max(valid, key=lambda x: x[1])
+        # Pick the NEAREST target that still meets the RR floor (smallest valid
+        # RR), not the farthest. Maximising RR pushed TP2 out to distant
+        # structure/liquidity levels — an optimistic ratio with a lower hit
+        # probability. Ties keep list order (atr first).
+        rr_method, rr, tp2 = min(valid, key=lambda x: x[1])
         tp1 = price + 1.2 * risk
         tp3 = price + 3.5 * risk
 
@@ -411,7 +418,11 @@ def build_levels(
         if not valid:
             return None
 
-        rr_method, rr, tp2 = max(valid, key=lambda x: x[1])
+        # Pick the NEAREST target that still meets the RR floor (smallest valid
+        # RR), not the farthest. Maximising RR pushed TP2 out to distant
+        # structure/liquidity levels — an optimistic ratio with a lower hit
+        # probability. Ties keep list order (atr first).
+        rr_method, rr, tp2 = min(valid, key=lambda x: x[1])
         tp1 = price - 1.2 * risk
         tp3 = price - 3.5 * risk
 

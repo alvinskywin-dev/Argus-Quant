@@ -175,6 +175,14 @@ class Settings(BaseSettings):
     # Distinct from auto_trading_enabled (LIVE, hard-locked false). Per-user
     # opt-in is AutoTradeConfig.enabled / PaperAccount.auto_follow.
     auto_trade_demo_enabled: bool = False
+    # 20D: confidence-scaled leverage for the auto engine. When True (default),
+    # leverage scales linearly with signal confidence between a floor anchor
+    # (min leverage) and a full anchor (max_leverage), instead of always using
+    # max_leverage regardless of conviction. Set False to restore always-max.
+    auto_trade_leverage_scaling: bool = True
+    auto_trade_leverage_floor_confidence: float = 75.0  # <= this -> min leverage
+    auto_trade_leverage_full_confidence: float = 95.0  # >= this -> max leverage
+    auto_trade_min_leverage: int = 1
     # 20E: account-protection layer. On by default — wraps every auto open with
     # loss limits, correlation caps, cooldown, loss-streak, and kill switches.
     safety_layer_enabled: bool = True

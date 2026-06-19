@@ -132,6 +132,10 @@ async def _maybe_open(db: AsyncSession, user_id: int, cfg: AutoTradeConfig, sign
         allowed_coins=cfg.allowed_coins,
         allowed_exchanges=cfg.allowed_exchanges,
         min_confidence=cfg.min_confidence,
+        leverage_scaling=settings.auto_trade_leverage_scaling,
+        leverage_floor_confidence=settings.auto_trade_leverage_floor_confidence,
+        leverage_full_confidence=settings.auto_trade_leverage_full_confidence,
+        min_leverage=settings.auto_trade_min_leverage,
     )
     if not decision.allow:
         await service.log_execution(

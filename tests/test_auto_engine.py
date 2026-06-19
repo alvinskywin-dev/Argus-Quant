@@ -36,8 +36,10 @@ def test_base_coin():
 
 
 def test_allow_normal():
+    # confidence 90 with max_leverage 10 → scaled below max (75→1x, 95→10x):
+    # frac = (90-75)/(95-75) = 0.75 → 1 + 0.75*9 = 7.75 → 8x.
     d = _eval()
-    assert d.allow and d.leverage == 10 and d.risk_pct == 1.0
+    assert d.allow and d.leverage == 8 and d.risk_pct == 1.0
 
 
 def test_deny_disabled():
@@ -63,8 +65,33 @@ def test_deny_no_margin():
     assert not _eval(available_margin=0).allow
 
 
-def test_leverage_clamped_to_max():
-    assert _eval(max_leverage=3).leverage == 3
+def test_leverage_never_exceeds_max():
+    # Scaled leverage is always within [min, max] — full-conviction hits the cap.
+    assert _eval(max_leverage=3, confidence=100).leverage == 3
+    assert _eval(max_leverage=10, confidence=100).leverage == 10
+    assert _eval(max_leverage=10, confidence=200).leverage == 10  # clamped
+
+
+def test_leverage_scales_with_confidence():
+    # Floor confidence (and below) → min leverage; full → max; monotonic between.
+    assert _eval(max_leverage=10, confidence=75).leverage == 1
+    assert _eval(max_leverage=10, confidence=70).leverage == 1  # below floor
+    assert _eval(max_leverage=10, confidence=85).leverage == 6  # 1 + 0.5*9 = 5.5 → 6
+    assert _eval(max_leverage=10, confidence=95).leverage == 10
+
+
+def test_leverage_scaling_can_be_disabled():
+    # With scaling off, leverage falls back to always-max behaviour.
+    d = _eval(max_leverage=10, confidence=80, leverage_scaling=False)
+    assert d.leverage == 10
+
+
+def test_scale_leverage_pure_helper():
+    assert risk.scale_leverage(75, 10) == 1
+    assert risk.scale_leverage(95, 10) == 10
+    assert risk.scale_leverage(85, 10) == 6
+    # max_leverage of 1 stays 1 regardless of confidence
+    assert risk.scale_leverage(100, 1) == 1
 
 
 def test_deny_exchange_restriction_without_connection():
