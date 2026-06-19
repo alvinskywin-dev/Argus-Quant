@@ -104,6 +104,15 @@ class Settings(BaseSettings):
     max_signals_per_hour: int = 12
     min_rr: float = 2.0
     entry_pass_score: int = 2  # minimum 15M entry factors needed (0-5)
+    # Require at least one price-action TRIGGER factor (BOS / FVG retest / OB
+    # retest) on the 15M entry, not just passive alignment (EMA pullback + VWAP
+    # reclaim). SMC entries are anchored to a trigger; this stops "alignment-only"
+    # passes from clearing entry_pass_score. Set false to restore count-only.
+    entry_require_trigger: bool = True
+    # Market sentiment guard (RISK_ON/OFF bias from the live major-price cache)
+    # adjusts confidence. It reads live WS state, so disable it for deterministic
+    # backtests / replays. On by default.
+    market_sentiment_guard_enabled: bool = True
 
     # --- Duplicate signal prevention ---
     # Block any new signal for a symbol while it still has an OPEN position

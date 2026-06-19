@@ -234,14 +234,18 @@ def evaluate_pipeline(
     #
     # Five equal-weight factors — any combination of ≥ ENTRY_PASS_SCORE passes.
     # Score 0-5; threshold configurable via env ENTRY_PASS_SCORE (default 2).
+    # The first three are price-action TRIGGERS; the last two are passive
+    # alignment. ENTRY_REQUIRE_TRIGGER (default on) demands ≥1 trigger so a setup
+    # can't pass on alignment alone.
     #
-    #   1. BOS          — price broke the 20-bar swing high/low on 15M
-    #   2. FVG retest   — a 15M fair value gap is open and price is inside it
-    #   3. OB retest    — price is retesting a 15M order block
-    #   4. EMA pullback — 15M EMA9 > EMA21 and close on correct side of EMA21
-    #   5. VWAP reclaim — price is on the entry-direction side of 15M VWAP
+    #   1. BOS          — price broke the 20-bar swing high/low on 15M   (trigger)
+    #   2. FVG retest   — a 15M fair value gap is open and price is inside it (trigger)
+    #   3. OB retest    — price is retesting a 15M order block            (trigger)
+    #   4. EMA pullback — 15M EMA9 > EMA21 and close on correct side of EMA21 (align)
+    #   5. VWAP reclaim — price is on the entry-direction side of 15M VWAP (align)
 
-    ENTRY_MIN_SCORE: int = settings.entry_pass_score  # default 2
+    # Clamp to ≥1: a threshold of 0 would let every symbol pass the entry layer.
+    ENTRY_MIN_SCORE: int = max(1, settings.entry_pass_score)  # default 2
 
     s15 = m15.structure
     entry_factors: Dict[str, bool] = {
@@ -259,12 +263,22 @@ def evaluate_pipeline(
     entry_score = sum(1 for v in entry_factors.values() if v)
     entry_reasons: List[str] = [f"15M {k}" for k, v in entry_factors.items() if v]
 
-    if entry_score < ENTRY_MIN_SCORE:
+    # SMC entries are anchored to a price-action trigger, not passive alignment.
+    TRIGGER_FACTORS = ("BOS", "FVG retest", "OB retest")
+    has_trigger = any(entry_factors[k] for k in TRIGGER_FACTORS)
+    needs_trigger = settings.entry_require_trigger
+
+    if entry_score < ENTRY_MIN_SCORE or (needs_trigger and not has_trigger):
         hit_list = ", ".join(f"{k}={'✓' if v else '✗'}" for k, v in entry_factors.items())
+        no_trigger = needs_trigger and not has_trigger
+        detail = (
+            f"15M entry score {entry_score}/{ENTRY_MIN_SCORE}"
+            f"{' no-trigger' if no_trigger else ''} — {hit_list}"
+        )
         return None, MTFRejection(
             side=side,
             stage="entry",
-            detail=(f"15M entry score {entry_score}/{ENTRY_MIN_SCORE} — {hit_list}"),
+            detail=detail,
             trend_score=trend_score,
             structure_score=float(struct_hits),
             setup_score=float(setup_hits),

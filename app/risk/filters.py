@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from collections import deque
 from datetime import datetime, timedelta, timezone
-from typing import Deque, Dict, Tuple
+from typing import Deque, Dict, Optional, Tuple
 
 from app.ai_scoring import MTFDecision
 from app.config import settings
@@ -89,16 +89,21 @@ def passes_market_filters(
     snap: FeatureSnapshot,
     decision: MTFDecision,
     min_confidence: float | None = None,
+    sentiment_bias: Optional[str] = None,
     enforce_confidence_floor: bool = True,
 ) -> tuple[bool, str | None]:
     """Returns (ok, reject_reason_or_None).
 
     `min_confidence` overrides the static `settings.min_confidence` floor (used
-    by the Regime Adaptive Gate). `enforce_confidence_floor` lets a caller apply
-    only the structural rejections and confidence adjustments here and defer the
-    floor to a later, authoritative gate (the scanner does this so positive
-    context — OI/funding/liquidity/regime — can lift a borderline setup, keeping
-    the gate symmetric with penalties); the rest of the logic is unchanged."""
+    by the Regime Adaptive Gate). `sentiment_bias` overrides the market-sentiment
+    bias used by the sentiment guard; when None (default) it reads the live
+    major-price cache, toggled by `settings.market_sentiment_guard_enabled`
+    (disable for deterministic backtests). `enforce_confidence_floor` lets a
+    caller apply only the structural rejections and confidence adjustments here
+    and defer the floor to a later, authoritative gate (the scanner does this so
+    positive context — OI/funding/liquidity/regime — can lift a borderline setup,
+    keeping the gate symmetric with penalties); the rest of the logic is
+    unchanged."""
     conf_floor = settings.min_confidence if min_confidence is None else min_confidence
     # low volume
     if snap.vol_spike_pct < -50:
@@ -141,19 +146,30 @@ def passes_market_filters(
     if decision.side == "SHORT" and getattr(snap, "rsi", getattr(snap, "rsi_value", 50)) < 28:
         decision.confidence -= 8
 
-    # simple market sentiment guard from live major prices cache
-    # If major-price cache is alive, require extra caution on weak contexts.
-    if latest_prices:
-        bias = market_bias().get("bias")
+    # Market sentiment guard — extra caution on weak contexts using the
+    # RISK_ON/OFF bias. By default it reads the live major-price cache (so the
+    # adjustment depends on live WS state); callers/tests may inject an explicit
+    # `sentiment_bias` for determinism, and the whole guard can be disabled for
+    # backtests via market_sentiment_guard_enabled. An empty cache → bias None →
+    # no adjustment (logged so the skip is observable).
+    if settings.market_sentiment_guard_enabled:
+        bias: Optional[str]
+        if sentiment_bias is not None:
+            bias = sentiment_bias
+        else:
+            bias = market_bias().get("bias") if latest_prices else None
 
         if bias == "RISK_OFF" and decision.side == "LONG":
             decision.confidence -= 7
-
-        if bias == "RISK_ON" and decision.side == "SHORT":
+        elif bias == "RISK_ON" and decision.side == "SHORT":
             decision.confidence -= 5
-
-        if bias == "NEUTRAL" and snap.trend_strength_adx < 25:
+        elif bias == "NEUTRAL" and snap.trend_strength_adx < 25:
             decision.confidence -= 4
+
+        logger.debug(
+            f"SENTIMENT_GUARD {decision.side} bias={bias or 'none'} "
+            f"conf={decision.confidence:.1f}"
+        )
 
     # confidence floor (optional — see enforce_confidence_floor)
     if enforce_confidence_floor and decision.confidence < conf_floor:
