@@ -252,8 +252,8 @@ class SignalTracker:
         # ── Apply the lifecycle events ───────────────────────────────────
         for event in seq:
             terminal = event in {"TP3", "SL"}
+            event_max_tp = max(pre_rank, new_tp, 3 if event == "TP3" else 0)
             if terminal and settings.lifecycle_pnl_enabled:
-                final_max_tp = max(pre_rank, new_tp, 3 if event == "TP3" else 0)
                 realized = blended_realized_pnl(
                     side=sig.side,
                     entry=entry,
@@ -261,7 +261,7 @@ class SignalTracker:
                     tp2=sig.tp2,
                     tp3=sig.tp3,
                     stop_loss=sig.stop_loss,
-                    max_tp_hit=final_max_tp,
+                    max_tp_hit=event_max_tp,
                     final_event=event,
                     tp1_frac=settings.tp1_close_fraction,
                     tp2_frac=settings.tp2_close_fraction,
@@ -273,8 +273,17 @@ class SignalTracker:
                 # Intermediate TP — position still open, keep mark-to-market.
                 realized = round(pnl, 3)
 
+            # A stop hit *after* a take-profit is a protected win, not a loss — it
+            # was already counted as a win when the TP hit. Record its terminal
+            # status as the highest TP reached so no raw status=="SL" consumer
+            # counts it as a stop-loss. The lifecycle diagnostics below still log
+            # the true SL exit (final_exit_event="SL"), so winrate/PnL are intact.
+            recorded_status = event
+            if event == "SL" and event_max_tp >= 1 and settings.count_protected_sl_as_win:
+                recorded_status = f"TP{event_max_tp}"
+
             fields = {
-                "status": event,
+                "status": recorded_status,
                 "pnl_pct": realized,
                 "max_favorable_pct": round(max_fav, 3),
                 "max_adverse_pct": round(max_adv, 3),
@@ -284,14 +293,19 @@ class SignalTracker:
             diag = record_exit_event(diag, event, event_time=now, realized_pnl=realized)
             fields["diagnostics"] = json.dumps(diag)
 
-            sig.status = event
+            sig.status = recorded_status
             sig.pnl_pct = realized
             sig.diagnostics = fields["diagnostics"]
             sig.max_favorable_pct = max_fav
             sig.max_adverse_pct = max_adv
             await repo.update_signal(sig.id, fields)
+            # Fan out the true event ("SL") so the paper/auto engine still closes
+            # the remainder and the notifier can apply its own protected-SL policy.
             await self._fanout(sig, event)
-            logger.info(f"signal #{sig.id} {sig.symbol} -> {event} pnl={realized:+.2f}%")
+            logger.info(
+                f"signal #{sig.id} {sig.symbol} -> {event} "
+                f"(status={recorded_status}) pnl={realized:+.2f}%"
+            )
 
     async def run_forever(self) -> None:
         while True:
