@@ -149,6 +149,13 @@ async def _maybe_open(db: AsyncSession, user_id: int, cfg: AutoTradeConfig, sign
         )
         return False
 
+    # ── LIVE branch: user opted into real-money trading ───────────────
+    # Real orders require ALL gates (global live gate + a connected key). If the
+    # user enabled live but a gate is unmet, SKIP — never silently demo-fill.
+    if cfg.live_enabled:
+        return await _open_live(db, user_id, cfg, signal, decision, account.id)
+
+    # ── DEMO branch (paper account) ───────────────────────────────────
     try:
         pos = await paper.copy_signal(db, account, signal, leverage=decision.leverage)
     except paper.PaperError as exc:
@@ -174,6 +181,77 @@ async def _maybe_open(db: AsyncSession, user_id: int, cfg: AutoTradeConfig, sign
         account_id=account.id,
         position_id=pos.id,
         symbol=signal.symbol,
+    )
+    return True
+
+
+async def _open_live(
+    db: AsyncSession,
+    user_id: int,
+    cfg: AutoTradeConfig,
+    signal: Signal,
+    decision,
+    account_id: int,
+) -> bool:
+    """Place a REAL order for a user who opted into live trading. Returns True on
+    a placed order. Any unmet gate or failure SKIPs (logged) — never demo-fills.
+
+    Sizing is risk-based (cfg.risk_per_trade_pct of balance vs the entry→stop
+    distance, handled by open_position). The exchange-native TP (signal TP1) + SL
+    manage the exit, so no separate live tracker is needed for v1. Entries are
+    MARKET on the signal."""
+    from app.exchange_adapters import live_gate_open
+    from app.execution.live_trading import service as live
+
+    async def _skip(reason: str, detail: str = "") -> bool:
+        await service.log_execution(
+            db,
+            user_id=user_id,
+            action="SKIP",
+            reason=reason,
+            signal_id=signal.id,
+            account_id=account_id,
+            symbol=signal.symbol,
+            detail=detail,
+        )
+        return False
+
+    # Gate 1+2: global live gate (runtime switch on AND MOCK_EXCHANGE_MODE false).
+    if not live_gate_open():
+        return await _skip("live_gate_closed", "runtime switch off or MOCK_EXCHANGE_MODE on")
+
+    # Gate 3: the user must have a connected exchange key.
+    if not await live.connected_exchanges(db, user_id):
+        return await _skip("live_no_exchange", "no connected exchange key")
+
+    try:
+        res = await live.open_position(
+            db,
+            user_id=user_id,
+            exchange="auto",
+            symbol=signal.symbol,
+            side=signal.side,
+            order_type="MARKET",
+            stop_loss=signal.stop_loss,
+            take_profit=signal.tp1,
+            leverage=decision.leverage,
+            risk_pct=cfg.risk_per_trade_pct,
+            client_order_id=f"auto-{signal.id}-u{user_id}",
+        )
+    except live.LiveTradingError as exc:
+        return await _skip("live_failed", str(getattr(exc, "detail", exc))[:200])
+    except Exception as exc:  # noqa: BLE001 — never break the signal loop
+        return await _skip("live_error", f"{type(exc).__name__}: {exc!s:.160}")
+
+    await service.log_execution(
+        db,
+        user_id=user_id,
+        action="OPEN",
+        reason=f"LIVE {res.get('mode', '?')} {decision.leverage}x risk={cfg.risk_per_trade_pct}%",
+        signal_id=signal.id,
+        account_id=account_id,
+        symbol=signal.symbol,
+        detail=f"order={res.get('order_id') or res.get('id') or ''}",
     )
     return True
 

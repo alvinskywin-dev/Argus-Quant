@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 class AutoConfigOut(BaseModel):
     enabled: bool
+    live_enabled: bool
     max_positions: int
     max_leverage: int
     risk_per_trade_pct: float
@@ -27,6 +28,7 @@ class AutoConfigOut(BaseModel):
 
 class AutoConfigUpdateIn(BaseModel):
     enabled: Optional[bool] = None
+    live_enabled: Optional[bool] = None
     max_positions: Optional[int] = Field(default=None, ge=1, le=50)
     max_leverage: Optional[int] = Field(default=None, ge=1, le=125)
     risk_per_trade_pct: Optional[float] = Field(default=None, gt=0, le=100)

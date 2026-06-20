@@ -27,6 +27,7 @@ router = APIRouter(prefix="/api/auto", tags=["auto-trading"])
 def _config_out(cfg: AutoTradeConfig) -> AutoConfigOut:
     return AutoConfigOut(
         enabled=cfg.enabled,
+        live_enabled=cfg.live_enabled,
         max_positions=cfg.max_positions,
         max_leverage=cfg.max_leverage,
         risk_per_trade_pct=cfg.risk_per_trade_pct,
