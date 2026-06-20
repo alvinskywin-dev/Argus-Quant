@@ -13,7 +13,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 
 from app.admin import service
-from app.admin.schemas import SetUserStatusIn
+from app.admin.schemas import LiveTradingToggleIn, SetUserStatusIn
 from app.auth.deps import require_role
 from app.database.models import AuthUser
 from app.database.session import get_session
@@ -53,6 +53,20 @@ async def set_user_status(user_id: int, body: SetUserStatusIn, user: AuthUser = 
     async with get_session() as db:
         return await service.set_user_status(
             db, admin_id=user.id, user_id=user_id, status=body.status
+        )
+
+
+@router.get("/live-trading", response_model=dict)
+async def get_live_trading(user: AuthUser = _admin):
+    async with get_session() as db:
+        return await service.get_live_trading(db)
+
+
+@router.post("/live-trading", response_model=dict)
+async def set_live_trading(body: LiveTradingToggleIn, user: AuthUser = _admin):
+    async with get_session() as db:
+        return await service.set_live_trading(
+            db, admin_id=user.id, enabled=body.enabled, confirm=body.confirm
         )
 
 

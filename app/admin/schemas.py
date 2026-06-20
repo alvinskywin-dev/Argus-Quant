@@ -12,3 +12,10 @@ from pydantic import BaseModel, Field
 
 class SetUserStatusIn(BaseModel):
     status: str = Field(pattern="^(ACTIVE|SUSPENDED)$")
+
+
+class LiveTradingToggleIn(BaseModel):
+    enabled: bool
+    # Required to ENABLE real trading (ignored when disabling). Guards against
+    # an accidental click flipping the bot to real money.
+    confirm: str = ""

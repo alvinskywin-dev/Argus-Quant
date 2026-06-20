@@ -29,6 +29,7 @@ from app.database.models import (
 )
 from app.exchange_adapters import live_gate_open
 from app.safety import service as safety
+from app.utils.logger import logger
 
 
 class AdminError(Exception):
@@ -327,3 +328,69 @@ async def set_user_status(db: AsyncSession, *, admin_id: int, user_id: int, stat
     user.status = status
     await db.flush()
     return {"id": user.id, "email": user.email, "status": user.status}
+
+
+# ── live-trading runtime switch ───────────────────────────────────
+# Phrase an admin must echo to ENABLE real-money trading (prevents misclicks).
+LIVE_TOGGLE_CONFIRM = "ENABLE-LIVE"
+
+
+def _live_trading_state() -> dict:
+    from app.config import settings
+    from app.exchange_adapters import live_gate_open, runtime_live_enabled
+
+    enabled = runtime_live_enabled()
+    gate = live_gate_open()
+    note = None
+    if enabled and not gate:
+        note = (
+            "Runtime switch is ON but MOCK_EXCHANGE_MODE=true, so the gate is still "
+            "CLOSED (no real orders). Set MOCK_EXCHANGE_MODE=false in .env + restart "
+            "to actually trade live."
+        )
+    return {
+        "runtime_enabled": enabled,
+        "mock_exchange_mode": settings.mock_exchange_mode,
+        "gate_open": gate,
+        "note": note,
+    }
+
+
+async def get_live_trading(db: AsyncSession) -> dict:
+    """Current real-trading switch + effective gate state."""
+    return _live_trading_state()
+
+
+async def set_live_trading(db: AsyncSession, *, admin_id: int, enabled: bool, confirm: str) -> dict:
+    """Flip the runtime real-trading switch (admin-only, audit-logged). Enabling
+    requires the confirmation phrase. MOCK_EXCHANGE_MODE stays the hard env floor."""
+    from app.database import repo
+    from app.exchange_adapters import (
+        LIVE_TRADING_RUNTIME_KEY,
+        live_gate_open,
+        set_runtime_live_enabled,
+    )
+
+    if enabled and confirm != LIVE_TOGGLE_CONFIRM:
+        raise AdminError(400, f"To enable real trading, send confirm='{LIVE_TOGGLE_CONFIRM}'.")
+
+    set_runtime_live_enabled(enabled)
+    await repo.set_setting(LIVE_TRADING_RUNTIME_KEY, "true" if enabled else "false")
+
+    db.add(
+        LiveAuditLog(
+            user_id=admin_id,
+            exchange="system",
+            symbol="",
+            action="LIVE_TOGGLE",
+            result="OK",
+            mode=("LIVE" if enabled else "MOCK"),
+            detail=f"admin {admin_id} set runtime live_trading={'ON' if enabled else 'OFF'}",
+        )
+    )
+    await db.flush()
+    logger.warning(
+        f"[admin] runtime live_trading set {'ON' if enabled else 'OFF'} by admin {admin_id}; "
+        f"gate_open={live_gate_open()}"
+    )
+    return _live_trading_state()

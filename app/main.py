@@ -293,6 +293,17 @@ class App:
 
         await self.bot.start()
         await _startup_report(self.bot)
+
+        # Load the admin runtime live-trading switch from system_settings (no-op
+        # default OFF). live_gate_open() also requires MOCK_EXCHANGE_MODE=false.
+        try:
+            from app.exchange_adapters import live_gate_open, load_runtime_live_enabled
+
+            await load_runtime_live_enabled()
+            logger.info(f"  Live-trading gate: {'OPEN' if live_gate_open() else 'CLOSED'}")
+        except Exception as exc:  # noqa: BLE001 — never block boot on this
+            logger.warning(f"runtime live switch load skipped: {exc!r}")
+
         await universe.refresh()
 
         self.tracker.on_update(self._handle_tracker_event)
