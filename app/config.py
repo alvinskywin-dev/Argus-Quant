@@ -188,6 +188,11 @@ class Settings(BaseSettings):
     paper_trading_enabled: bool = True
     exchange_api_vault_enabled: bool = True  # 20C: encrypted exchange-key vault
     mock_exchange_mode: bool = True  # adapters simulate fills, no real orders
+    # Validate exchange API keys for real (read-only signed request) even when
+    # MOCK_EXCHANGE_MODE is on. mock_exchange_mode only governs ORDER simulation;
+    # key validation must hit the exchange or connect/test would mark an invalid
+    # key as CONNECTED. Default True. Set False only for offline dev without network.
+    validate_keys_live: bool = True
     default_demo_balance: float = 10_000.0  # starting virtual balance per account
     # AES-256 master key for the exchange-credential vault (20C).
     # Blank -> derived from secret_key. Rotating this invalidates stored keys.

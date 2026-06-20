@@ -469,7 +469,11 @@ async def validate_okx(api_key: str, api_secret: str, passphrase: str) -> Exchan
     code = str(data.get("code", "")) if isinstance(data, dict) else str(status)
     if status >= 400 or code not in ("0", ""):
         msg = data.get("msg", "") if isinstance(data, dict) else str(data)
-        st = STATUS_INVALID if code in ("50111", "50113", "50104") else STATUS_PERMISSION_DENIED
+        st = (
+            STATUS_INVALID
+            if code in ("50111", "50113", "50104", "50105", "50102")
+            else STATUS_PERMISSION_DENIED
+        )
         return ExchangePermissionResult(
             exchange="okx", ok=False, status=st, error_code=code, error_message=str(msg)[:200]
         )
@@ -589,7 +593,11 @@ async def validate_permissions(
             error_message=f"{exchange} requires a passphrase",
         )
 
-    if settings.mock_exchange_mode:
+    # Credential validation is a real, read-only check. mock_exchange_mode only
+    # simulates ORDERS — it must NOT short-circuit key validation, otherwise an
+    # invalid key (wrong secret/passphrase, swapped fields) gets marked CONNECTED.
+    # Only fall back to offline inference when validate_keys_live is explicitly off.
+    if settings.mock_exchange_mode and not settings.validate_keys_live:
         perms = get_validator(exchange).validate(api_key, api_secret, passphrase)
         return from_mock_permissions(exchange, perms)
 
