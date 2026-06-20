@@ -15,7 +15,12 @@ import hmac
 import pytest
 
 from app.config import settings
-from app.exchange_adapters import live_gate_open, resolve_adapter
+from app.exchange_adapters import (
+    live_gate_open,
+    resolve_adapter,
+    runtime_live_enabled,
+    set_runtime_live_enabled,
+)
 from app.exchange_adapters.base import MODE_LIVE, MODE_MOCK, AdapterError
 from app.exchange_adapters.binance import BinanceFuturesAdapter, sign_query
 from app.exchange_adapters.bitget import BitgetAdapter, sign_bitget
@@ -26,10 +31,11 @@ from app.exchange_adapters.okx import OKXAdapter, sign_okx, to_inst_id
 
 @pytest.fixture
 def gate():
-    """Save/restore the two gate flags around a test."""
-    orig = (settings.live_trading_enabled, settings.mock_exchange_mode)
+    """Save/restore the gate state (runtime live switch + mock floor) around a test."""
+    orig = (runtime_live_enabled(), settings.mock_exchange_mode)
     yield settings
-    settings.live_trading_enabled, settings.mock_exchange_mode = orig
+    set_runtime_live_enabled(orig[0])
+    settings.mock_exchange_mode = orig[1]
 
 
 # ── Binance HMAC signature (documented test vector) ───────────────
@@ -55,7 +61,7 @@ def test_binance_signature_matches_documented_vector():
 
 
 def test_resolve_returns_mock_by_default(gate):
-    gate.live_trading_enabled = False
+    set_runtime_live_enabled(False)
     gate.mock_exchange_mode = True
     a = resolve_adapter("binance", api_key="k", api_secret="s")
     assert isinstance(a, MockExchangeAdapter) and a.mode == MODE_MOCK
@@ -64,21 +70,21 @@ def test_resolve_returns_mock_by_default(gate):
 
 def test_resolve_mock_when_live_on_but_mock_also_on(gate):
     # Both must align; mock mode wins (safe).
-    gate.live_trading_enabled = True
+    set_runtime_live_enabled(True)
     gate.mock_exchange_mode = True
     assert not live_gate_open()
     assert isinstance(resolve_adapter("binance", api_key="k", api_secret="s"), MockExchangeAdapter)
 
 
 def test_resolve_mock_when_live_off_even_if_mock_off(gate):
-    gate.live_trading_enabled = False
+    set_runtime_live_enabled(False)
     gate.mock_exchange_mode = False
     assert not live_gate_open()
     assert isinstance(resolve_adapter("binance", api_key="k", api_secret="s"), MockExchangeAdapter)
 
 
 def test_resolve_live_only_when_gate_fully_open(gate):
-    gate.live_trading_enabled = True
+    set_runtime_live_enabled(True)
     gate.mock_exchange_mode = False
     assert live_gate_open()
     a = resolve_adapter("binance", api_key="k", api_secret="s")
@@ -86,14 +92,14 @@ def test_resolve_live_only_when_gate_fully_open(gate):
 
 
 def test_resolve_mock_when_no_credentials(gate):
-    gate.live_trading_enabled = True
+    set_runtime_live_enabled(True)
     gate.mock_exchange_mode = False
     # Gate open but no creds -> still mock (cannot sign).
     assert isinstance(resolve_adapter("binance"), MockExchangeAdapter)
 
 
 def test_unknown_exchange_falls_back_to_mock(gate):
-    gate.live_trading_enabled = True
+    set_runtime_live_enabled(True)
     gate.mock_exchange_mode = False
     assert isinstance(resolve_adapter("ftx", api_key="k", api_secret="s"), MockExchangeAdapter)
 
@@ -102,14 +108,14 @@ def test_unknown_exchange_falls_back_to_mock(gate):
 
 
 def test_binance_guard_raises_when_gate_closed(gate):
-    gate.live_trading_enabled = False
+    set_runtime_live_enabled(False)
     gate.mock_exchange_mode = True
     with pytest.raises(AdapterError):
         BinanceFuturesAdapter._guard()
 
 
 def test_binance_guard_passes_when_gate_open(gate):
-    gate.live_trading_enabled = True
+    set_runtime_live_enabled(True)
     gate.mock_exchange_mode = False
     BinanceFuturesAdapter._guard()  # should not raise
 
@@ -136,7 +142,7 @@ _CLOSED_STATES = [
 @pytest.mark.parametrize("guard", _GUARDS, ids=["binance", "okx", "bybit", "bitget"])
 @pytest.mark.parametrize("live_on,mock_on", _CLOSED_STATES)
 def test_all_adapter_guards_refuse_when_gate_closed(gate, guard, live_on, mock_on):
-    gate.live_trading_enabled = live_on
+    set_runtime_live_enabled(live_on)
     gate.mock_exchange_mode = mock_on
     assert not live_gate_open()
     with pytest.raises(AdapterError):
@@ -145,7 +151,7 @@ def test_all_adapter_guards_refuse_when_gate_closed(gate, guard, live_on, mock_o
 
 @pytest.mark.parametrize("guard", _GUARDS, ids=["binance", "okx", "bybit", "bitget"])
 def test_all_adapter_guards_pass_only_when_gate_open(gate, guard):
-    gate.live_trading_enabled = True
+    set_runtime_live_enabled(True)
     gate.mock_exchange_mode = False
     assert live_gate_open()
     guard()  # must not raise
@@ -157,7 +163,7 @@ def test_guards_track_canonical_gate_definition(gate, guard, monkeypatch):
 
     If the canonical gate is forced closed, the guard must refuse even while
     the raw flags read 'open' — proving delegation to the single source."""
-    gate.live_trading_enabled = True
+    set_runtime_live_enabled(True)
     gate.mock_exchange_mode = False
     # Each adapter imports live_gate_open into its own module namespace, so
     # patch it there (guard.__module__ == 'app.exchange_adapters.<exchange>').
@@ -237,7 +243,7 @@ def test_okx_inst_id_mapping():
 
 
 def test_resolve_routes_to_each_live_adapter(gate):
-    gate.live_trading_enabled = True
+    set_runtime_live_enabled(True)
     gate.mock_exchange_mode = False
     assert isinstance(
         resolve_adapter("okx", api_key="k", api_secret="s", passphrase="p"), OKXAdapter
@@ -249,7 +255,7 @@ def test_resolve_routes_to_each_live_adapter(gate):
 
 
 def test_resolve_20g_adapters_mock_when_gate_closed(gate):
-    gate.live_trading_enabled = False
+    set_runtime_live_enabled(False)
     gate.mock_exchange_mode = True
     for ex in ("okx", "bybit", "bitget"):
         a = resolve_adapter(ex, api_key="k", api_secret="s", passphrase="p")
@@ -257,7 +263,7 @@ def test_resolve_20g_adapters_mock_when_gate_closed(gate):
 
 
 def test_passphrase_threaded_to_okx_and_bitget(gate):
-    gate.live_trading_enabled = True
+    set_runtime_live_enabled(True)
     gate.mock_exchange_mode = False
     assert resolve_adapter("okx", api_key="k", api_secret="s", passphrase="pp")._passphrase == "pp"
     assert (
@@ -269,7 +275,7 @@ def test_passphrase_threaded_to_okx_and_bitget(gate):
 
 
 def test_20g_guards_raise_when_gate_closed(gate):
-    gate.live_trading_enabled = False
+    set_runtime_live_enabled(False)
     gate.mock_exchange_mode = True
     for cls in (OKXAdapter, BybitAdapter, BitgetAdapter):
         with pytest.raises(AdapterError):
@@ -277,7 +283,7 @@ def test_20g_guards_raise_when_gate_closed(gate):
 
 
 def test_20g_guards_pass_when_gate_open(gate):
-    gate.live_trading_enabled = True
+    set_runtime_live_enabled(True)
     gate.mock_exchange_mode = False
     OKXAdapter._guard()
     BybitAdapter._guard()
