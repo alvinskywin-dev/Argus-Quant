@@ -590,6 +590,10 @@ class AutoTradeConfig(Base):
         ForeignKey("auth_users.id", ondelete="CASCADE"), unique=True, index=True
     )
     enabled: Mapped[bool] = mapped_column(Boolean, default=False)  # Auto Trade ON/OFF
+    # Per-user REAL-money opt-in. A real order is only placed when this is true
+    # AND the global live gate is open (runtime switch on + MOCK_EXCHANGE_MODE
+    # false) AND the user has a connected, valid exchange key. Default false.
+    live_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     max_positions: Mapped[int] = mapped_column(Integer, default=5)
     max_leverage: Mapped[int] = mapped_column(Integer, default=10)  # Allowed Leverage
     risk_per_trade_pct: Mapped[float] = mapped_column(Float, default=1.0)

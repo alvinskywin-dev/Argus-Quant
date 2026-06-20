@@ -775,7 +775,9 @@ PAGES.auto = async (v) => {
   if(c.error) return void(v.innerHTML=`<div class="card pad">${empty("⚠️","Could not load",c.error)}</div>`);
   const C=c.data; const st=await tryGet("/api/auto/status"); const S=st.data;
   const safe = S ? (S.global_demo_enabled? '<span class="pos">DEMO OK</span>':'<span class="neg">PAUSED</span>') : "—";
-  v.innerHTML=`<div class="alert info">🤖 Auto-trading executes on your <b>paper account only</b> (DEMO). No real orders are ever placed.</div>
+  v.innerHTML=`${C.live_enabled
+      ? '<div class="alert danger">💰 <b>REAL-money mode is ON</b> for your account — qualifying signals place <b>real orders</b> on your exchange whenever the platform live-gate is open. You bear all losses.</div>'
+      : '<div class="alert info">🤖 Auto-trading executes on your <b>paper account only</b> (DEMO). No real orders are ever placed.</div>'}
     <div class="kpis">
       ${stat("Auto Enabled", S&&S.enabled?'<span class="pos">ON</span>':'<span class="neg">OFF</span>', "your engine","🤖")}
       ${stat("Total Opened", S?S.total_opened:"—", "open now "+(S?S.open_auto_positions:"—"),"📂")}
@@ -785,6 +787,11 @@ PAGES.auto = async (v) => {
     <div class="grid g2 mt">
       <div class="card"><div class="card-h"><h3>Configuration</h3><label class="switch"><input type="checkbox" id="en" ${C.enabled?"checked":""}><span class="sl"></span></label></div>
         <div class="card-b">
+          <div class="alert ${C.live_enabled?'danger':'warn'}" style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+            <div style="flex:1">💰 <b>Real-money trading</b> ${C.live_enabled?'<span class="neg">ON</span>':'<span class="muted">OFF</span>'}
+              <div class="sub">Places REAL orders on your connected exchange. Also requires the platform live-gate ON + a connected key.</div></div>
+            <label class="switch"><input type="checkbox" id="live" ${C.live_enabled?"checked":""}><span class="sl"></span></label>
+          </div>
           <div class="form-grid">
             <div class="field"><label>Risk per trade (%)</label><input id="risk" type="number" step="0.1" value="${C.risk_per_trade_pct}"></div>
             <div class="field"><label>Min confidence</label><input id="minc" type="number" value="${C.min_confidence}"></div>
@@ -807,6 +814,16 @@ PAGES.auto = async (v) => {
     <div class="card mt"><div class="card-h"><h3>Execution History</h3></div><div id="exec">${skel(4)}</div></div>`;
   const save=(btn,patch)=>withLoading(btn, async()=>{try{await api("/api/auto/config",{method:"PUT",body:patch});toast("Saved","ok");}catch(e){toast(e.detail,"bad");}});
   $("#en").onchange=e=>save(null,{enabled:e.target.checked});
+  $("#live").onchange=e=>{
+    if(e.target.checked){
+      e.target.checked=false; // stay OFF until explicitly confirmed
+      confirmModal({title:"Enable REAL-money trading",danger:true,confirmText:"Enable real trading",
+        body:`<div class="alert danger">⚠️ This lets the bot place <b>REAL orders with your funds</b> on every qualifying signal. Real orders also require the platform live-gate ON and a connected exchange key. <b>You are responsible for all losses.</b></div>`,
+        onConfirm:async()=>{await api("/api/auto/config",{method:"PUT",body:{live_enabled:true}});toast("Real-money trading ENABLED","warn");refresh();}});
+    } else {
+      (async()=>{try{await api("/api/auto/config",{method:"PUT",body:{live_enabled:false}});toast("Real-money trading disabled","ok");refresh();}catch(err){toast(err.detail,"bad");}})();
+    }
+  };
   $("#save").onclick=()=>save($("#save"),{risk_per_trade_pct:+$("#risk").value,max_positions:+$("#maxp").value,max_leverage:+$("#maxl").value,min_confidence:+$("#minc").value,allowed_coins:$("#coins").value.trim(),use_break_even:$("#be").value==="true",break_even_trigger:$("#bet").value});
   const ex=await tryGet("/api/auto/executions");const rows=ex.data||[];
   $("#exec").innerHTML=rows.length?tableWrap(["When","Symbol","Action","Reason","Detail"],

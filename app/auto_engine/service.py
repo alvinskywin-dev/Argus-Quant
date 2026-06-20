@@ -36,6 +36,7 @@ async def get_or_create_config(db: AsyncSession, user_id: int) -> AutoTradeConfi
 
 _UPDATABLE = {
     "enabled",
+    "live_enabled",
     "max_positions",
     "max_leverage",
     "risk_per_trade_pct",

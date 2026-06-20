@@ -22,6 +22,9 @@ from app.utils.logger import logger
 # All statements use IF NOT EXISTS so they are safe to run against both
 # new and existing databases.
 _SCHEMA_UPGRADES: list[str] = [
+    # Per-user real-money opt-in for the auto engine (Phase 2 live trading).
+    "ALTER TABLE auto_trade_configs ADD COLUMN IF NOT EXISTS live_enabled "
+    "BOOLEAN NOT NULL DEFAULT FALSE",
     # V3.1 — MTF layer score columns on signals
     "ALTER TABLE signals ADD COLUMN IF NOT EXISTS trend_score     FLOAT",
     "ALTER TABLE signals ADD COLUMN IF NOT EXISTS structure_score FLOAT",
